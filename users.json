@@ -1,0 +1,77 @@
+{
+  "Sami": {
+    "password": "Newpassword1323!",
+    "role": "super_admin",
+    "email": "sami@vervrooms.com"
+  },
+  "Norbert": {
+    "password": "Norbertops123@",
+    "role": "super_admin",
+    "email": ""
+  },
+  "Roo": {
+    "password": "Roomanager123@",
+    "role": "super_admin",
+    "email": "roo@vervrooms.com"
+  },
+  "Sadman": {
+    "password": "Sadmanops123@",
+    "role": "super_admin",
+    "email": ""
+  },
+  "Tom": {
+    "password": "Tomops123@",
+    "role": "admin",
+    "email": ""
+  },
+  "Fareeha": {
+    "password": "Fareehaops123@",
+    "role": "admin",
+    "email": ""
+  },
+  "Edina": {
+    "password": "Edinaops123@",
+    "role": "admin",
+    "email": ""
+  },
+  "Waleed": {
+    "password": "Waleedops123@",
+    "role": "admin",
+    "email": ""
+  },
+  "Dua": {
+    "password": "Duaops123@",
+    "role": "admin",
+    "email": ""
+  },
+  "Nahiyan": {
+    "password": "Nahiyanops123@",
+    "role": "admin",
+    "email": ""
+  },
+  "Saif": {
+    "password": "Saifops123@",
+    "role": "admin",
+    "email": ""
+  },
+  "Alex": {
+    "password": "Alexops123@",
+    "role": "admin",
+    "email": ""
+  },
+  "Hafiza": {
+    "password": "Hafizaops123@",
+    "role": "admin",
+    "email": ""
+  },
+  "James": {
+    "password": "Jamesops123@",
+    "role": "admin",
+    "email": ""
+  },
+  "Rahat": {
+    "password": "Rahatops123@",
+    "role": "projects",
+    "email": "rahat@vervrooms.com"
+  }
+}
