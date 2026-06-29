@@ -545,51 +545,168 @@ def api_delete_user(username):
 @app.route("/api/properties")
 @require_auth
 def api_properties():
-    props = []
+    """Properties overview — grouped by building address.
+    1 building = 1 property, with multiple units/rooms inside.
+    STR: listings grouped by address (e.g. Angel F1 with 2 rooms = 1 property)
+    HMO: Arthur units grouped by address (e.g. 25 Carrol Close with 8 rooms = 1 property)
+    """
+    props = {}
+    
+    # ── STR from Hostaway ──
     ha = api_get("https://api.hostaway.com/v1/listings?limit=200",
                  {"Authorization": f"Bearer {get_hostaway_token()}"})
     if "result" in ha and isinstance(ha["result"], list):
         for l in ha["result"]:
-            name = l.get("name","") or f"STR #{l.get('id')}"
-            props.append({
-                "id": f"str_{l.get('id')}", "name": name,
-                "type": "STR", "brand": "Luna Rooms",
-                "source": "hostaway", "status": l.get("status","active"),
-                "address": l.get("locationAddress","") or "",
-                "bedrooms": l.get("bedrooms",""), "max_guests": l.get("maximumNumberOfGuests","")
+            name = l.get("name", "") or f"STR #{l.get('id')}"
+            addr = l.get("locationAddress", "") or l.get("address", "") or ""
+            listing_id = str(l.get("id", ""))
+            
+            group_key = addr.strip().lower() if addr.strip() else name.strip().lower()
+            bedrooms = l.get("bedrooms", "")
+            max_guests = l.get("maximumNumberOfGuests", "")
+            
+            if group_key not in props:
+                props[group_key] = {
+                    "id": f"str_{group_key[:20]}",
+                    "name": name.split(" - ")[0].split(" x ")[0].strip() if "Room" not in name and not any(x in name for x in ["Room", "Studio", "Flat"]) else name,
+                    "type": "STR",
+                    "brand": "Luna Rooms",
+                    "source": "hostaway",
+                    "status": "active",
+                    "address": addr,
+                    "city": l.get("locationCity", "") or "",
+                    "units": [],
+                    "bedrooms": "",
+                    "max_guests": 0,
+                }
+            
+            props[group_key]["units"].append({
+                "id": f"str_unit_{listing_id}",
+                "name": name,
+                "listing_id": listing_id,
+                "bedrooms": bedrooms,
+                "max_guests": max_guests,
+                "status": l.get("status", "active"),
             })
-
-    # HMO from Arthur
+            try:
+                props[group_key]["max_guests"] += int(max_guests) if max_guests else 0
+            except:
+                pass
+    
+    # ── HMO from Arthur ──
     tok = get_arthur_token()
     if tok:
-        ar = api_get(f"https://api.arthuronline.co.uk/v2/units?limit=200",
+        ar = api_get("https://api.arthuronline.co.uk/v2/units?limit=500",
                      {"Authorization": f"Bearer {tok}", "X-EntityID": "349912", "User-Agent": "Mozilla/5.0"})
         if "error" not in ar:
             items = ar.get("data", []) if isinstance(ar, dict) else (ar if isinstance(ar, list) else [])
             for u in items:
-                props.append({
-                    "id": f"hmo_{u.get('id')}", "name": u.get("name","") or f"HMO #{u.get('id')}",
-                    "type": "HMO", "brand": "Banksia",
-                    "source": "arthur", "status": u.get("status","active"),
-                    "address": u.get("address","") or "",
-                    "unit_ref": u.get("unit_ref","") or ""
+                unit_name = u.get("name", "") or f"Unit #{u.get('id')}"
+                addr = u.get("address", "") or ""
+                addr_lower = addr.strip().lower() if addr.strip() else unit_name.strip().lower()
+                
+                if addr_lower not in props:
+                    props[addr_lower] = {
+                        "id": f"hmo_{addr_lower[:20]}",
+                        "name": addr.split(",")[0].strip() if addr else unit_name,
+                        "type": "HMO",
+                        "brand": "Banksia",
+                        "source": "arthur",
+                        "status": "active",
+                        "address": addr,
+                        "units": [],
+                    }
+                
+                props[addr_lower]["units"].append({
+                    "id": f"hmo_unit_{u.get('id')}",
+                    "unit_id": u.get("id"),
+                    "name": unit_name,
+                    "unit_ref": u.get("unit_ref", "") or "",
+                    "status": u.get("status", "active"),
+                    "address": addr,
                 })
+    
+    # Convert to list, add unit counts
+    result = []
+    for key, p in props.items():
+        p["unit_count"] = len(p["units"])
+        result.append(p)
+    
+    result.sort(key=lambda x: (0 if x["type"] == "STR" else 1, x["name"].lower()))
+    
+    return jsonify({"properties": result, "total": len(result)})
 
-    # Detect Hybrids
-    str_names = {p["name"].lower().strip() for p in props if p["type"] == "STR"}
-    hmo_names = {p["name"].lower().strip() for p in props if p["type"] == "HMO"}
-    hybrids = str_names & hmo_names
-    for p in props:
-        if p["name"].lower().strip() in hybrids:
-            p["type"] = "Hybrid"
+# ── PROPERTY DETAIL — drill down into units ──
+@app.route("/api/properties/<property_id>")
+@require_auth
+def api_property_detail(property_id):
+    """Get detailed info about a specific property and its units."""
+    from flask import Response
+    resp = api_properties()
+    data = json.loads(resp.get_data().decode())
+    for p in data.get("properties", []):
+        if p["id"] == property_id:
+            return jsonify(p)
+    return jsonify({"error": "Property not found"}), 404
 
-    # Brand refinement
-    for p in props:
-        n = p["name"].lower()
-        if "banksia" in n: p["brand"] = "Banksia"
-        elif "luna" in n or "lake" in n or "canary" in n or "angel" in n or "studd" in n or "west" in n: p["brand"] = "Luna Rooms"
-
-    return jsonify({"properties": props, "total": len(props)})
+# ── HMO: Units with tenancy status ──
+@app.route("/api/hmo/unit-tenancies")
+@require_auth
+def api_hmo_unit_tenancies():
+    """Get all HMO units with their current tenancy status (occupied/available/applicant)."""
+    tok = get_arthur_token()
+    if not tok:
+        return jsonify({"error": "Arthur token unavailable"}), 503
+    
+    r = api_get("https://api.arthuronline.co.uk/v2/tenancies?status=active,periodic&limit=500",
+                {"Authorization": f"Bearer {tok}", "X-EntityID": "349912", "User-Agent": "Mozilla/5.0"})
+    if "error" in r:
+        return jsonify(r)
+    
+    items = r.get("data", []) if isinstance(r, dict) else (r if isinstance(r, list) else [])
+    unit_tenancies = {}
+    for t in items:
+        uid = str(t.get("unit_id", ""))
+        if not uid:
+            continue
+        tn = ""
+        if t.get("tenancy_tenants") and len(t["tenancy_tenants"]) > 0:
+            p = t["tenancy_tenants"][0].get("person", {})
+            tn = f"{p.get('forename','')} {p.get('surname','')}".strip()
+        if uid not in unit_tenancies:
+            unit_tenancies[uid] = []
+        unit_tenancies[uid].append({
+            "id": t.get("id"),
+            "tenant_name": tn,
+            "rent_amount": t.get("rent_amount", ""),
+            "rent_frequency": t.get("rent_frequency", ""),
+            "start_date": t.get("start_date", ""),
+            "end_date": t.get("end_date", ""),
+            "status": t.get("status", ""),
+        })
+    
+    ar = api_get("https://api.arthuronline.co.uk/v2/units?limit=500",
+                 {"Authorization": f"Bearer {tok}", "X-EntityID": "349912", "User-Agent": "Mozilla/5.0"})
+    units_out = []
+    if "error" not in ar:
+        u_items = ar.get("data", []) if isinstance(ar, dict) else (ar if isinstance(ar, list) else [])
+        for u in u_items:
+            uid = str(u.get("id", ""))
+            tenancies = unit_tenancies.get(uid, [])
+            status = "Available"
+            if tenancies:
+                status = "Occupied"
+            units_out.append({
+                "id": u.get("id"),
+                "name": u.get("name", ""),
+                "address": u.get("address", ""),
+                "unit_ref": u.get("unit_ref", ""),
+                "status": status,
+                "tenancies": tenancies,
+                "tenancy_count": len(tenancies),
+            })
+    
+    return jsonify({"units": units_out, "total": len(units_out)})
 
 # ── STR ──
 @app.route("/api/str/arrivals")

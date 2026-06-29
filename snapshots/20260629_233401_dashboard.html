@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>VERV Operations Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:'Inter',-apple-system,sans-serif;background:#F8F9FC;color:#1E293B;display:flex;min-height:100vh;overflow-x:hidden}
+.dash-sidebar{width:260px;background:linear-gradient(180deg,#0F172A 0%,#1E293B 100%);color:#fff;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;transform:translateX(0);transition:transform .25s ease}
+.dash-sidebar .brand{padding:24px 20px 20px;border-bottom:1px solid rgba(255,255,255,.08)}
+.dash-sidebar .brand .logo{font-size:22px;font-weight:800;letter-spacing:-0.5px}
+.dash-sidebar .brand .logo span{color:#3B82F6}
+.dash-sidebar .brand .tagline{font-size:11px;color:#64748B;text-transform:uppercase;letter-spacing:2px;margin-top:2px}
+.dash-nav{padding:16px 12px;flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.nav-s{font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1.5px;padding:16px 12px 8px;font-weight:600}
+.dash-nav .ni{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:8px;color:#94A3B8;text-decoration:none;font-size:14px;font-weight:500;cursor:pointer;margin-bottom:2px;transition:all .15s;min-height:44px}
+.dash-nav .ni:hover{background:rgba(255,255,255,.06);color:#E2E8F0}
+.dash-nav .ni.active{background:rgba(59,130,246,.15);color:#60A5FA;font-weight:600}
+.dash-nav .ni .badge{margin-left:auto;background:#3B82F6;color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}
+.dash-user{margin:12px;padding:14px;border-radius:10px;background:rgba(255,255,255,.05);display:flex;align-items:center;gap:12px}
+.dash-user .av{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3B82F6,#8B5CF6);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;color:#fff;flex-shrink:0}
+.dash-user .info{flex:1;min-width:0}
+.dash-user .info .n{font-size:14px;font-weight:600;color:#E2E8F0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dash-user .info .r{font-size:12px;color:#64748B}
+.dash-user .lo{width:40px;height:40px;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#94A3B8;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .15s;text-decoration:none;flex-shrink:0}
+.dash-user .lo:hover{background:rgba(239,68,68,.15);color:#FCA5A5;border-color:rgba(239,68,68,.3)}
+.menu-toggle{display:none;position:fixed;top:12px;left:12px;z-index:200;width:44px;height:44px;border:none;border-radius:12px;background:#0F172A;color:#fff;font-size:22px;cursor:pointer;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.sidebar-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:99}
+.sidebar-overlay.show{display:block}
+.dash-main{margin-left:260px;flex:1;padding:0;min-height:100vh;width:calc(100% - 260px)}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:16px 24px;background:#fff;border-bottom:1px solid #E2E8F0;position:sticky;top:0;z-index:50;min-height:60px}
+.topbar h2{font-size:18px;font-weight:700;color:#0F172A}
+.topbar .right{display:flex;align-items:center;gap:12px}
+.cnt{padding:20px 24px;max-width:100%}
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.kpi-card{background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.kpi-card .kh{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+.kpi-card .ki{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.kpi-card .ki.b{background:#EFF6FF;color:#3B82F6}
+.kpi-card .ki.p{background:#F5F3FF;color:#8B5CF6}
+.kpi-card .ki.o{background:#FFF7ED;color:#F97316}
+.kpi-card .ki.g{background:#F0FDF4;color:#22C55E}
+.kpi-card .kl{font-size:12px;color:#64748B;font-weight:500}
+.kpi-card .kv{font-size:24px;font-weight:800;color:#0F172A;line-height:1.2}
+.kpi-card .kt{font-size:11px;font-weight:600;margin-top:4px}
+.kpi-card .kt.up{color:#22C55E}
+.kpi-card .kt.down{color:#EF4444}
+.kpi-card .kt.neutral{color:#64748B}
+.charts-grid{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:24px}
+.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;margin-bottom:16px}
+.card-h{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #F1F5F9;min-height:48px}
+.card-h h3{font-size:14px;font-weight:600;color:#0F172A}
+.card-h .ca{font-size:12px;color:#3B82F6;cursor:pointer;font-weight:500;padding:6px 0}
+.card-b{padding:14px 16px}
+.tab-bar{display:flex;gap:2px;margin-bottom:16px;background:#F1F5F9;border-radius:10px;padding:3px;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tab-bar::-webkit-scrollbar{display:none}
+.tab-btn{padding:10px 16px;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;font-family:'Inter',sans-serif;color:#64748B;background:transparent;white-space:nowrap;flex-shrink:0;min-height:40px}
+.tab-btn.active{background:#fff;color:#0F172A;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.panel{display:none}
+.panel.active{display:block}
+.badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600;gap:4px}
+.bg{background:#F0FDF4;color:#16A34A}
+.bb{background:#EFF6FF;color:#2563EB}
+.bp{background:#F5F3FF;color:#7C3AED}
+.ba{background:#FFFBEB;color:#D97706}
+.br{background:#FEF2F2;color:#DC2626}
+.bgr{background:#F1F5F9;color:#64748B}
+.tag{display:inline-flex;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:600}
+.ts{background:#EFF6FF;color:#2563EB}
+.th{background:#F5F3FF;color:#7C3AED}
+.td{background:#FFFBEB;color:#D97706}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.ops-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.ops-card{text-align:center;padding:14px 8px;border-radius:10px;border:1px solid #F1F5F9}
+.ops-card .oi{font-size:20px;margin-bottom:6px}
+.ops-card .ov{font-size:18px;font-weight:700;color:#0F172A}
+.ops-card .ol{font-size:11px;color:#64748B;margin-top:2px}
+.il{display:flex;flex-direction:column;gap:10px}
+.ii{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;border:1px solid #F1F5F9}
+.ii .ii-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0}
+.ii .ii-icon.hw{background:#EFF6FF;color:#3B82F6}
+.ii .ii-icon.ar{background:#F0FDF4;color:#22C55E}
+.ii .ii-icon.ms{background:#FFFBEB;color:#D97706}
+.ii .ii-icon.mc{background:#F5F3FF;color:#7C3AED}
+.ii .ii-info{flex:1;min-width:0}
+.ii .ii-name{font-size:13px;font-weight:600;color:#0F172A}
+.ii .ii-status{font-size:11px;color:#64748B}
+.ii .badge{flex-shrink:0}
+.prog{margin-top:6px}
+.prog-bar{height:6px;background:#F1F5F9;border-radius:3px;overflow:hidden}
+.prog-fill{height:100%;border-radius:3px;background:#3B82F6;transition:width .4s}
+.prog-lbl{display:flex;justify-content:space-between;font-size:11px;color:#64748B;margin-top:4px}
+.sd{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px}
+.sd.on{background:#22C55E}
+.sd.wa{background:#D97706}
+.tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;font-size:13px;min-width:500px}
+th{text-align:left;padding:10px 12px;color:#64748B;font-weight:600;border-bottom:2px solid #F1F5F9;white-space:nowrap;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+td{padding:10px 12px;border-bottom:1px solid #F8F9FC;white-space:nowrap}
+tr:hover{background:#F8FAFC}
+.vc-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px}
+.vc-meta{display:flex;gap:12px;flex-wrap:wrap}
+.vc-meta-item{display:flex;align-items:center;gap:5px;font-size:12px;color:#64748B}
+.vc-meta-item strong{color:#0F172A;font-size:14px}
+.vc-progress-block{margin-bottom:16px;background:#fff;border-radius:10px;border:1px solid #F1F5F9;padding:14px 16px}
+.vc-prog-label{display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px}
+.vc-prog-label strong{color:#0F172A}
+.vc-big-prog{height:8px;background:#F1F5F9;border-radius:4px;overflow:hidden;margin-bottom:10px}
+.vc-big-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,#3B82F6,#8B5CF6);transition:width .4s}
+.vc-counts{display:flex;gap:16px;flex-wrap:wrap}
+.vc-counts .vcc{font-size:11px;display:flex;align-items:center;gap:4px}
+.vcc-d{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.vcc-d.ip{background:#3B82F6}
+.vcc-d.wo{background:#F97316}
+.vcc-d.dn{background:#22C55E}
+.vcc-d.ns{background:#94A3B8}
+.vc-filter{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.vc-filter .vf-btn{padding:8px 14px;border-radius:8px;border:1px solid #E2E8F0;background:#fff;font-family:Inter;font-size:12px;font-weight:500;color:#64748B;cursor:pointer;transition:all .15s;min-height:38px}
+.vc-filter .vf-btn:hover{border-color:#3B82F6;color:#3B82F6}
+.vc-filter .vf-btn.active{background:#3B82F6;color:#fff;border-color:#3B82F6}
+.vc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.vc-col{min-width:0}
+.vc-col-h{font-size:12px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.5px;padding:8px 12px;border-radius:8px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.vc-col-h.ip{background:#EFF6FF;color:#2563EB}
+.vc-col-h.wo{background:#FFF7ED;color:#F97316}
+.vc-col-h.dn{background:#F0FDF4;color:#16A34A}
+.vc-col-h.ns{background:#F1F5F9;color:#64748B}
+.vc-col-h .vcc-count{font-size:11px;background:rgba(0,0,0,.08);padding:2px 7px;border-radius:10px}
+.vc-card{border:1px solid #F1F5F9;border-radius:10px;padding:12px;margin-bottom:8px;transition:box-shadow .15s;background:#fff;position:relative}
+.vc-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.06);border-color:#E2E8F0}
+.vc-card .vc-name{font-size:13px;font-weight:600;color:#0F172A;margin-bottom:5px;padding-right:30px}
+.vc-card .vc-person{font-size:12px;color:#64748B;margin-bottom:3px}
+.vc-card .vc-hour{font-size:11px;color:#3B82F6;font-weight:600}
+.vc-card .vc-subitems{margin-top:8px;border-top:1px solid #F1F5F9;padding-top:6px}
+.vc-card .vc-si{display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:11px;border-bottom:1px solid #F8F9FC}
+.vc-card .vc-si:last-child{border-bottom:none}
+.vc-card .vc-si .si-name{color:#475569;flex:1;padding-right:6px;min-width:0}
+.vc-card .vc-si .si-toggle{cursor:pointer;margin-right:5px;color:#94A3B8;font-size:9px;padding:4px 2px}
+.vc-sub-detail{padding:4px 0 4px 16px;font-size:11px;color:#94A3B8;display:none}
+.vc-sub-detail.show{display:block}
+.vc-pri{width:6px;height:6px;border-radius:50%;display:inline-block;margin-right:4px;flex-shrink:0}
+.vc-pri.high{background:#EF4444}
+.vc-pri.med{background:#F97316}
+.vc-pri.low{background:#22C55E}
+.vc-empty{text-align:center;padding:16px;color:#94A3B8;font-size:12px}
+/* ===== COMMENTS ===== */
+.cm-count{position:absolute;top:10px;right:10px;display:flex;align-items:center;gap:3px;font-size:10px;color:#94A3B8;cursor:pointer;padding:3px 7px;border-radius:6px;background:#F8F9FC;transition:all .15s}
+.cm-count:hover{background:#EFF6FF;color:#3B82F6}
+.cm-count.has{color:#3B82F6;background:#EFF6FF}
+.cm-thread{margin-top:10px;border-top:1px solid #F1F5F9;padding-top:10px;display:none}
+.cm-thread.open{display:block}
+.cm-item{padding:8px 10px;margin-bottom:6px;border-radius:8px;background:#F8F9FC;border-left:3px solid #E2E8F0;font-size:12px}
+.cm-item.monday{border-left-color:#D97706;background:#FFFBEB}
+.cm-item .cm-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.cm-item .cm-author{font-weight:600;color:#0F172A;font-size:12px;display:flex;align-items:center;gap:5px}
+.cm-item .cm-time{font-size:10px;color:#94A3B8}
+.cm-item .cm-body{color:#334155;line-height:1.5}
+.cm-item .cm-src{font-size:9px;padding:1px 6px;border-radius:4px;font-weight:600}
+.cm-src.monday{background:#FEF3C7;color:#92400E}
+.cm-src.dashboard{background:#DBEAFE;color:#1E40AF}
+.cm-input-wrap{display:flex;gap:6px;margin-top:8px}
+.cm-input{flex:1;padding:8px 12px;border:1px solid #E2E8F0;border-radius:8px;font-family:Inter;font-size:12px;outline:none;transition:border .15s}
+.cm-input:focus{border-color:#3B82F6}
+.cm-input::placeholder{color:#94A3B8}
+.cm-send{width:36px;height:36px;border:none;border-radius:8px;background:#3B82F6;color:#fff;font-size:16px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:background .15s}
+.cm-send:hover{background:#2563EB}
+.cm-send:disabled{background:#94A3B8;cursor:not-allowed}
+.cm-err{font-size:11px;color:#DC2626;margin-top:4px;display:none}
+.cm-loading{display:flex;align-items:center;justify-content:center;padding:12px;color:#94A3B8;font-size:11px;gap:6px}
+.loading{display:flex;align-items:center;justify-content:center;padding:32px;color:#94A3B8;font-size:13px;gap:8px}
+.spinner{width:16px;height:16px;border:2px solid #E2E8F0;border-top-color:#3B82F6;border-radius:50%;animation:spin .6s linear infinite}
+.err{color:#DC2626;padding:16px;text-align:center;background:#FEF2F2;border-radius:8px;font-size:13px}
+.empty{text-align:center;padding:24px;color:#94A3B8;font-size:13px}
+.tm{color:#64748B}
+.fw{font-weight:600}
+.fg select{padding:8px 14px;border-radius:8px;border:1px solid #E2E8F0;font-family:Inter;font-size:13px;outline:none;background:#fff;cursor:pointer;min-height:40px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Mobile responsive */
+@media(max-width:575px){
+.dash-sidebar{width:85vw;max-width:300px}
+.menu-toggle{display:flex}
+.dash-sidebar{transform:translateX(-100%)}
+.dash-sidebar.open{transform:translateX(0)}
+.dash-main{margin-left:0;width:100%}
+.topbar{padding:12px 14px;padding-left:62px;flex-wrap:wrap;gap:8px}
+.topbar h2{font-size:16px}
+.topbar .right{width:100%;justify-content:flex-end}
+.cnt{padding:12px 14px}
+.kpi-grid{grid-template-columns:repeat(2,1fr);gap:10px}
+.kpi-card{padding:12px}
+.kpi-card .kv{font-size:20px}
+.kpi-card .ki{width:32px;height:32px;font-size:14px}
+.charts-grid{grid-template-columns:1fr;gap:12px}
+.card-h{padding:12px 14px;min-height:44px}
+.card-h h3{font-size:13px}
+.card-b{padding:12px 14px}
+.tw{overflow-x:visible}
+table{min-width:auto;font-size:13px}
+th{display:none}
+td{display:block;padding:6px 0;border-bottom:none;white-space:normal}
+td:before{content:attr(data-label);display:block;font-size:10px;color:#94A3B8;font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px}
+tr{display:block;padding:12px;margin-bottom:8px;background:#fff;border:1px solid #F1F5F9;border-radius:10px}
+tr:hover{background:#fff}
+.ops-grid{grid-template-columns:repeat(3,1fr);gap:8px}
+.ops-card{padding:10px 6px}
+.ops-card .ov{font-size:16px}
+.vc-grid{grid-template-columns:1fr}
+.vc-col-h{padding:8px 12px;font-size:11px}
+.vc-card{padding:10px}
+.vc-meta{flex-direction:column;gap:4px}
+.vc-header{flex-direction:column;align-items:flex-start}
+.vc-progress-block{padding:12px 14px}
+.vc-counts{gap:10px;flex-wrap:wrap}
+.grid-2{grid-template-columns:1fr;gap:12px}
+.il{gap:8px}
+.ii{padding:10px 12px}
+.ii .ii-icon{width:28px;height:28px;font-size:12px}
+.ii .ii-name{font-size:12px}
+.tab-bar{padding:2px;gap:1px}
+.tab-btn{padding:8px 12px;font-size:12px;min-height:36px}
+.vc-filter{gap:4px}
+.vc-filter .vf-btn{padding:6px 10px;font-size:11px;min-height:34px}
+select{font-size:16px!important;padding:10px 12px}
+.menu-toggle{width:40px;height:40px;font-size:20px}
+}
+@media(min-width:576px)and(max-width:899px){
+.dash-sidebar{width:220px}
+.dash-main{margin-left:220px;width:calc(100% - 220px)}
+.cnt{padding:16px 20px}
+.topbar{padding:14px 20px}
+.kpi-grid{grid-template-columns:repeat(2,1fr);gap:12px}
+.charts-grid{grid-template-columns:1fr}
+.vc-grid{grid-template-columns:repeat(2,1fr)}
+.ops-grid{grid-template-columns:repeat(3,1fr)}
+}
+@media(min-width:900px){
+.sidebar-overlay{display:none!important}
+.menu-toggle{display:none!important}
+.dash-sidebar{transform:translateX(0)!important}
+}
+@supports(padding:max(0px)){
+.dash-sidebar{padding-top:max(24px,env(safe-area-inset-top))}
+.dash-sidebar{padding-bottom:max(0px,env(safe-area-inset-bottom))}
+.cnt{padding-bottom:max(12px,env(safe-area-inset-bottom))}
+}
+</style>
+</head>
+<body>
+
+<button class="menu-toggle" id="mToggle" onclick="ts()">☰</button>
+<div class="sidebar-overlay" id="sOverlay" onclick="ts()"></div>
+
+<aside class="dash-sidebar" id="dashSidebar">
+<div class="brand"><div class="logo">VERV<span>.</span></div><div class="tagline">Operations</div></div>
+<nav class="dash-nav" id="dashNav">
+<div class="nav-s">Overview</div>
+<div class="ni active" onclick="sp('dashboard')"><span>◉</span><span>Dashboard</span></div>
+<div class="nav-s">Properties</div>
+<div class="ni" onclick="sp('properties')"><span>🏠</span><span>All Properties</span><span class="badge" id="pCount">0</span></div>
+<div class="n-sub">
+<div class="ni" onclick="sp('str')"><span>🏨</span><span>Short Stay</span></div>
+<div class="ni" onclick="sp('hmo')"><span>🏢</span><span>HMO</span></div>
+</div>
+<div class="nav-s">Operations</div>
+<div class="ni" onclick="sp('maintenance')"><span>🔧</span><span>Maintenance</span><span class="badge" id="mCountSide">0</span></div>
+<div class="nav-s">Development</div>
+<div class="ni" onclick="document.getElementById('devSection').scrollIntoView({behavior:'smooth'})"><span>⚡</span><span>Projects</span></div>
+</nav>
+<div class="dash-user">
+<div class="av" id="userAvatar">{{ user.username[0]|upper if user.username else 'U' }}</div>
+<div class="info"><div class="n" id="userName">{{ user.username if user.username else 'User' }}</div><div class="r" id="userRole">{{ user.role if user.role else 'admin' }}</div></div>
+<a href="/api/auth/logout" class="lo" title="Sign out">✕</a>
+</div>
+</aside>
+
+<div class="dash-main">
+<div class="topbar">
+<h2 id="pageTitle">Dashboard</h2>
+<div class="right">
+<div class="fg"><select id="periodFilter" onchange="rl()"><option value="today">Today</option><option value="week">This Week</option><option value="month" selected>This Month</option><option value="quarter">This Quarter</option></select></div>
+<span class="tm" id="lastUpdated">—</span>
+</div>
+</div>
+<div class="cnt" id="dashContent"></div>
+</div>
+
+<script>
+var CUSER = '{{ user.username if user.username else "User" }}';
+
+function ts() {
+document.getElementById('sOverlay').classList.toggle('show');
+document.getElementById('dashSidebar').classList.toggle('open');
+}
+document.querySelectorAll('.ni').forEach(function(i){
+i.addEventListener('click',function(){if(window.innerWidth<900)ts();});
+});
+document.getElementById('sOverlay').addEventListener('click',ts);
+(function(){var d=new Date();var el=document.getElementById('lastUpdated');if(el)el.textContent=d.toLocaleDateString('en-GB',{weekday:'long',year:'numeric',month:'long',day:'numeric'});})();
+
+function sp(p){document.querySelectorAll('.ni').forEach(function(n){n.classList.remove('active')});var t={dashboard:'Dashboard',properties:'All Properties',str:'Short Stay',hmo:'HMO',maintenance:'Maintenance'};document.getElementById('pageTitle').textContent=t[p]||'Dashboard';document.querySelectorAll('.ni').forEach(function(n){if(n.textContent.trim().includes(t[p]))n.classList.add('active');});}
+function st(n){document.querySelectorAll('.tab-btn').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.panel').forEach(function(p){p.classList.remove('active')});document.querySelectorAll('.tab-btn').forEach(function(t){if(t.textContent.trim().toLowerCase().includes(n))t.classList.add('active')});var e=document.getElementById('panel-'+n);if(e){e.classList.add('active');if(n==='properties')loadProperties();if(n==='str')loadSTR();if(n==='hmo')loadHMO();if(n==='maintenance')loadMaintenance();}}
+async function api(p){var r=await fetch(p);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
+function rl(){loadKPIs();loadProperties();loadSTR();loadHMO();loadMaintenance();}
+
+(function renderDashboard(){
+var dc=document.getElementById('dashContent');
+dc.innerHTML=
+'<div class="kpi-grid" id="kpiGrid">'+
+'<div class="kpi-card"><div class="kh"><div class="kl">STR Properties</div><div class="ki b">&#127975;</div></div><div class="kv" id="kpiStr">&#8212;</div><div class="kt neutral">● Active</div></div>'+
+'<div class="kpi-card"><div class="kh"><div class="kl">HMO Properties</div><div class="ki p">&#127962;</div></div><div class="kv" id="kpiHmo">&#8212;</div><div class="kt neutral">● Leased</div></div>'+
+'<div class="kpi-card"><div class="kh"><div class="kl">Today\'s Bookings</div><div class="ki o">&#128197;</div></div><div class="kv" id="kpiBook">&#8212;</div><div class="kt" id="kpiBookT">● Arrivals / Departures</div></div>'+
+'<div class="kpi-card"><div class="kh"><div class="kl">Maintenance Jobs</div><div class="ki g">&#128295;</div></div><div class="kv" id="kpiMaint">&#8212;</div><div class="kt neutral">● Open</div></div>'+
+'</div>'+
+'<div class="charts-grid">'+
+'<div class="card"><div class="card-h"><h3>Revenue Overview</h3></div><div class="card-b" style="min-height:180px"><canvas id="revChart" height="180"></canvas></div></div>'+
+'<div class="card"><div class="card-h"><h3>Portfolio Split</h3></div><div class="card-b" style="min-height:180px"><canvas id="portChart" height="180"></canvas><div style="display:flex;justify-content:center;gap:14px;margin-top:8px;font-size:11px;flex-wrap:wrap"><span><span style="color:#3B82F6">●</span> STR <strong id="psStr">0</strong></span><span><span style="color:#8B5CF6">●</span> HMO <strong id="psHmo">0</strong></span><span><span style="color:#F97316">●</span> Hybrid <strong id="psHyb">0</strong></span></div></div></div>'+
+'</div>'+
+'<div class="card"><div class="card-h"><h3>Operational Overview</h3></div><div class="card-b"><div class="ops-grid">'+
+'<div class="ops-card"><div class="oi">&#128197;</div><div class="ov" id="oBook">&#8212;</div><div class="ol">Bookings</div></div>'+
+'<div class="ops-card"><div class="oi">&#128682;</div><div class="ov" id="oArr">&#8212;</div><div class="ol">Arrivals</div></div>'+
+'<div class="ops-card"><div class="oi">&#128694;</div><div class="ov" id="oDep">&#8212;</div><div class="ol">Departures</div></div>'+
+'<div class="ops-card"><div class="oi">&#128295;</div><div class="ov" id="oMaint">&#8212;</div><div class="ol">Maintenance</div></div>'+
+'<div class="ops-card"><div class="oi">&#127968;</div><div class="ov" id="oProps">&#8212;</div><div class="ol">Properties</div></div>'+
+'</div></div></div>'+
+'<div id="devSection" class="card"><div class="card-h"><h3>⚡ verv.co.uk — Development Pipeline</h3></div><div class="card-b" id="vervCoukSection"><div class="loading"><div class="spinner"></div> Loading pipeline...</div></div></div>'+
+'<div class="card"><div class="card-h"><h3>System Integrations</h3></div><div class="card-b"><div class="il">'+
+'<div class="ii"><div class="ii-icon hw">H</div><div class="ii-info"><div class="ii-name">Hostaway</div><div class="ii-status">30 listings</div></div><span class="badge bg"><span class="sd on"></span>Live</span></div>'+
+'<div class="ii"><div class="ii-icon ar">A</div><div class="ii-info"><div class="ii-name">Arthur</div><div class="ii-status">HMO tenants</div></div><span class="badge ba"><span class="sd wa"></span>Syncing</span></div>'+
+'<div class="ii"><div class="ii-icon ms">M</div><div class="ii-info"><div class="ii-name">Missive</div><div class="ii-status">Team comms</div></div><span class="badge bg"><span class="sd on"></span>Live</span></div>'+
+'<div class="ii"><div class="ii-icon mc">◊</div><div class="ii-info"><div class="ii-name">Monday.com</div><div class="ii-status">Project boards</div></div><span class="badge bg"><span class="sd on"></span>Live</span></div>'+
+'</div></div></div>'+
+'<div class="tab-bar" id="mainTabs">'+
+'<button class="tab-btn active" onclick="st(\'properties\')">Properties</button>'+
+'<button class="tab-btn" onclick="st(\'str\')">Short Stay</button>'+
+'<button class="tab-btn" onclick="st(\'hmo\')">HMO</button>'+
+'<button class="tab-btn" onclick="st(\'maintenance\')">Maintenance</button>'+
+'</div>'+
+'<div id="panel-properties" class="panel active"></div>'+
+'<div id="panel-str" class="panel"></div>'+
+'<div id="panel-hmo" class="panel"></div>'+
+'<div id="panel-maintenance" class="panel"></div>';
+loadKPIs();loadProperties();loadVervCoukPipeline();
+})();
+
+// ========== verv.co.uk Pipeline with Comments ==========
+async function loadVervCoukPipeline() {
+var el=document.getElementById('vervCoukSection');
+if(!el)return;
+try{
+var d=await api('/api/projects/vervcouk');
+var total=d.overall.total_items||d.items.length;
+var ip=d.items.filter(function(i){return /in progress/i.test(i.status)}).length;
+var wo=d.items.filter(function(i){return /working on it/i.test(i.status)}).length;
+var done=d.items.filter(function(i){return /completed/i.test(i.status)}).length;
+var ns=d.items.filter(function(i){return /not started/i.test(i.status)}).length;
+var totalHours=d.overall.total_dev_hours||0;
+var people=[];
+d.items.forEach(function(item){
+if(item.people){item.people.split(',').forEach(function(p){var n=p.trim();if(n&&people.indexOf(n)===-1)people.push(n);});}
+});
+var h='<div class="vc-progress-block">'+
+'<div class="vc-prog-label"><span><strong>Completion</strong></span><span><strong>'+done+'</strong>/'+total+' done</span></div>'+
+'<div class="vc-big-prog"><div class="vc-big-fill" style="width:'+(done/total*100||0)+'%"></div></div>'+
+'<div class="vc-counts">'+
+'<span class="vcc"><span class="vcc-d ip"></span> In Progress: <strong>'+ip+'</strong></span>'+
+'<span class="vcc"><span class="vcc-d wo"></span> Working: <strong>'+wo+'</strong></span>'+
+'<span class="vcc"><span class="vcc-d dn"></span> Done: <strong>'+done+'</strong></span>'+
+'<span class="vcc"><span class="vcc-d ns"></span> Not Started: <strong>'+ns+'</strong></span>'+
+'</div></div>';
+h+='<div class="vc-filter"><button class="vf-btn active" data-filter="all" onclick="applyVervFilter(this,\'all\')">All</button>';
+for(var pi=0;pi<people.length;pi++){h+='<button class="vf-btn" data-filter="'+people[pi]+'" onclick="applyVervFilter(this,\''+people[pi]+'\')">'+people[pi]+'</button>';}
+h+='</div><div class="vc-grid" id="vervCoukGrid">';
+var cols=[{key:'In Progress',label:'In Progress',cls:'ip'},{key:'Working on it',label:'Working On It',cls:'wo'},{key:'Completed',label:'Completed',cls:'dn'},{key:'Not Started',label:'Not Started',cls:'ns'}];
+for(var ci=0;ci<cols.length;ci++){
+var col=cols[ci];
+var items=d.items.filter(function(i){return i.status.toLowerCase()===col.key.toLowerCase();});
+h+='<div class="vc-col"><div class="vc-col-h '+col.cls+'">'+col.label+' <span class="vcc-count">'+items.length+'</span></div>';
+if(items.length===0){h+='<div class="vc-empty">No items</div>';}
+else{for(var ii=0;ii<items.length;ii++){h+=buildVervCard(items[ii]);}}
+h+='</div>';
+}
+h+='</div>';
+h+='<div class="vc-header" style="border-top:1px solid #F1F5F9;padding-top:12px;margin:0">'+
+'<div class="vc-meta"><span class="vc-meta-item">📊 <strong>'+total+'</strong> workstreams</span><span class="vc-meta-item">⏱ <strong>'+totalHours+'</strong> hours</span><span class="vc-meta-item">📋 <strong>'+d.overall.total_subtasks+'</strong> subtasks</span></div>'+
+'<span class="tm">Faisal Ahmed</span></div>';
+el.innerHTML=h;
+}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}
+}
+
+function buildVervCard(item){
+var cm=item.comments||[];
+var hasCm=cm.length>0;
+var h='<div class="vc-card" data-person="'+(item.people||'')+'" data-item-id="'+item.id+'">';
+if(item.priority){var pcls=(item.priority||'').toLowerCase().includes('high')?'high':(item.priority||'').toLowerCase().includes('medium')?'med':'low';h+='<span class="vc-pri '+pcls+'"></span>';}
+h+='<div class="vc-name">'+item.name+'</div>';
+h+='<div class="vc-person">👤 '+(item.people||'Unassigned')+'</div>';
+h+='<div class="vc-hour">⏱ '+item.dev_time_hours+'h</div>';
+// Comment badge
+h+='<div class="cm-count '+(hasCm?'has':'')+'" onclick="toggleCm(this,\''+item.id+'\')" data-item="'+item.id+'">💬 <span class="cm-num">'+cm.length+'</span></div>';
+// Comments thread
+h+='<div class="cm-thread" id="cm-thread-'+item.id+'">';
+for(var ci=0;ci<cm.length;ci++){
+var c=cm[ci];
+var src=c.source||'dashboard';
+var srcLabel=src==='monday'?'From Monday':'Dashboard';
+h+='<div class="cm-item '+src+'">'+
+'<div class="cm-head"><span class="cm-author"><span class="cm-src '+src+'">'+srcLabel+'</span> '+c.author+'</span><span class="cm-time">'+formatTime(c.created_at)+'</span></div>'+
+'<div class="cm-body">'+c.body+'</div></div>';
+}
+h+='<div class="cm-input-wrap">'+
+'<input class="cm-input" id="cm-input-'+item.id+'" placeholder="Add a comment..." onkeypress="if(event.key===\'Enter\')sendCm(\''+item.id+'\')">'+
+'<button class="cm-send" id="cm-btn-'+item.id+'" onclick="sendCm(\''+item.id+'\')">↵</button></div>'+
+'<div class="cm-err" id="cm-err-'+item.id+'"></div>';
+h+='</div>';
+// Subitems
+if(item.subitems&&item.subitems.length>0){
+h+='<div class="vc-subitems">';
+var doneSubs=item.subitems.filter(function(s){return /done|completed/i.test(s.status)}).length;
+h+='<div style="font-size:11px;color:#64748B;margin-bottom:3px">'+doneSubs+'/'+item.subitems.length+' subtasks done</div>';
+for(var si=0;si<item.subitems.length;si++){
+var sub=item.subitems[si];
+var sc=/done|completed/i.test(sub.status)?'bg':(/in progress|working/i.test(sub.status)?'ba':'bgr');
+var sname=sub.name.length>45?sub.name.substring(0,42)+'...':sub.name;
+var sid='si-'+item.id+'-'+sub.id;
+h+='<div class="vc-si"><span class="si-name"><span class="si-toggle" onclick="toggleSubDetail(\''+sid+'\')">▶</span>'+sname+'</span><span class="badge '+sc+'">'+sub.status+'</span></div>';
+h+='<div class="vc-sub-detail" id="'+sid+'">';
+if(sub.assignee)h+='👤 '+sub.assignee;
+if(sub.priority)h+=' | 🔥 '+sub.priority;
+h+='</div>';
+}
+h+='</div>';
+}
+h+='</div>';
+return h;
+}
+
+function formatTime(ts){
+if(!ts)return '';
+try{
+var d=new Date(ts);
+var now=new Date();
+var diff=Math.floor((now-d)/1000);
+if(diff<60)return 'just now';
+if(diff<3600)return Math.floor(diff/60)+'m ago';
+if(diff<86400)return Math.floor(diff/3600)+'h ago';
+return d.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+}catch(e){return ts;}
+}
+
+function toggleCm(el,itemId){
+var thread=document.getElementById('cm-thread-'+itemId);
+if(!thread)return;
+thread.classList.toggle('open');
+if(thread.classList.contains('open')){
+setTimeout(function(){
+var inp=document.getElementById('cm-input-'+itemId);
+if(inp)inp.focus();
+},100);
+}
+}
+
+async function sendCm(itemId){
+var inp=document.getElementById('cm-input-'+itemId);
+var btn=document.getElementById('cm-btn-'+itemId);
+var err=document.getElementById('cm-err-'+itemId);
+if(!inp||!btn)return;
+var body=inp.value.trim();
+if(!body){err.textContent='Please write something';err.style.display='block';return;}
+err.style.display='none';
+btn.disabled=true;
+btn.textContent='⏳';
+try{
+var r=await fetch('/api/comments/vervcouk/'+itemId,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body:body})});
+if(!r.ok)throw new Error('HTTP '+r.status);
+var d=await r.json();
+inp.value='';
+btn.disabled=false;
+btn.textContent='↵';
+// Reload comments from pipeline data
+var pipeline=await api('/api/projects/vervcouk');
+var item=null;
+for(var i=0;i<pipeline.items.length;i++){if(pipeline.items[i].id===itemId){item=pipeline.items[i];break;}}
+if(item){
+var cm=item.comments||[];
+var thread=document.getElementById('cm-thread-'+itemId);
+if(thread){
+var cmHtml='';
+for(var ci=0;ci<cm.length;ci++){
+var c=cm[ci];
+var src=c.source||'dashboard';
+var srcLabel=src==='monday'?'From Monday':'Dashboard';
+cmHtml+='<div class="cm-item '+src+'"><div class="cm-head"><span class="cm-author"><span class="cm-src '+src+'">'+srcLabel+'</span> '+c.author+'</span><span class="cm-time">'+formatTime(c.created_at)+'</span></div><div class="cm-body">'+c.body+'</div></div>';
+}
+// Keep the input
+cmHtml+='<div class="cm-input-wrap"><input class="cm-input" id="cm-input-'+itemId+'" placeholder="Add a comment..." onkeypress="if(event.key===\'Enter\')sendCm(\''+itemId+'\')"><button class="cm-send" id="cm-btn-'+itemId+'" onclick="sendCm(\''+itemId+'\')">↵</button></div><div class="cm-err" id="cm-err-'+itemId+'" style="display:none"></div>';
+thread.innerHTML=cmHtml;
+thread.classList.add('open');
+}
+// Update badge count
+var badge=document.querySelector('.cm-count[data-item="'+itemId+'"]');
+if(badge){
+badge.classList.toggle('has',cm.length>0);
+badge.querySelector('.cm-num').textContent=cm.length;
+}
+}
+}catch(e){
+err.textContent='Failed to send comment: '+e.message;
+err.style.display='block';
+btn.disabled=false;
+btn.textContent='↵';
+}
+}
+
+function toggleSubDetail(id){var el=document.getElementById(id);if(el)el.classList.toggle('show');}
+function applyVervFilter(btn,filter){
+document.querySelectorAll('.vc-filter .vf-btn').forEach(function(b){b.classList.remove('active');});
+btn.classList.add('active');
+var cards=document.getElementById('vervCoukGrid').querySelectorAll('.vc-card');
+for(var i=0;i<cards.length;i++){var c=cards[i];c.style.display=(filter==='all'||c.getAttribute('data-person').indexOf(filter)!==-1)?'':'none';}
+}
+
+// ========== Data ==========
+async function loadKPIs(){
+try{
+var props=await api('/api/properties');var summary=await api('/api/summary');var maint=await api('/api/maintenance');
+var strC=props.properties.filter(function(p){return p.type==='STR'||p.type==='Hybrid'}).length;
+var hmoC=props.properties.filter(function(p){return p.type==='HMO'||p.type==='Hybrid'}).length;
+var tot=props.total||props.properties.length;
+document.getElementById('kpiStr').textContent=strC;document.getElementById('kpiHmo').textContent=hmoC;
+var arr=summary.str?.arrivals||0,dep=summary.str?.departures||0;
+document.getElementById('kpiBook').textContent=arr+dep;
+document.getElementById('kpiBookT').textContent='↑ '+arr+' arr / '+dep+' dep';
+document.getElementById('kpiBookT').className='kt '+(arr>0?'up':'neutral');
+document.getElementById('kpiMaint').textContent=maint.count;
+document.getElementById('mCountSide').textContent=maint.count;
+document.getElementById('pCount').textContent=tot;
+document.getElementById('oBook').textContent=arr+dep;document.getElementById('oArr').textContent=arr;document.getElementById('oDep').textContent=dep;document.getElementById('oMaint').textContent=maint.count;document.getElementById('oProps').textContent=tot;
+document.getElementById('psStr').textContent=strC;document.getElementById('psHmo').textContent=hmoC;document.getElementById('psHyb').textContent=Math.max(0,tot-strC-hmoC);
+if(window.revenueChart)window.revenueChart.destroy();if(window.portfolioChart)window.portfolioChart.destroy();
+var c1=document.getElementById('revChart');if(c1){window.revenueChart=new Chart(c1.getContext('2d'),{type:'bar',data:{labels:['Jan','Feb','Mar','Apr','May','Jun'],datasets:[{label:'Revenue',data:[28,32,35,38,42,47],backgroundColor:'#3B82F6',borderRadius:6,barThickness:32}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,grid:{color:'#F1F5F9'},ticks:{color:'#94A3B8',font:{size:11}}},x:{grid:{display:false},ticks:{color:'#94A3B8',font:{size:11}}}}}});}
+var c2=document.getElementById('portChart');if(c2){window.portfolioChart=new Chart(c2.getContext('2d'),{type:'doughnut',data:{labels:['STR ('+strC+')','HMO ('+hmoC+')','Hybrid'],datasets:[{data:[strC,hmoC,Math.max(0,tot-strC-hmoC)],backgroundColor:['#3B82F6','#8B5CF6','#F97316'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{padding:14,usePointStyle:true,font:{size:12}}}},cutout:'70%'}});}
+}catch(e){console.error(e);}
+}
+async function loadProperties(){var el=document.getElementById('panel-properties');if(!el)return;el.innerHTML='<div class="loading"><div class="spinner"></div> Loading...</div>';try{var d=await api('/api/properties');var h='<div class="card"><div class="card-h"><h3>Properties ('+d.total+')</h3></div><div class="card-b"><div class="tw"><table><thead><tr><th>Name</th><th>Type</th><th>Brand</th><th>Status</th><th>Address</th></tr></thead><tbody>';for(var i=0;i<d.properties.length;i++){var p=d.properties[i];var tc=p.type==='Hybrid'?'td':(p.type==='STR'?'ts':'th');var sc=p.status==='active'?'bg':'bgr';h+='<tr><td class="fw" data-label="Property">'+p.name+'</td><td data-label="Type"><span class="tag '+tc+'">'+p.type+'</span></td><td data-label="Brand">'+(p.brand||'-')+'</td><td data-label="Status"><span class="badge '+sc+'">'+p.status+'</span></td><td class="tm" data-label="Address">'+(p.address||'-')+'</td></tr>';}h+='</tbody></table></div></div></div>';el.innerHTML=h;}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+async function loadSTR(){var el=document.getElementById('panel-str');if(!el)return;el.innerHTML='<div class="loading"><div class="spinner"></div> Loading...</div>';try{var list=await api('/api/str/listings');var s=await api('/api/summary');var h='<div class="card"><div class="card-h"><h3>STR Listings ('+list.count+')</h3></div><div class="card-b"><div class="tw"><table><thead><tr><th>Name</th><th>Bedrooms</th><th>Guests</th><th>Status</th></tr></thead><tbody>';for(var i=0;i<list.listings.length;i++){var l=list.listings[i];h+='<tr><td class="fw" data-label="Name">'+l.name+'</td><td class="tm" data-label="Bedrooms">'+(l.bedrooms||'-')+'</td><td class="tm" data-label="Guests">'+(l.max_guests||'-')+'</td><td data-label="Status"><span class="badge bg">Active</span></td></tr>';}h+='</tbody></table></div></div></div>';h+='<div class="card"><div class="card-h"><h3>Today</h3></div><div class="card-b"><div class="grid-2"><div><div class="ops-card"><div class="oi">🚪</div><div class="ov">'+(s.str?.arrivals||0)+'</div><div class="ol">Arrivals</div></div></div><div><div class="ops-card"><div class="oi">🚶</div><div class="ov">'+(s.str?.departures||0)+'</div><div class="ol">Departures</div></div></div></div></div></div>';el.innerHTML=h;}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+async function loadHMO(){var el=document.getElementById('panel-hmo');if(!el)return;el.innerHTML='<div class="loading"><div class="spinner"></div> Loading...</div>';try{var tResp=await api('/api/hmo/tenants');var pResp=await api('/api/hmo/properties');var h='<div class="grid-2"><div class="card"><div class="card-h"><h3>Tenants ('+tResp.count+')</h3></div><div class="card-b">';if(tResp.tenants.length){h+='<div class="tw"><table><thead><tr><th>Tenant</th><th>Property</th><th>Rent</th><th>Status</th></tr></thead><tbody>';for(var i=0;i<tResp.tenants.length;i++){var t=tResp.tenants[i];var sc=t.status==='periodic'?'bp':'bg';var r=t.rent_amount?'£'+t.rent_amount+(t.rent_frequency?'/'+t.rent_frequency:''):'-';h+='<tr><td class="fw" data-label="Tenant">'+(t.tenant_name||'N/A')+'</td><td data-label="Property">'+(t.property||t.unit_id)+'</td><td class="fw" data-label="Rent">'+r+'</td><td data-label="Status"><span class="badge '+sc+'">'+t.status+'</span></td></tr>';}h+='</tbody></table></div>';}else{h+='<div class="empty">No active tenancies</div>';}h+='</div></div><div class="card"><div class="card-h"><h3>Properties ('+pResp.count+')</h3></div><div class="card-b">';if(pResp.properties?.length){h+='<div class="tw"><table><thead><tr><th>Name</th><th>Status</th><th>Ref</th></tr></thead><tbody>';for(var i=0;i<pResp.properties.length&&i<50;i++){var p=pResp.properties[i];var sc=p.status==='active'||p.status==='Live'?'bg':'bgr';h+='<tr><td class="fw" data-label="Name">'+(p.name||'')+'</td><td data-label="Status"><span class="badge '+sc+'">'+(p.status||'')+'</span></td><td class="tm" data-label="Ref">'+(p.unit_ref||'')+'</td></tr>';}h+='</tbody></table></div>';}else{h+='<div class="empty">No HMO properties</div>';}h+='</div></div></div>';el.innerHTML=h;}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+async function loadMaintenance(){var el=document.getElementById('panel-maintenance');if(!el)return;el.innerHTML='<div class="loading"><div class="spinner"></div> Loading...</div>';try{var d=await api('/api/maintenance');var h='<div class="card"><div class="card-h"><h3>Maintenance ('+d.count+')</h3></div><div class="card-b">';if(d.maintenance.length){h+='<div class="tw"><table><thead><tr><th>Issue</th><th>Priority</th><th>Status</th><th>Date</th></tr></thead><tbody>';for(var i=0;i<d.maintenance.length;i++){var m=d.maintenance[i];var p=(m.priority||'').toLowerCase();var pc=p.includes('urgent')||p.includes('high')?'br':(p.includes('medium')?'ba':'bb');var sc=m.status==='IN PROGRESS'?'ba':m.status==='DONE'||m.status==='COMPLETED'?'bg':'bgr';h+='<tr><td class="fw" data-label="Issue">'+m.title+'</td><td data-label="Priority"><span class="badge '+pc+'">'+(m.priority||'-')+'</span></td><td data-label="Status"><span class="badge '+sc+'">'+m.status+'</span></td><td class="tm" data-label="Date">'+(m.date_raised||'-')+'</td></tr>';}h+='</tbody></table></div>';}else{h+='<div class="empty">No jobs</div>';}h+='</div></div>';el.innerHTML=h;}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+</script>
+</body>
+</html>

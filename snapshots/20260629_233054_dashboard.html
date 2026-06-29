@@ -87,31 +87,6 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#F8F9FC;color:#1E29
 .ops-card .oi{font-size:20px;margin-bottom:6px}
 .ops-card .ov{font-size:18px;font-weight:700;color:#0F172A}
 .ops-card .ol{font-size:11px;color:#64748B;margin-top:2px}
-/* ===== COMMENTS ===== */
-.vc-cmt-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#64748B;cursor:pointer;padding:4px 8px;border-radius:6px;background:#F8F9FC;border:1px solid #E2E8F0;margin-top:6px;transition:all .15s;user-select:none}
-.vc-cmt-badge:hover{background:#EFF6FF;border-color:#93C5FD;color:#2563EB}
-.vc-cmt-badge.has-cmts{color:#3B82F6;border-color:#BFDBFE;background:#EFF6FF}
-.vc-cmt-badge .b-count{font-weight:600}
-.vc-cmt-thread{display:none;margin-top:6px;border-top:1px solid #E2E8F0;padding-top:8px}
-.vc-cmt-thread.show{display:block}
-.vc-cmt{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #F1F5F9}
-.vc-cmt:last-child{border-bottom:none}
-.vc-cmt-av{width:28px;height:28px;border-radius:50%;background:#E2E8F0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#475569;flex-shrink:0}
-.vc-cmt-av.s{background:#DBEAFE;color:#2563EB}
-.vc-cmt-body{flex:1;min-width:0}
-.vc-cmt-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.vc-cmt-author{font-size:12px;font-weight:600;color:#0F172A}
-.vc-cmt-time{font-size:10px;color:#94A3B8}
-.vc-cmt-src{font-size:9px;padding:1px 5px;border-radius:4px;font-weight:600}
-.vc-cmt-src.dash{background:#EFF6FF;color:#3B82F6}
-.vc-cmt-src.monday{background:#F0FDF4;color:#16A34A}
-.vc-cmt-text{font-size:12px;color:#475569;margin-top:2px;line-height:1.4;white-space:pre-wrap}
-.vc-cmt-input-row{display:flex;gap:6px;margin-top:8px;padding-top:6px;border-top:1px solid #F1F5F9}
-.vc-cmt-input{flex:1;min-width:0;padding:7px 10px;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;font-family:'Inter',sans-serif;outline:none;transition:border-color .15s}
-.vc-cmt-input:focus{border-color:#3B82F6}
-.vc-cmt-send{padding:7px 14px;border:none;border-radius:6px;background:#3B82F6;color:#fff;font-size:12px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;transition:background .15s;white-space:nowrap}
-.vc-cmt-send:hover{background:#2563EB}
-.vc-cmt-send:disabled{opacity:.5;cursor:default}
 .il{display:flex;flex-direction:column;gap:10px}
 .ii{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;border:1px solid #F1F5F9}
 .ii .ii-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0}
@@ -365,14 +340,8 @@ if(name==='maintenance') loadMaintenance();
 }
 }
 
-async function api(path, method, body) {
-var opts = {};
-if(method === 'POST' || method === 'PUT' || method === 'DELETE') {
-opts.method = method;
-opts.headers = {'Content-Type':'application/json'};
-if(body) opts.body = JSON.stringify(body);
-}
-var r = await fetch(path, opts);
+async function api(path) {
+var r = await fetch(path);
 if(!r.ok) throw new Error('HTTP '+r.status);
 return r.json();
 }
@@ -498,7 +467,7 @@ el.innerHTML = h;
 }
 
 function buildVervCard(item) {
-var h = '<div class="vc-card" data-person="' + (item.people||'') + '" data-item-id="' + item.id + '">';
+var h = '<div class="vc-card" data-person="' + (item.people||'') + '">';
 h += '<div class="vc-name">';
 if(item.priority) {
 var pcls = (item.priority||'').toLowerCase().includes('high')?'high':(item.priority||'').toLowerCase().includes('medium')?'med':'low';
@@ -524,87 +493,8 @@ h += '</div>';
 }
 h += '</div>';
 }
-/* Comment badge */
-var cmtCount = item.comment_count || (item.comments ? item.comments.length : 0);
-var badgeCls = cmtCount > 0 ? 'vc-cmt-badge has-cmts' : 'vc-cmt-badge';
-var cmtToggleId = 'cmt-' + item.id;
-h += '<div class="' + badgeCls + '" onclick="toggleComments(\'' + cmtToggleId + '\',\'' + item.id + '\')">💬 <span class="b-count">' + cmtCount + '</span></div>';
-/* Comment thread (hidden initially) */
-h += '<div class="vc-cmt-thread" id="' + cmtToggleId + '">';
-if(item.comments && item.comments.length > 0) {
-for(var ci=0;ci<item.comments.length;ci++) {
-h += renderComment(item.comments[ci]);
-}
-}
-h += '<div class="vc-cmt-input-row"><input class="vc-cmt-input" id="' + cmtToggleId + '-inp" placeholder="Add a comment..." onkeydown="if(event.key===\'Enter\')postComment(\''+item.id+'\',\''+cmtToggleId+'\')"><button class="vc-cmt-send" onclick="postComment(\''+item.id+'\',\''+cmtToggleId+'\')">Send</button></div>';
-h += '</div>';
 h += '</div>';
 return h;
-}
-
-function renderComment(c) {
-var isDashboard = c.source === 'dashboard';
-var author = c.author || '';
-var init = author.charAt(0).toUpperCase() || '?';
-var body = c.body || '';
-var time = c.created_at || '';
-var relativeTime = '';
-if(time) {
-try {
-var d = new Date(time);
-var now = new Date();
-var diffS = Math.floor((now - d) / 1000);
-if(diffS < 60) relativeTime = 'just now';
-else if(diffS < 3600) relativeTime = Math.floor(diffS/60) + 'm ago';
-else if(diffS < 86400) relativeTime = Math.floor(diffS/3600) + 'h ago';
-else relativeTime = Math.floor(diffS/86400) + 'd ago';
-} catch(e) { relativeTime = ''; }
-}
-var srcBadge = isDashboard ? '<span class="vc-cmt-src dash">Dashboard</span>' : '<span class="vc-cmt-src monday">Monday</span>';
-var avCls = isDashboard ? 'vc-cmt-av s' : 'vc-cmt-av';
-return '<div class="vc-cmt"><div class="' + avCls + '">' + init + '</div><div class="vc-cmt-body"><div class="vc-cmt-head"><span class="vc-cmt-author">' + author + '</span><span class="vc-cmt-time">' + relativeTime + '</span>' + srcBadge + '</div><div class="vc-cmt-text">' + body + '</div></div></div>';
-}
-
-function toggleComments(id) {
-var el = document.getElementById(id);
-if(el) el.classList.toggle('show');
-}
-
-async function postComment(itemId, threadId) {
-var inp = document.getElementById(threadId + '-inp');
-if(!inp || !inp.value.trim()) return;
-var body = inp.value.trim();
-inp.disabled = true;
-try {
-var result = await api('/api/comments/vervcouk/' + itemId, 'POST', {body: body});
-if(result && result.comment) {
-/* Insert new comment above the input row */
-var thread = document.getElementById(threadId);
-if(thread) {
-var newCmtHtml = renderComment(result.comment);
-var inputRow = thread.querySelector('.vc-cmt-input-row');
-if(inputRow) {
-inputRow.insertAdjacentHTML('beforebegin', newCmtHtml);
-}
-}
-/* Update badge count */
-var card = document.querySelector('[data-item-id="' + itemId + '"]');
-if(card) {
-var badge = card.querySelector('.vc-cmt-badge');
-var countEl = badge ? badge.querySelector('.b-count') : null;
-if(countEl) {
-var cur = parseInt(countEl.textContent) || 0;
-countEl.textContent = cur + 1;
-}
-if(badge) badge.classList.add('has-cmts');
-}
-}
-inp.value = '';
-} catch(e) {
-console.error('Comment failed:', e);
-} finally {
-inp.disabled = false;
-}
 }
 
 function toggleSubDetail(id) {
