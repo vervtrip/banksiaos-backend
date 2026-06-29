@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verv Ops Dashboard — STR, HMO, Maintenance consolidated view."""
 import json, os, subprocess, re, time, sys, urllib.request, uuid
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, redirect, session
 
@@ -103,6 +103,41 @@ def get_missive_creds():
             if "MISSIVE_API_KEY" in line:
                 return {"token": line.split("=",1)[1].strip().strip("'\""), "org_id": ""}
     return None
+
+# ── Universal Comment System ──
+COMMENTS_FILE = os.path.join(os.path.dirname(__file__), "comments.json")
+
+def _load_comments():
+    if not os.path.exists(COMMENTS_FILE):
+        return {}
+    return json.load(open(COMMENTS_FILE))
+
+def _save_comments(comments):
+    with open(COMMENTS_FILE, "w") as f:
+        json.dump(comments, f, indent=2)
+
+def _get_item_comments(project, item_id):
+    """Get local dashboard comments for a specific project item."""
+    comments = _load_comments()
+    key = f"{project}_{item_id}"
+    return comments.get(key, [])
+
+def _add_item_comment(project, item_id, author, body):
+    """Add a comment to an item. Returns the new comment dict."""
+    comments = _load_comments()
+    key = f"{project}_{item_id}"
+    if key not in comments:
+        comments[key] = []
+    comment = {
+        "id": str(uuid.uuid4()),
+        "author": author,
+        "body": body.strip(),
+        "source": "dashboard",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    comments[key].append(comment)
+    _save_comments(comments)
+    return comment
 
 # ── API Helpers ──
 def api_get(url, headers):
@@ -275,6 +310,201 @@ def api_restore_snapshot(commit_hash):
         # Restart dashboard to reload templates
         os._exit(0)
     return jsonify(data)
+
+# ── PROJECTS — Verv.co.uk Pipeline ──
+@app.route("/api/projects/vervcouk")
+@require_auth
+def api_project_vervcouk():
+    """Verv.co.uk Development Project Pipeline — full board data."""
+    mtok = get_monday_token()
+    if not mtok:
+        return jsonify({"error": "Monday.com token unavailable"}), 503
+
+    board_id = "18416089386"
+    query = """{{
+  boards(ids:[{bid}]) {{
+    name
+    items_page(limit:100) {{
+      items {{
+        id name
+        column_values {{
+          id text
+          column {{ id title }}
+        }}
+        subitems {{
+          id name
+          column_values {{
+            id text
+            column {{ id title }}
+          }}
+        }}
+        updates(limit:20) {{
+          id body created_at
+          creator {{ name email }}
+        }}
+      }}
+    }}
+  }}
+}}""".format(bid=board_id)
+
+    tmp = f"/tmp/mq_{uuid.uuid4().hex}.json"
+    try:
+        with open(tmp, "w") as f:
+            json.dump({"query": query}, f)
+        out = subprocess.check_output(
+            ["curl", "-s", "--connect-timeout", "10", "--max-time", "60",
+             "-X", "POST", "https://api.monday.com/v2",
+             "-H", f"Authorization: {mtok}",
+             "-H", "Content-Type: application/json",
+             "-d", f"@{tmp}"], timeout=25)
+        data = json.loads(out.decode())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if os.path.exists(tmp): os.remove(tmp)
+
+    board = data.get("data", {}).get("boards", [{}])[0]
+    items_out = []
+    total_hours = 0
+    total_tasks = 0
+    completed_tasks = 0
+    in_progress_tasks = 0
+
+    for item in board.get("items_page", {}).get("items", []):
+        cols = {}
+        for cv in item.get("column_values", []):
+            cid = cv.get("column", {}).get("id", "")
+            title = cv.get("column", {}).get("title", "")
+            text = cv.get("text", "")
+            cols[cid] = {"col": title, "value": text}
+
+        time_str = cols.get("duration_mknr526v", {}).get("value", "")
+        hours = 0
+        if time_str:
+            parts = time_str.split(":")
+            if len(parts) == 3:
+                hours = int(parts[0]) + int(parts[1]) / 60 + int(parts[2]) / 3600
+                total_hours += hours
+
+        status = cols.get("status_mkkda1p9", {}).get("value", "")
+        priority = cols.get("priority_mkkdtv12", {}).get("value", "")
+        people = cols.get("people_mkkqy60v", {}).get("value", "")
+
+        subitems_out = []
+        for s in item.get("subitems", []):
+            scols = {}
+            for cv in s.get("column_values", []):
+                cid = cv.get("column", {}).get("id", "")
+                title = cv.get("column", {}).get("title", "")
+                text = cv.get("text", "")
+                scols[cid] = {"col": title, "value": text}
+
+            sub_status = scols.get("status_mkkda1p9", {}).get("value", "")
+            sub_priority = scols.get("priority_mkkdtv12", {}).get("value", "")
+            sub_assign = scols.get("people_mkkqy60v", {}).get("value", "") or scols.get("assign_to_mkkd2n6w", {}).get("value", "")
+
+            total_tasks += 1
+            if sub_status.lower() in ("completed", "done"):
+                completed_tasks += 1
+            elif sub_status.lower() in ("in progress", "working on it"):
+                in_progress_tasks += 1
+
+            subitems_out.append({
+                "id": s["id"],
+                "name": s["name"],
+                "status": sub_status or "Not Started",
+                "priority": sub_priority or "",
+                "assignee": sub_assign or "",
+            })
+
+        # Parse Monday.com updates/comments
+        import re as _re
+        updates_out = []
+        for u in item.get("updates", []):
+            creator = u.get("creator", {})
+            raw_body = u.get("body", "") or ""
+            clean_body = _re.sub(r"<[^>]+>", "", raw_body).strip()
+            updates_out.append({
+                "id": u.get("id"),
+                "author": creator.get("name", "Unknown"),
+                "email": creator.get("email", ""),
+                "body": clean_body,
+                "created_at": u.get("created_at", ""),
+            })
+
+        # Merge with local dashboard comments for this item
+        local_comments = _get_item_comments("vervcouk", item["id"])
+        all_comments = updates_out + local_comments
+        all_comments.sort(key=lambda x: x.get("created_at", ""))
+
+        items_out.append({
+            "id": item["id"],
+            "name": item["name"],
+            "status": status or "Not Started",
+            "priority": priority or "",
+            "people": people or "",
+            "dev_time_hours": round(hours, 1),
+            "subitems": subitems_out,
+            "subitem_count": len(subitems_out),
+            "updates_from_monday": updates_out,
+            "comments": all_comments,
+            "comment_count": len(all_comments),
+        })
+
+    overall = {
+        "total_items": len(items_out),
+        "total_subtasks": total_tasks,
+        "completed": completed_tasks,
+        "in_progress": in_progress_tasks,
+        "not_started": total_tasks - completed_tasks - in_progress_tasks,
+        "total_dev_hours": round(total_hours, 1),
+        "completion_pct": round((completed_tasks / total_tasks * 100) if total_tasks > 0 else 0),
+    }
+
+    return jsonify({
+        "board": "Project Pipeline - verv.co.uk",
+        "overall": overall,
+        "items": items_out,
+    })
+
+# ── Universal Comment API ──
+COMMENT_PROJECTS = {"vervcouk", "vervtrip", "str", "hmo", "maintenance", "tasks"}
+
+@app.route("/api/comments/<project>/<item_id>", methods=["GET"])
+@require_auth
+def api_get_comments(project, item_id):
+    """Get all comments for an item (Monday updates + dashboard comments)."""
+    if project not in COMMENT_PROJECTS:
+        return jsonify({"error": "Invalid project"}), 400
+    local = _get_item_comments(project, item_id)
+    return jsonify({"comments": local, "count": len(local)})
+
+@app.route("/api/comments/<project>/<item_id>", methods=["POST"])
+@require_auth
+def api_add_comment(project, item_id):
+    """Add a comment to an item."""
+    if project not in COMMENT_PROJECTS:
+        return jsonify({"error": "Invalid project"}), 400
+    data = request.get_json()
+    body = (data.get("body") or "").strip()
+    if not body:
+        return jsonify({"error": "Comment body is required"}), 400
+    author = request.current_user.get("username", "Unknown")
+    comment = _add_item_comment(project, item_id, author, body)
+    return jsonify({"success": True, "comment": comment}), 201
+
+@app.route("/api/comments/<project>/<item_id>/<comment_id>", methods=["DELETE"])
+@require_auth
+def api_delete_comment(project, item_id, comment_id):
+    """Delete a comment by ID."""
+    if project not in COMMENT_PROJECTS:
+        return jsonify({"error": "Invalid project"}), 400
+    comments = _load_comments()
+    key = f"{project}_{item_id}"
+    existing = comments.get(key, [])
+    comments[key] = [c for c in existing if c.get("id") != comment_id]
+    _save_comments(comments)
+    return jsonify({"success": True})
 
 # ── USER MANAGEMENT (super admin only) ──
 @app.route("/api/users", methods=["GET"])
