@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VERV Operations Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,sans-serif;background:#F8F9FC;color:#1E293B;display:flex;min-height:100vh}
+.dash-sidebar{width:260px;background:linear-gradient(180deg,#0F172A 0%,#1E293B 100%);color:#fff;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100}
+.dash-sidebar .brand{padding:24px 20px 20px;border-bottom:1px solid rgba(255,255,255,.08)}
+.dash-sidebar .brand .logo{font-size:22px;font-weight:800;letter-spacing:-0.5px}
+.dash-sidebar .brand .logo span{color:#3B82F6}
+.dash-sidebar .brand .tagline{font-size:11px;color:#64748B;text-transform:uppercase;letter-spacing:2px;margin-top:2px}
+.dash-nav{padding:16px 12px;flex:1;overflow-y:auto}
+.nav-s{font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1.5px;padding:16px 12px 8px;font-weight:600}
+.dash-nav .ni{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:8px;color:#94A3B8;text-decoration:none;font-size:14px;font-weight:500;cursor:pointer;margin-bottom:2px;transition:all .15s}
+.dash-nav .ni:hover{background:rgba(255,255,255,.06);color:#E2E8F0}
+.dash-nav .ni.active{background:rgba(59,130,246,.15);color:#60A5FA;font-weight:600}
+.dash-nav .ni .badge{margin-left:auto;background:#3B82F6;color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}
+.nav-sub{padding-left:20px}
+.nav-sub .ni{font-size:13px;padding:7px 14px}
+.dash-user{margin:12px;padding:14px;border-radius:10px;background:rgba(255,255,255,.05);display:flex;align-items:center;gap:12px}
+.dash-user .av{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#3B82F6,#8B5CF6);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#fff}
+.dash-user .info{flex:1}
+.dash-user .info .n{font-size:13px;font-weight:600;color:#E2E8F0}
+.dash-user .info .r{font-size:11px;color:#64748B}
+.dash-user .lo{width:32px;height:32px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#94A3B8;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all .15s;text-decoration:none}
+.dash-user .lo:hover{background:rgba(239,68,68,.15);color:#FCA5A5;border-color:rgba(239,68,68,.3)}
+.menu-toggle{display:none;position:fixed;top:16px;left:16px;z-index:200;width:40px;height:40px;border:none;border-radius:10px;background:#0F172A;color:#fff;font-size:20px;cursor:pointer;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.sidebar-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:99}
+.sidebar-overlay.show{display:block}
+.dash-main{margin-left:260px;flex:1;padding:0;min-height:100vh}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:20px 32px;background:#fff;border-bottom:1px solid #E2E8F0;position:sticky;top:0;z-index:50}
+.topbar h2{font-size:20px;font-weight:700;color:#0F172A}
+.topbar .right{display:flex;align-items:center;gap:16px}
+.cnt{padding:24px 32px}
+
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-bottom:28px}
+.kpi-card{background:#fff;border-radius:14px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:box-shadow .2s}
+.kpi-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.08)}
+.kpi-card .kh{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+.kpi-card .ki{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px}
+.kpi-card .ki.b{background:#EFF6FF;color:#3B82F6}
+.kpi-card .ki.p{background:#F5F3FF;color:#8B5CF6}
+.kpi-card .ki.o{background:#FFF7ED;color:#F97316}
+.kpi-card .ki.g{background:#F0FDF4;color:#22C55E}
+.kpi-card .kl{font-size:13px;color:#64748B;font-weight:500}
+.kpi-card .kv{font-size:28px;font-weight:800;color:#0F172A;line-height:1.2}
+.kpi-card .kt{font-size:12px;font-weight:600;margin-top:6px}
+.kpi-card .kt.up{color:#22C55E}
+.kpi-card .kt.down{color:#EF4444}
+.kpi-card .kt.neutral{color:#64748B}
+
+.charts-grid{display:grid;grid-template-columns:2fr 1fr;gap:20px;margin-bottom:28px}
+.card{background:#fff;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;margin-bottom:20px}
+.card-h{display:flex;justify-content:space-between;align-items:center;padding:18px 20px;border-bottom:1px solid #F1F5F9}
+.card-h h3{font-size:15px;font-weight:600;color:#0F172A}
+.card-h .ca{font-size:13px;color:#3B82F6;cursor:pointer;font-weight:500}
+.card-b{padding:20px}
+
+.tab-bar{display:flex;gap:2px;margin-bottom:20px;background:#F1F5F9;border-radius:10px;padding:3px;width:fit-content}
+.tab-btn{padding:8px 20px;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;font-family:'Inter',sans-serif;color:#64748B;background:transparent}
+.tab-btn.active{background:#fff;color:#0F172A;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.panel{display:none}
+.panel.active{display:block}
+
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px 12px;color:#64748B;font-weight:600;border-bottom:2px solid #F1F5F9;white-space:nowrap;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+td{padding:10px 12px;border-bottom:1px solid #F8F9FC;white-space:nowrap}
+tr:hover{background:#F8FAFC}
+
+.badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;gap:4px}
+.bg{background:#F0FDF4;color:#16A34A}
+.bb{background:#EFF6FF;color:#2563EB}
+.bp{background:#F5F3FF;color:#7C3AED}
+.ba{background:#FFFBEB;color:#D97706}
+.br{background:#FEF2F2;color:#DC2626}
+.bgr{background:#F1F5F9;color:#64748B}
+.tag{display:inline-flex;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:600}
+.ts{background:#EFF6FF;color:#2563EB}
+.th{background:#F5F3FF;color:#7C3AED}
+.td{background:#FFFBEB;color:#D97706}
+
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.grid-3,.p-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.ops-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.ops-card{text-align:center;padding:16px 8px;border-radius:10px;border:1px solid #F1F5F9}
+.ops-card .oi{font-size:22px;margin-bottom:8px}
+.ops-card .ov{font-size:20px;font-weight:700;color:#0F172A}
+.ops-card .ol{font-size:11px;color:#64748B;margin-top:2px}
+
+.il{display:flex;flex-direction:column;gap:10px}
+.ii{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:10px;border:1px solid #F1F5F9}
+.ii .ii-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex-shrink:0}
+.ii .ii-icon.hw{background:#EFF6FF;color:#3B82F6}
+.ii .ii-icon.ar{background:#F0FDF4;color:#22C55E}
+.ii .ii-icon.ms{background:#FFFBEB;color:#D97706}
+.ii .ii-icon.mc{background:#F5F3FF;color:#7C3AED}
+.ii .ii-info{flex:1}
+.ii .ii-name{font-size:13px;font-weight:600;color:#0F172A}
+.ii .ii-status{font-size:11px;color:#64748B}
+
+.pc{padding:18px;border-radius:10px;border:1px solid #F1F5F9}
+.pc .pn{font-size:15px;font-weight:600;color:#0F172A}
+.pc .ps{margin:4px 0 10px}
+.pc .pm{font-size:12px;color:#64748B;margin-top:6px}
+.pc .pm strong{color:#0F172A}
+.pc .pt{display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:#64748B;border-bottom:1px solid #F8F9FC}
+.pc .pt:last-child{border-bottom:none}
+.pc .pt .ptn{color:#0F172A;font-weight:500}
+.prog{margin-top:6px}
+.prog-bar{height:6px;background:#F1F5F9;border-radius:3px;overflow:hidden}
+.prog-fill{height:100%;border-radius:3px;background:#3B82F6;transition:width .4s}
+.prog-lbl{display:flex;justify-content:space-between;font-size:11px;color:#64748B;margin-top:4px}
+.sd{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px}
+.sd.on{background:#22C55E}
+.sd.wa{background:#D97706}
+
+.loading{display:flex;align-items:center;justify-content:center;padding:40px;color:#94A3B8;font-size:14px;gap:8px}
+.spinner{width:18px;height:18px;border:2px solid #E2E8F0;border-top-color:#3B82F6;border-radius:50%;animation:spin .6s linear infinite}
+.err{color:#DC2626;padding:20px;text-align:center;background:#FEF2F2;border-radius:10px;font-size:14px}
+.empty{text-align:center;padding:32px;color:#94A3B8;font-size:14px}
+.tm{color:#64748B}
+.fw{font-weight:600}
+.fg select{padding:7px 14px;border-radius:8px;border:1px solid #E2E8F0;font-family:Inter;font-size:13px;outline:none;background:#fff;cursor:pointer}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+@media(max-width:1200px){.kpi-grid{grid-template-columns:repeat(2,1fr)}.charts-grid{grid-template-columns:1fr}.ops-grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:968px){.grid-2,.grid-3,.p-grid{grid-template-columns:1fr}.ops-grid{grid-template-columns:repeat(2,1fr)}}  
+@media(max-width:768px){
+.menu-toggle{display:flex}
+.dash-sidebar{transform:translateX(-100%);transition:transform .3s ease;width:280px}
+.dash-sidebar.open{transform:translateX(0)}
+.dash-main{margin-left:0}
+.cnt{padding:16px}
+.topbar{padding:12px 16px}
+.kpi-grid{grid-template-columns:1fr}
+.tab-bar{width:100%;overflow-x:auto;white-space:nowrap}
+.ops-grid{grid-template-columns:repeat(2,1fr)}
+.p-grid{grid-template-columns:1fr}
+}
+@supports(padding:max(0px)){.dash-sidebar{padding-top:max(24px,env(safe-area-inset-top))}.cnt{padding-bottom:max(16px,env(safe-area-inset-bottom))}}
+@media(hover:none)and(pointer:coarse){.ni{padding:12px 14px}.tab-btn{padding:10px 16px}select{font-size:16px!important}}
+</style>
+</head>
+<body>
+
+<button class="menu-toggle" id="mToggle" onclick="ts()">☰</button>
+<div class="sidebar-overlay" id="sOverlay" onclick="ts()"></div>
+
+<aside class="dash-sidebar" id="dashSidebar">
+<div class="brand"><div class="logo">VERV<span>.</span></div><div class="tagline">Operations</div></div>
+<nav class="dash-nav" id="dashNav">
+{% if user.role == 'projects' %}
+<div class="nav-s">Development</div>
+<div class="ni active" onclick="document.getElementById('devSection').scrollIntoView({behavior:'smooth'})"><span>⚡</span><span>Projects</span></div>
+{% else %}
+<div class="nav-s">Overview</div>
+<div class="ni active" onclick="sp('dashboard')"><span>◉</span><span>Dashboard</span></div>
+<div class="nav-s">Properties</div>
+<div class="ni" onclick="sp('properties')"><span>🏠</span><span>All Properties</span><span class="badge" id="pCount">0</span></div>
+<div class="n-sub">
+<div class="ni" onclick="sp('str')"><span>🏨</span><span>Short Stay</span></div>
+<div class="ni" onclick="sp('hmo')"><span>🏢</span><span>HMO</span></div>
+</div>
+<div class="nav-s">Operations</div>
+<div class="ni" onclick="sp('maintenance')"><span>🔧</span><span>Maintenance</span><span class="badge" id="mCountSide">0</span></div>
+<div class="nav-s">Development</div>
+<div class="ni" onclick="document.getElementById('devSection').scrollIntoView({behavior:'smooth'})"><span>⚡</span><span>Projects</span></div>
+{% endif %}
+</nav>
+<div class="dash-user">
+<div class="av" id="userAvatar">{{ user.username[:2].upper() if user else 'T' }}</div>
+<div class="info"><div class="n" id="userName">{{ user.username if user else 'User' }}</div><div class="r" id="userRole">{{ user.role if user else 'admin' }}</div></div>
+<a href="/api/auth/logout" class="lo" title="Sign out" onclick="return confirm('Sign out?')">✕</a>
+</div>
+</aside>
+
+<div class="dash-main">
+<div class="topbar">
+<h2 id="pageTitle">{% if user.role == 'projects' %}Development Projects{% else %}Dashboard{% endif %}</h2>
+<div class="right">
+<div class="fg"><select id="periodFilter" onchange="rl()"><option value="today">Today</option><option value="week">This Week</option><option value="month" selected>This Month</option><option value="quarter">This Quarter</option></select></div>
+<span class="tm" id="lastUpdated">—</span>
+</div>
+</div>
+<div class="cnt" id="dashContent"></div>
+</div>
+
+<script>
+// Sidebar toggle
+function ts() {
+document.getElementById('sOverlay').classList.toggle('show');
+document.getElementById('dashSidebar').classList.toggle('open');
+}
+document.querySelectorAll('.ni').forEach(function(item) {
+item.addEventListener('click', function() {
+if(window.innerWidth <= 768) ts();
+});
+});
+
+// Set date
+(function(){
+var d = new Date();
+var opts = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+var el = document.getElementById('lastUpdated');
+if(el) el.textContent = d.toLocaleDateString('en-GB', opts);
+})();
+
+function sp(page) {
+document.querySelectorAll('.ni').forEach(function(n){ n.classList.remove('active'); });
+var titles = {dashboard:'Dashboard',properties:'All Properties',str:'Short Stay',hmo:'HMO',maintenance:'Maintenance'};
+document.getElementById('pageTitle').textContent = titles[page] || 'Dashboard';
+document.querySelectorAll('.ni').forEach(function(n){
+if(n.textContent.trim().includes(titles[page])) n.classList.add('active');
+});
+}
+
+function st(name) {
+document.querySelectorAll('.tab-btn').forEach(function(t){ t.classList.remove('active'); });
+document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
+document.querySelectorAll('.tab-btn').forEach(function(t){
+if(t.textContent.trim().toLowerCase().includes(name)) t.classList.add('active');
+});
+var el = document.getElementById('panel-'+name);
+if(el) {
+el.classList.add('active');
+if(name==='properties') loadProperties();
+if(name==='str') loadSTR();
+if(name==='hmo') loadHMO();
+if(name==='maintenance') loadMaintenance();
+}
+}
+
+async function api(path) {
+var r = await fetch(path);
+if(!r.ok) throw new Error('HTTP '+r.status);
+return r.json();
+}
+
+function rl() { loadKPIs(); loadProperties(); loadSTR(); loadHMO(); loadMaintenance(); }
+
+// Render Dashboard
+(async function renderDashboard() {
+var dc = document.getElementById('dashContent');
+var userRole = '{{ user.role }}';
+if(userRole === 'projects') {
+dc.innerHTML = 
+'<div id="devSection" class="card"><div class="card-h"><h3>⚡ Development Projects</h3></div><div class="card-b">' +
+'<div class="p-grid">' +
+'<div class="pc"><div class="pn">Verv.co.uk <span class="badge bb" style="font-size:10px">In Development</span></div><div class="ps"><span class="badge ba">Backend: Microservices</span></div>' +
+'<div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:55%"></div></div><div class="prog-lbl"><span>6 active services</span><span>55%</span></div></div>' +
+'<div class="pt"><span class="ptn">Profile Service</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Listing Service</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Payment Service</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Orchestration Service</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Notification Service</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Media Service</span><span class="badge ba">Working On It</span></div>' +
+'<div class="pm">Dev: <strong>Faisal</strong> (BE) — <strong>Sabbir</strong> (FE) — Last commit: 25 Jun</div>' +
+'<div class="pm">Completed: Auth Service, Scaffolding, Architecture Design ✅</div></div>' +
+'<div class="pc"><div class="pn">VervTrip <span class="badge bg" style="font-size:10px">Live</span></div><div class="ps"><span class="tag tl" style="background:#F0FDF4;color:#16A34A">Production</span></div>' +
+'<div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:70%"></div></div><div class="prog-lbl"><span>Active development</span><span>70%</span></div></div>' +
+'<div class="pt"><span class="ptn">Airport Transfer</span><span class="badge bg">Fixed</span></div>' +
+'<div class="pt"><span class="ptn">Booking Cancellation</span><span class="badge bg">Fixed</span></div>' +
+'<div class="pt"><span class="ptn">Discount Caps</span><span class="badge bg">Fixed</span></div>' +
+'<div class="pt"><span class="ptn">Tickadoo Destinations</span><span class="badge bg">Fixed</span></div>' +
+'<div class="pt"><span class="ptn">Datetime Issues</span><span class="badge bg">Fixed</span></div>' +
+'<div class="pm">Devs: <strong>Mithu</strong> & <strong>Adnan</strong> — Last commit: 25 Jun</div>' +
+'<div class="pm">Repos: React/Inertia + Laravel/Vue</div></div>' +
+'<div class="pc"><div class="pn">Innovate Rank <span class="badge bp" style="font-size:10px">Ongoing</span></div><div class="ps"><span class="tag td" style="background:#FFFBEB;color:#D97706">SEO & Optimisation</span></div>' +
+'<div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:45%"></div></div><div class="prog-lbl"><span>Client: Al Isharah</span><span>45%</span></div></div>' +
+'<div class="pt"><span class="ptn">Accessibility — Deaf-Friendly App</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Case Studies</span><span class="badge bgr">Pending</span></div>' +
+'<div class="pt"><span class="ptn">Website Optimisation</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pm"><strong>Forhad</strong> (Marketing) — <strong>Tarikul</strong> (Design)</div>' +
+'<div class="pm">Live at innovaterank.co.uk</div></div>' +
+'</div></div></div>';
+} else { 
+'<div class="kpi-grid" id="kpiGrid">' +
+'<div class="kpi-card"><div class="kh"><div class="kl">STR Properties</div><div class="ki b">&#127975;</div></div><div class="kv" id="kpiStr">—</div><div class="kt neutral" id="kpiStrT">● Active</div></div>' +
+'<div class="kpi-card"><div class="kh"><div class="kl">HMO Properties</div><div class="ki p">&#127962;</div></div><div class="kv" id="kpiHmo">—</div><div class="kt neutral" id="kpiHmoT">● Leased</div></div>' +
+'<div class="kpi-card"><div class="kh"><div class="kl">Today\'s Bookings</div><div class="ki o">&#128197;</div></div><div class="kv" id="kpiBook">—</div><div class="kt" id="kpiBookT">● Arrivals / Departures</div></div>' +
+'<div class="kpi-card"><div class="kh"><div class="kl">Maintenance Jobs</div><div class="ki g">&#128295;</div></div><div class="kv" id="kpiMaint">—</div><div class="kt neutral" id="kpiMaintT">● Open</div></div>' +
+'</div>' +
+
+'<div class="charts-grid">' +
+'<div class="card"><div class="card-h"><h3>Revenue Overview</h3></div><div class="card-b"><div style="height:200px"><canvas id="revChart" height="200"></canvas></div></div></div>' +
+'<div class="card"><div class="card-h"><h3>Portfolio Split</h3></div><div class="card-b"><div style="height:200px"><canvas id="portChart" height="200"></canvas></div>' +
+'<div style="display:flex;justify-content:center;gap:20px;margin-top:10px;font-size:12px"><span><span style="color:#3B82F6">●</span> STR <strong id="psStr">0</strong></span><span><span style="color:#8B5CF6">●</span> HMO <strong id="psHmo">0</strong></span><span><span style="color:#F97316">●</span> Hybrid <strong id="psHyb">0</strong></span></div></div></div>' +
+'</div>' +
+
+'<div class="card"><div class="card-h"><h3>Operational Overview</h3></div><div class="card-b">' +
+'<div class="ops-grid">' +
+'<div class="ops-card"><div class="oi">&#128197;</div><div class="ov" id="oBook">—</div><div class="ol">Total Bookings</div></div>' +
+'<div class="ops-card"><div class="oi">&#128682;</div><div class="ov" id="oArr">—</div><div class="ol">Arrivals Today</div></div>' +
+'<div class="ops-card"><div class="oi">&#128694;</div><div class="ov" id="oDep">—</div><div class="ol">Departures Today</div></div>' +
+'<div class="ops-card"><div class="oi">&#128295;</div><div class="ov" id="oMaint">—</div><div class="ol">Open Maintenance</div></div>' +
+'<div class="ops-card"><div class="oi">&#127968;</div><div class="ov" id="oProps">—</div><div class="ol">Total Properties</div></div>' +
+'</div></div></div>' +
+
+'<div id="devSection" class="card"><div class="card-h"><h3>⚡ Development Projects</h3></div><div class="card-b">' +
+'<div class="p-grid">' +
+'<div class="pc"><div class="pn">Verv.co.uk <span class="badge bb" style="font-size:10px">In Development</span></div><div class="ps"><span class="badge ba">Backend: Microservices</span></div>' +
+'<div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:55%"></div></div><div class="prog-lbl"><span>6 active services</span><span>55%</span></div></div>' +
+'<div class="pt"><span class="ptn">Profile Service</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Listing Service</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Payment Service</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Orchestration Service</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Notification Service</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Media Service</span><span class="badge ba">Working On It</span></div>' +
+'<div class="pm">Dev: <strong>Faisal</strong> (BE) — <strong>Sabbir</strong> (FE) — Last commit: 25 Jun</div>' +
+'<div class="pm">Completed: Auth Service, Scaffolding, Architecture Design ✅</div></div>' +
+'<div class="pc"><div class="pn">VervTrip <span class="badge bg" style="font-size:10px">Live</span></div><div class="ps"><span class="tag tl" style="background:#F0FDF4;color:#16A34A">Production</span></div>' +
+'<div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:70%"></div></div><div class="prog-lbl"><span>Active development</span><span>70%</span></div></div>' +
+'<div class="pt"><span class="ptn">Airport Transfer</span><span class="badge bg">Fixed</span></div>' +
+'<div class="pt"><span class="ptn">Booking Cancellation</span><span class="badge bg">Fixed</span></div>' +
+'<div class="pt"><span class="ptn">Discount Caps</span><span class="badge bg">Fixed</span></div>' +
+'<div class="pt"><span class="ptn">Tickadoo Destinations</span><span class="badge bg">Fixed</span></div>' +
+'<div class="pt"><span class="ptn">Datetime Issues</span><span class="badge bg">Fixed</span></div>' +
+'<div class="pm">Devs: <strong>Mithu</strong> & <strong>Adnan</strong> — Last commit: 25 Jun</div>' +
+'<div class="pm">Repos: React/Inertia + Laravel/Vue</div></div>' +
+'<div class="pc"><div class="pn">Innovate Rank <span class="badge bp" style="font-size:10px">Ongoing</span></div><div class="ps"><span class="tag td" style="background:#FFFBEB;color:#D97706">SEO & Optimisation</span></div>' +
+'<div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:45%"></div></div><div class="prog-lbl"><span>Client: Al Isharah</span><span>45%</span></div></div>' +
+'<div class="pt"><span class="ptn">Accessibility — Deaf-Friendly App</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Case Studies</span><span class="badge bgr">Pending</span></div>' +
+'<div class="pt"><span class="ptn">Website Optimisation</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pm"><strong>Forhad</strong> (Marketing) — <strong>Tarikul</strong> (Design)</div>' +
+'<div class="pm">Live at innovaterank.co.uk</div></div>' +
+'</div></div></div>' +
+
+'<div class="card"><div class="card-h"><h3>System Integrations</h3></div><div class="card-b">' +
+'<div class="il">' +
+'<div class="ii"><div class="ii-icon hw">H</div><div class="ii-info"><div class="ii-name">Hostaway</div><div class="ii-status">30 STR listings, reservations live</div></div><span class="badge bg"><span class="sd on"></span>Connected</span></div>' +
+'<div class="ii"><div class="ii-icon ar">A</div><div class="ii-info"><div class="ii-name">Arthur</div><div class="ii-status">HMO tenants & properties</div></div><span class="badge ba"><span class="sd wa"></span>Syncing</span></div>' +
+'<div class="ii"><div class="ii-icon ms">M</div><div class="ii-info"><div class="ii-name">Missive</div><div class="ii-status">Team email & communication</div></div><span class="badge bg"><span class="sd on"></span>Connected</span></div>' +
+'<div class="ii"><div class="ii-icon mc">◊</div><div class="ii-info"><div class="ii-name">Monday.com</div><div class="ii-status">Project boards & maintenance</div></div><span class="badge bg"><span class="sd on"></span>Connected</span></div>' +
+'</div></div></div>' +
+
+'<div class="tab-bar" id="mainTabs">' +
+'<button class="tab-btn active" onclick="st(\'properties\')">Properties</button>' +
+'<button class="tab-btn" onclick="st(\'str\')">Short Stay</button>' +
+'<button class="tab-btn" onclick="st(\'hmo\')">HMO</button>' +
+'<button class="tab-btn" onclick="st(\'maintenance\')">Maintenance</button>' +
+'</div>' +
+'<div id="panel-properties" class="panel active"></div>' +
+'<div id="panel-str" class="panel"></div>' +
+'<div id="panel-hmo" class="panel"></div>' +
+'<div id="panel-maintenance" class="panel"></div>';
+
+loadKPIs();
+loadProperties();
+}
+})();
+
+// Data functions
+async function loadKPIs() {
+try {
+var props = await api('/api/properties');
+var summary = await api('/api/summary');
+var maint = await api('/api/maintenance');
+var strC = props.properties.filter(function(p){return p.type==='STR'||p.type==='Hybrid'}).length;
+var hmoC = props.properties.filter(function(p){return p.type==='HMO'||p.type==='Hybrid'}).length;
+var tot = props.total || props.properties.length;
+document.getElementById('kpiStr').textContent = strC;
+document.getElementById('kpiHmo').textContent = hmoC;
+var arr = summary.str?.arrivals||0, dep = summary.str?.departures||0;
+document.getElementById('kpiBook').textContent = arr + dep;
+document.getElementById('kpiBookT').textContent = '↑ '+arr+' arr / '+dep+' dep';
+document.getElementById('kpiBookT').className = 'kt ' + (arr > 0 ? 'up' : 'neutral');
+document.getElementById('kpiMaint').textContent = maint.count;
+document.getElementById('mCountSide').textContent = maint.count;
+document.getElementById('pCount').textContent = tot;
+document.getElementById('oBook').textContent = arr + dep;
+document.getElementById('oArr').textContent = arr;
+document.getElementById('oDep').textContent = dep;
+document.getElementById('oMaint').textContent = maint.count;
+document.getElementById('oProps').textContent = tot;
+document.getElementById('psStr').textContent = strC;
+document.getElementById('psHmo').textContent = hmoC;
+document.getElementById('psHyb').textContent = Math.max(0,tot-strC-hmoC);
+
+if(window.revenueChart) window.revenueChart.destroy();
+if(window.portfolioChart) window.portfolioChart.destroy();
+var c1 = document.getElementById('revChart');
+if(c1) {
+window.revenueChart = new Chart(c1.getContext('2d'), {
+type:'bar',data:{labels:['Jan','Feb','Mar','Apr','May','Jun'],datasets:[{label:'Revenue',data:[28,32,35,38,42,47],backgroundColor:'#3B82F6',borderRadius:6,barThickness:32}]},
+options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,grid:{color:'#F1F5F9'},ticks:{color:'#94A3B8',font:{size:11}}},x:{grid:{display:false},ticks:{color:'#94A3B8',font:{size:11}}}}}
+});
+}
+var c2 = document.getElementById('portChart');
+if(c2) {
+window.portfolioChart = new Chart(c2.getContext('2d'), {
+type:'doughnut',data:{labels:['STR ('+strC+')','HMO ('+hmoC+')','Hybrid'],datasets:[{data:[strC,hmoC,Math.max(0,tot-strC-hmoC)],backgroundColor:['#3B82F6','#8B5CF6','#F97316'],borderWidth:0}]},
+options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{padding:16,usePointStyle:true,font:{size:12}}}},cutout:'70%'}
+});
+}
+} catch(e) { console.error(e); }
+}
+
+async function loadProperties() {
+var el = document.getElementById('panel-properties');
+if(!el) return;
+el.innerHTML = '<div class="loading"><div class="spinner"></div> Loading properties...</div>';
+try {
+var d = await api('/api/properties');
+var h = '<div class="card"><div class="card-h"><h3>All Properties ('+d.total+')</h3></div><div class="card-b"><div class="tw"><table><thead><tr><th>Name</th><th>Type</th><th>Brand</th><th>Status</th><th>Address</th></tr></thead><tbody>';
+for(var i=0;i<d.properties.length;i++) {
+var p = d.properties[i];
+var tc = p.type==='Hybrid'?'td':(p.type==='STR'?'ts':'th');
+var sc = p.status==='active'?'bg':'bgr';
+h += '<tr><td class="fw">'+p.name+'</td><td><span class="tag '+tc+'">'+p.type+'</span></td><td>'+(p.brand||'-')+'</td><td><span class="badge '+sc+'">'+p.status+'</span></td><td class="tm">'+(p.address||'-')+'</td></tr>';
+}
+h += '</tbody></table></div></div></div>';
+el.innerHTML = h;
+} catch(e) { el.innerHTML = '<div class="err">'+e.message+'</div>'; }
+}
+
+async function loadSTR() {
+var el = document.getElementById('panel-str');
+if(!el) return;
+el.innerHTML = '<div class="loading"><div class="spinner"></div> Loading STR data...</div>';
+try {
+var list = await api('/api/str/listings');
+var s = await api('/api/summary');
+var h = '<div class="card"><div class="card-h"><h3>STR Listings ('+list.count+')</h3></div><div class="card-b"><div class="tw"><table><thead><tr><th>Name</th><th>Bedrooms</th><th>Guests</th><th>Status</th></tr></thead><tbody>';
+for(var i=0;i<list.listings.length;i++) {
+var l = list.listings[i];
+h += '<tr><td class="fw">'+l.name+'</td><td class="tm">'+(l.bedrooms||'-')+'</td><td class="tm">'+(l.max_guests||'-')+'</td><td><span class="badge bg">Active</span></td></tr>';
+}
+h += '</tbody></table></div></div></div>';
+h += '<div class="card"><div class="card-h"><h3>Today\'s Activity</h3></div><div class="card-b"><div class="grid-2"><div><div class="ops-card"><div class="oi">🚪</div><div class="ov">'+(s.str?.arrivals||0)+'</div><div class="ol">Arrivals</div></div></div><div><div class="ops-card"><div class="oi">🚶</div><div class="ov">'+(s.str?.departures||0)+'</div><div class="ol">Departures</div></div></div></div></div></div>';
+el.innerHTML = h;
+} catch(e) { el.innerHTML = '<div class="err">'+e.message+'</div>'; }
+}
+
+async function loadHMO() {
+var el = document.getElementById('panel-hmo');
+if(!el) return;
+el.innerHTML = '<div class="loading"><div class="spinner"></div> Loading HMO data...</div>';
+try {
+var tResp = await api('/api/hmo/tenants');
+var pResp = await api('/api/hmo/properties');
+var h = '<div class="grid-2"><div class="card"><div class="card-h"><h3>Active Tenants ('+tResp.count+')</h3></div><div class="card-b">';
+if(tResp.tenants.length) {
+h += '<div class="tw"><table><thead><tr><th>Tenant</th><th>Property</th><th>Rent</th><th>Status</th></tr></thead><tbody>';
+for(var i=0;i<tResp.tenants.length;i++) {
+var t = tResp.tenants[i];
+var sc = t.status==='periodic'?'bp':'bg';
+var r = t.rent_amount?'£'+t.rent_amount+(t.rent_frequency?'/'+t.rent_frequency:''):'-';
+h += '<tr><td class="fw">'+(t.tenant_name||'N/A')+'</td><td>'+(t.property||t.unit_id)+'</td><td class="fw">'+r+'</td><td><span class="badge '+sc+'">'+t.status+'</span></td></tr>';
+}
+h += '</tbody></table></div>';
+} else h += '<div class="empty">No active tenancies</div>';
+h += '</div></div><div class="card"><div class="card-h"><h3>HMO Properties ('+pResp.count+')</h3></div><div class="card-b">';
+if(pResp.properties?.length) {
+h += '<div class="tw"><table><thead><tr><th>Name</th><th>Status</th><th>Reference</th></tr></thead><tbody>';
+for(var i=0;i<pResp.properties.length&&i<50;i++) {
+var p = pResp.properties[i];
+var sc = p.status==='active'||p.status==='Live'?'bg':'bgr';
+h += '<tr><td class="fw">'+(p.name||'')+'</td><td><span class="badge '+sc+'">'+(p.status||'')+'</span></td><td class="tm">'+(p.unit_ref||'')+'</td></tr>';
+}
+h += '</tbody></table></div>';
+} else h += '<div class="empty">No HMO properties</div>';
+h += '</div></div></div>';
+el.innerHTML = h;
+} catch(e) { el.innerHTML = '<div class="err">'+e.message+'</div>'; }
+}
+
+async function loadMaintenance() {
+var el = document.getElementById('panel-maintenance');
+if(!el) return;
+el.innerHTML = '<div class="loading"><div class="spinner"></div> Loading maintenance...</div>';
+try {
+var d = await api('/api/maintenance');
+var h = '<div class="card"><div class="card-h"><h3>Maintenance Jobs ('+d.count+')</h3></div><div class="card-b">';
+if(d.maintenance.length) {
+h += '<div class="tw"><table><thead><tr><th>Issue</th><th>Priority</th><th>Status</th><th>Date</th></tr></thead><tbody>';
+for(var i=0;i<d.maintenance.length;i++) {
+var m = d.maintenance[i];
+var p = (m.priority||'').toLowerCase();
+var pc = p.includes('urgent')||p.includes('high')?'br':(p.includes('medium')?'ba':'bb');
+var sc = m.status==='IN PROGRESS'?'ba':m.status==='DONE'||m.status==='COMPLETED'?'bg':'bgr';
+h += '<tr><td class="fw">'+m.title+'</td><td><span class="badge '+pc+'">'+(m.priority||'-')+'</span></td><td><span class="badge '+sc+'">'+m.status+'</span></td><td class="tm">'+(m.date_raised||'-')+'</td></tr>';
+}
+h += '</tbody></table></div>';
+} else h += '<div class="empty">No maintenance jobs</div>';
+h += '</div></div>';
+el.innerHTML = h;
+} catch(e) { el.innerHTML = '<div class="err">'+e.message+'</div>'; }
+}
+</script>
+</body>
+</html>
