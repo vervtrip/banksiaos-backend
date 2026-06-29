@@ -281,6 +281,7 @@ dc.innerHTML =
 '<div class="pm">Live at innovaterank.co.uk</div></div>' +
 '</div></div></div>';
 } else { 
+var html = 
 '<div class="kpi-grid" id="kpiGrid">' +
 '<div class="kpi-card"><div class="kh"><div class="kl">STR Properties</div><div class="ki b">&#127975;</div></div><div class="kv" id="kpiStr">—</div><div class="kt neutral" id="kpiStrT">● Active</div></div>' +
 '<div class="kpi-card"><div class="kh"><div class="kl">HMO Properties</div><div class="ki p">&#127962;</div></div><div class="kv" id="kpiHmo">—</div><div class="kt neutral" id="kpiHmoT">● Leased</div></div>' +
@@ -352,6 +353,7 @@ dc.innerHTML =
 '<div id="panel-hmo" class="panel"></div>' +
 '<div id="panel-maintenance" class="panel"></div>';
 
+dc.innerHTML = html;
 loadKPIs();
 loadProperties();
 }
