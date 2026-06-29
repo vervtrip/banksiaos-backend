@@ -156,6 +156,10 @@ tr:hover{background:#F8FAFC}
 <aside class="dash-sidebar" id="dashSidebar">
 <div class="brand"><div class="logo">VERV<span>.</span></div><div class="tagline">Operations</div></div>
 <nav class="dash-nav" id="dashNav">
+{% if user.role == 'projects' %}
+<div class="nav-s">Development</div>
+<div class="ni active" onclick="document.getElementById('devSection').scrollIntoView({behavior:'smooth'})"><span>⚡</span><span>Projects</span></div>
+{% else %}
 <div class="nav-s">Overview</div>
 <div class="ni active" onclick="sp('dashboard')"><span>◉</span><span>Dashboard</span></div>
 <div class="nav-s">Properties</div>
@@ -168,6 +172,7 @@ tr:hover{background:#F8FAFC}
 <div class="ni" onclick="sp('maintenance')"><span>🔧</span><span>Maintenance</span><span class="badge" id="mCountSide">0</span></div>
 <div class="nav-s">Development</div>
 <div class="ni" onclick="document.getElementById('devSection').scrollIntoView({behavior:'smooth'})"><span>⚡</span><span>Projects</span></div>
+{% endif %}
 </nav>
 <div class="dash-user">
 <div class="av" id="userAvatar">{{ user.username[:2].upper() if user else 'T' }}</div>
@@ -178,7 +183,7 @@ tr:hover{background:#F8FAFC}
 
 <div class="dash-main">
 <div class="topbar">
-<h2 id="pageTitle">Dashboard</h2>
+<h2 id="pageTitle">{% if user.role == 'projects' %}Development Projects{% else %}Dashboard{% endif %}</h2>
 <div class="right">
 <div class="fg"><select id="periodFilter" onchange="rl()"><option value="today">Today</option><option value="week">This Week</option><option value="month" selected>This Month</option><option value="quarter">This Quarter</option></select></div>
 <span class="tm" id="lastUpdated">—</span>
@@ -243,7 +248,39 @@ function rl() { loadKPIs(); loadProperties(); loadSTR(); loadHMO(); loadMaintena
 // Render Dashboard
 (async function renderDashboard() {
 var dc = document.getElementById('dashContent');
+var userRole = '{{ user.role }}';
+if(userRole === 'projects') {
 dc.innerHTML = 
+'<div id="devSection" class="card"><div class="card-h"><h3>⚡ Development Projects</h3></div><div class="card-b">' +
+'<div class="p-grid">' +
+'<div class="pc"><div class="pn">Verv.co.uk <span class="badge bb" style="font-size:10px">In Development</span></div><div class="ps"><span class="badge ba">Backend: Microservices</span></div>' +
+'<div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:55%"></div></div><div class="prog-lbl"><span>6 active services</span><span>55%</span></div></div>' +
+'<div class="pt"><span class="ptn">Profile Service</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Listing Service</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Payment Service</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Orchestration Service</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Notification Service</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Media Service</span><span class="badge ba">Working On It</span></div>' +
+'<div class="pm">Dev: <strong>Faisal</strong> (BE) — <strong>Sabbir</strong> (FE) — Last commit: 25 Jun</div>' +
+'<div class="pm">Completed: Auth Service, Scaffolding, Architecture Design ✅</div></div>' +
+'<div class="pc"><div class="pn">VervTrip <span class="badge bg" style="font-size:10px">Live</span></div><div class="ps"><span class="tag tl" style="background:#F0FDF4;color:#16A34A">Production</span></div>' +
+'<div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:70%"></div></div><div class="prog-lbl"><span>Active development</span><span>70%</span></div></div>' +
+'<div class="pt"><span class="ptn">Airport Transfer</span><span class="badge bg">Fixed</span></div>' +
+'<div class="pt"><span class="ptn">Booking Cancellation</span><span class="badge bg">Fixed</span></div>' +
+'<div class="pt"><span class="ptn">Discount Caps</span><span class="badge bg">Fixed</span></div>' +
+'<div class="pt"><span class="ptn">Tickadoo Destinations</span><span class="badge bg">Fixed</span></div>' +
+'<div class="pt"><span class="ptn">Datetime Issues</span><span class="badge bg">Fixed</span></div>' +
+'<div class="pm">Devs: <strong>Mithu</strong> & <strong>Adnan</strong> — Last commit: 25 Jun</div>' +
+'<div class="pm">Repos: React/Inertia + Laravel/Vue</div></div>' +
+'<div class="pc"><div class="pn">Innovate Rank <span class="badge bp" style="font-size:10px">Ongoing</span></div><div class="ps"><span class="tag td" style="background:#FFFBEB;color:#D97706">SEO & Optimisation</span></div>' +
+'<div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:45%"></div></div><div class="prog-lbl"><span>Client: Al Isharah</span><span>45%</span></div></div>' +
+'<div class="pt"><span class="ptn">Accessibility — Deaf-Friendly App</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pt"><span class="ptn">Case Studies</span><span class="badge bgr">Pending</span></div>' +
+'<div class="pt"><span class="ptn">Website Optimisation</span><span class="badge ba">In Progress</span></div>' +
+'<div class="pm"><strong>Forhad</strong> (Marketing) — <strong>Tarikul</strong> (Design)</div>' +
+'<div class="pm">Live at innovaterank.co.uk</div></div>' +
+'</div></div></div>';
+} else { 
 '<div class="kpi-grid" id="kpiGrid">' +
 '<div class="kpi-card"><div class="kh"><div class="kl">STR Properties</div><div class="ki b">&#127975;</div></div><div class="kv" id="kpiStr">—</div><div class="kt neutral" id="kpiStrT">● Active</div></div>' +
 '<div class="kpi-card"><div class="kh"><div class="kl">HMO Properties</div><div class="ki p">&#127962;</div></div><div class="kv" id="kpiHmo">—</div><div class="kt neutral" id="kpiHmoT">● Leased</div></div>' +
@@ -317,6 +354,7 @@ dc.innerHTML =
 
 loadKPIs();
 loadProperties();
+}
 })();
 
 // Data functions

@@ -240,6 +240,42 @@ def reset_password_page():
 def dashboard():
     return render_template("dashboard.html", user=request.current_user)
 
+# ── Snapshot Management (super admin only) ──
+SNAPSHOT_SCRIPT = os.path.join(os.path.dirname(__file__), "snapshot.py")
+
+@app.route("/api/snapshots", methods=["GET"])
+@require_super_admin
+def api_list_snapshots():
+    result = subprocess.run(
+        [sys.executable, SNAPSHOT_SCRIPT, "list"],
+        capture_output=True, text=True, timeout=10, cwd=os.path.dirname(__file__)
+    )
+    return jsonify(json.loads(result.stdout))
+
+@app.route("/api/snapshots", methods=["POST"])
+@require_super_admin
+def api_take_snapshot():
+    data = request.get_json() or {}
+    name = data.get("name", None)
+    result = subprocess.run(
+        [sys.executable, SNAPSHOT_SCRIPT, "save"] + ([name] if name else []),
+        capture_output=True, text=True, timeout=10, cwd=os.path.dirname(__file__)
+    )
+    return jsonify(json.loads(result.stdout))
+
+@app.route("/api/snapshots/restore/<commit_hash>", methods=["POST"])
+@require_super_admin
+def api_restore_snapshot(commit_hash):
+    result = subprocess.run(
+        [sys.executable, SNAPSHOT_SCRIPT, "restore", commit_hash],
+        capture_output=True, text=True, timeout=10, cwd=os.path.dirname(__file__)
+    )
+    data = json.loads(result.stdout)
+    if data.get("status") == "restored":
+        # Restart dashboard to reload templates
+        os._exit(0)
+    return jsonify(data)
+
 # ── USER MANAGEMENT (super admin only) ──
 @app.route("/api/users", methods=["GET"])
 @require_super_admin
