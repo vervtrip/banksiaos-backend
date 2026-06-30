@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>VERV OS — Banksia Operations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:'Inter',-apple-system,sans-serif;background:#F8F9FC;color:#1E293B;display:flex;min-height:100vh;overflow-x:hidden}
+.bsb{width:240px;background:linear-gradient(180deg,#0F172A 0%,#1E293B 100%);color:#fff;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;transition:transform .25s ease}
+.bsb .brand{padding:20px;border-bottom:1px solid rgba(255,255,255,.08)}
+.bsb .brand .logo{font-size:18px;font-weight:800;display:flex;align-items:center;gap:8px}
+.bsb .brand .logo span{color:#3B82F6}
+.bsb .brand .tag{font-size:10px;background:rgba(59,130,246,.15);color:#60A5FA;padding:2px 6px;border-radius:4px;margin-left:4px;text-transform:uppercase}
+.bsb .brand .tagline{font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:2px;margin-top:2px}
+.bs-nav{padding:12px;flex:1;overflow-y:auto}
+.ns{font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1.5px;padding:12px 12px 6px;font-weight:600}
+.ni{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;color:#94A3B8;text-decoration:none;font-size:13px;font-weight:500;cursor:pointer;margin-bottom:1px;transition:all .15s;min-height:40px}
+.ni:hover{background:rgba(255,255,255,.06);color:#E2E8F0}
+.ni.active{background:rgba(59,130,246,.15);color:#60A5FA;font-weight:600}
+.ni .b-num{margin-left:auto;background:rgba(239,68,68,.2);color:#FCA5A5;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600}
+.bs-user{margin:8px;padding:12px;border-radius:8px;background:rgba(255,255,255,.05);display:flex;align-items:center;gap:10px}
+.bs-user .av{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#3B82F6,#8B5CF6);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#fff;flex-shrink:0}
+.bs-user .info{flex:1}
+.bs-user .info .n{font-size:12px;font-weight:600;color:#E2E8F0}
+.bs-user .info .r{font-size:10px;color:#64748B}
+.bs-user .lo{width:32px;height:32px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#94A3B8;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;text-decoration:none}
+.mt{display:none;position:fixed;top:10px;left:10px;z-index:200;width:36px;height:36px;border:none;border-radius:8px;background:#0F172A;color:#fff;font-size:18px;cursor:pointer;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.so{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:99}
+.bm{margin-left:240px;flex:1;min-height:100vh}
+.bt{display:flex;justify-content:space-between;align-items:center;padding:12px 20px;background:#fff;border-bottom:1px solid #E2E8F0;position:sticky;top:0;z-index:50;min-height:52px}
+.bt h2{font-size:16px;font-weight:700;color:#0F172A}
+.bt .right{display:flex;align-items:center;gap:10px;font-size:12px;color:#64748B}
+.bc{padding:16px 20px}
+.pg{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.pc{background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;cursor:pointer;transition:all .15s;border:1px solid transparent}
+.pc:hover{box-shadow:0 4px 12px rgba(0,0,0,.1);border-color:#E2E8F0;transform:translateY(-1px)}
+.pc-h{padding:14px 16px;display:flex;justify-content:space-between;align-items:flex-start}
+.pc-h .pn{font-size:14px;font-weight:600;color:#0F172A}
+.pc-h .pa{font-size:11px;color:#64748B;margin-top:2px}
+.pc-b{padding:0 16px 14px}
+.pc-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.pc-stat{text-align:center;padding:8px 4px;border-radius:6px;background:#F8F9FC}
+.pc-stat .sv{font-size:15px;font-weight:700}
+.pc-stat .sl{font-size:9px;color:#64748B;text-transform:uppercase;margin-top:1px}
+.pc-stat .sv.g{color:#22C55E}.pc-stat .sv.r{color:#EF4444}.pc-stat .sv.b{color:#3B82F6}.pc-stat .sv.o{color:#F97316}
+.ats{display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600}
+.ats.high{background:#FEF2F2;color:#DC2626}.ats.med{background:#FFFBEB;color:#D97706}.ats.low{background:#F0FDF4;color:#16A34A}
+.ug{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:12px}
+.uc{border-radius:10px;padding:14px;border:1px solid #E2E8F0;cursor:pointer;transition:all .15s;border-left:3px solid #E2E8F0}
+.uc:hover{box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.uc .un{font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+.uc .ub{padding-top:8px;font-size:11px;color:#64748B}
+.uc .ub div{padding:2px 0}.uc .ub .ubv{color:#1E293B;font-weight:500}
+.dv{background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);padding:20px;margin-bottom:16px}
+.dv-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #F1F5F9}
+.dv-h h3{font-size:14px;font-weight:600}
+.dv-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+.dv-f{display:flex;flex-direction:column;gap:2px}
+.dv-f .dl{font-size:10px;color:#64748B;text-transform:uppercase;font-weight:600}
+.dv-f .dv{font-size:13px;color:#1E293B;font-weight:500}
+.tl{padding:0;list-style:none}
+.tl-item{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #F1F5F9;border-left:2px solid #3B82F6;padding-left:12px;margin-bottom:4px}
+.tl-item:last-child{border-bottom:none}
+.tl-c{flex:1}
+.tl-c .tt{font-size:13px;font-weight:500;color:#0F172A}
+.tl-c .td{font-size:11px;color:#64748B;margin-top:2px}
+.tl-c .tm{font-size:10px;color:#94A3B8;margin-top:1px}
+.sb{display:inline-flex;align-items:center;padding:3px 8px;border-radius:20px;font-size:10px;font-weight:600;gap:4px}
+.sb.g{background:#F0FDF4;color:#16A34A}.sb.y{background:#FFFBEB;color:#D97706}
+.sb.r{background:#FEF2F2;color:#DC2626}.sb.b{background:#EFF6FF;color:#2563EB}.sb.gr{background:#F1F5F9;color:#64748B}
+.ld{display:flex;align-items:center;justify-content:center;padding:40px;color:#94A3B8;gap:8px}
+.sp{width:16px;height:16px;border:2px solid #E2E8F0;border-top-color:#3B82F6;border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.err{padding:16px;color:#DC2626;background:#FEF2F2;border-radius:8px;font-size:13px}
+.empty{padding:24px;text-align:center;color:#94A3B8;font-size:13px}.back-link{cursor:pointer;color:#3B82F6;font-weight:500;font-size:13px;display:inline-block;margin-bottom:12px}
+@media(max-width:899px){
+.bsb{transform:translateX(-100%);width:85vw;max-width:300px}.bsb.open{transform:translateX(0)}
+.mt{display:flex}.so.show{display:block}.bm{margin-left:0}.bt{padding:10px 14px;padding-left:54px}
+.bc{padding:12px 14px}.pg{grid-template-columns:1fr}.ug{grid-template-columns:1fr 1fr}.dv-g{grid-template-columns:1fr 1fr}
+}
+@media(max-width:480px){.pg{grid-template-columns:1fr}.ug{grid-template-columns:1fr}.dv-g{grid-template-columns:1fr}.pc-stats{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<button class="mt" id="mBtn" onclick="ts()">☰</button>
+<div class="so" id="sOv" onclick="ts()"></div>
+<aside class="bsb" id="sb">
+<div class="brand"><div class="logo">VOS<span>.</span><span class="tag">BETA</span></div><div class="tagline">Banksia Operations</div></div>
+<nav class="bs-nav">
+<div class="ns">Operations</div>
+<div class="ni active" onclick="nav('portfolio')"><span>🏢</span>Portfolio<span class="b-num" id="pBadge" style="display:none">0</span></div>
+<div class="ni" onclick="nav('compliance')"><span>✅</span>Compliance</div>
+<div class="ni" onclick="nav('maintenance')"><span>🔧</span>Maintenance</div>
+<div class="ns">People</div>
+<div class="ni" onclick="nav('tenants')"><span>👥</span>Tenants</div>
+<div class="ni" onclick="nav('landlords')"><span>🤝</span>Landlords</div>
+<div class="ni" onclick="nav('contractors')"><span>👷</span>Contractors</div>
+<div class="ns">Intelligence</div>
+<div class="ni" onclick="nav('attention')"><span>⚠️</span>Executive Attention<span class="b-num" id="aBadge" style="display:none">0</span></div>
+</nav>
+<div class="bs-user">
+<div class="av" id="uAv">S</div>
+<div class="info"><div class="n" id="uName">Sami</div><div class="r" id="uRole">super_admin</div></div>
+<a href="/api/auth/logout" class="lo" title="Sign out">✕</a>
+</div>
+</aside>
+<div class="bm">
+<div class="bt"><h2 id="pTitle">Portfolio</h2><div class="right"><span id="bStats"></span></div></div>
+<div class="bc" id="bContent"></div>
+</div>
+<script>
+var cv='portfolio',cp=null,cu=null;
+function ts(){document.getElementById('sOv').classList.toggle('show');document.getElementById('sb').classList.toggle('open');}
+document.querySelectorAll('.ni').forEach(function(e){e.addEventListener('click',function(){if(window.innerWidth<900)ts();});});
+async function api(p,m,b){var o={};if(m){o.method=m;o.headers={'Content-Type':'application/json'};}if(b)o.body=JSON.stringify(b);var r=await fetch(p,o);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
+function nav(v,p,u){cv=v;cp=p||null;cu=u||null;
+document.querySelectorAll('.ni').forEach(function(e){e.classList.remove('active');});
+var t={portfolio:'Portfolio',compliance:'Compliance',maintenance:'Maintenance',tenants:'Tenants',landlords:'Landlords',contractors:'Contractors',attention:'Executive Attention'};
+document.getElementById('pTitle').textContent=t[v]||'Banksia OS';render();}
+function rt(i){if(!i)return'';try{var d=new Date(i),s=Math.floor((new Date()-d)/1000);if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}catch(e){return'';}}
+function sbs(s){var m={occupied:'g',vacant:'gr',reserved:'b',notice_served:'y',attention:'r',active:'g',periodic:'b',expired:'r',completed:'g',in_progress:'y',reported:'b',approved:'b',assigned:'y',confirmed:'g'};return '<span class="sb '+(m[s.toLowerCase()]||'gr')+'">'+s+'</span>';}
+function render(){var e=document.getElementById('bContent');
+if(cu){loadUnitDetail(e);return;}if(cp){loadPropertyDetail(e);return;}
+if(cv==='portfolio')loadPortfolio(e);else if(cv==='compliance')loadCompliance(e);else if(cv==='maintenance')loadMaint(e);else if(cv==='tenants')loadTenants(e);else if(cv==='landlords')loadLandlords(e);else if(cv==='contractors')loadContractors(e);else if(cv==='attention')loadAttention(e);}
+
+async function loadPortfolio(el){
+el.innerHTML='<div class="ld"><div class="sp"></div> Loading portfolio...</div>';
+try{var d=await api('/api/banksia/portfolio'),s=await api('/api/banksia/portfolio/stats');
+document.getElementById('bStats').textContent=s.total_units+' units | '+s.properties+' properties';
+document.getElementById('pBadge').style.display=s.compliance_issues>0?'':'none';document.getElementById('pBadge').textContent=s.compliance_issues;
+var h='<div class="pg">';
+for(var i=0;i<d.properties.length;i++){var p=d.properties[i],ac=p.attention_score>50?'high':(p.attention_score>20?'med':'low');
+h+='<div class="pc" onclick="nav(\'portfolio\','+p.id+')"><div class="pc-h"><div><div class="pn">'+p.name+'</div><div class="pa">'+(p.address||'')+'</div></div><div class="ats '+ac+'">'+(p.attention_score>0?'⚠ '+p.attention_score:'✓ Clear')+'</div></div><div class="pc-b"><div class="pc-stats"><div class="pc-stat"><div class="sv g">'+p.occupied+'</div><div class="sl">Occupied</div></div><div class="pc-stat"><div class="sv '+(p.vacant>0?'r':'b')+'">'+p.vacant+'</div><div class="sl">Vacant</div></div><div class="pc-stat"><div class="sv b">'+p.total_units+'</div><div class="sl">Units</div></div><div class="pc-stat"><div class="sv o">£'+(p.monthly_income||0).toLocaleString()+'</div><div class="sl">/mo</div></div></div></div></div>';}
+el.innerHTML=h+'</div>';}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+
+async function loadPropertyDetail(el){
+el.innerHTML='<div class="ld"><div class="sp"></div> Loading property...</div>';
+try{var d=await api('/api/banksia/properties/'+cp),p=d.property;
+var h='<div class="back-link" onclick="nav(\'portfolio\')">← Back to Portfolio</div><div class="dv"><div class="dv-h"><h3>📍 '+p.name+'</h3><div class="ats '+(d.attention_score>50?'high':(d.attention_score>20?'med':'low'))+'">'+(d.attention_score>0?'⚠ '+d.attention_score+' — '+d.attention_reasons.join(', '):'✓ All Clear')+'</div></div><div class="dv-g"><div class="dv-f"><div class="dl">Address</div><div class="dv">'+(p.address||'—')+'</div></div><div class="dv-f"><div class="dl">Postcode</div><div class="dv">'+(p.postcode||'—')+'</div></div><div class="dv-f"><div class="dl">Type</div><div class="dv">'+(p.property_type||'HMO')+'</div></div><div class="dv-f"><div class="dl">Manager</div><div class="dv">'+(p.manager||'Banksia Lettings')+'</div></div><div class="dv-f"><div class="dl">Monthly Income</div><div class="dv">£'+(d.monthly_income||0).toLocaleString()+'</div></div><div class="dv-f"><div class="dl">Occupancy</div><div class="dv">'+d.occupied_count+'/'+d.unit_count+' ('+Math.round(d.occupied_count/d.unit_count*100||0)+'%)</div></div></div></div>';
+h+='<div class="dv"><div class="dv-h"><h3>Units ('+d.unit_count+')</h3></div><div class="ug">';
+for(var i=0;i<d.units.length;i++){var u=d.units[i],tn=u.tenant||{};
+var bc=u.status==='occupied'?'#22C55E':u.status==='notice_served'?'#F59E0B':u.status==='reserved'?'#3B82F6':u.status==='attention'?'#EF4444':'#E2E8F0';
+var tName=tn.full_name||(tn.first_name||'')+' '+(tn.last_name||'');
+h+='<div class="uc" style="border-left-color:'+bc+'" onclick="nav(\'portfolio\','+cp+','+u.id+')"><div class="un">'+u.name+' <span class="ud">'+sbs(u.status)+'</span></div><div class="ub">'+(tName.trim()?'<div>👤 <span class="ubv">'+tName.trim()+'</span></div>':'<div style="color:#94A3B8">— Vacant</div>')+(u.rent_amount?'<div>💰 £'+u.rent_amount+'/mo</div>':'')+'<div>🔧 '+u.open_maintenance+' open</div>'+(u.attention_score>0?'<div style="color:#DC2626">⚠ Score: '+u.attention_score+'</div>':'')+'</div></div>';}
+h+='</div></div><div class="dv"><div class="dv-h"><h3>Compliance ('+d.compliance_count+')</h3></div>';
+if(Object.keys(d.compliance).length>0){h+='<div class="dv-g">';for(var k in d.compliance){var c=d.compliance[k];h+='<div class="dv-f"><div class="dl">'+k.replace(/_/g,' ').replace(/\b\w/g,function(s){return s.toUpperCase()})+'</div><div class="dv">'+sbs(c[c.length-1].status)+'</div></div>';}h+='</div>';}else h+='<div class="empty">No compliance records</div>';
+h+='</div><div class="dv"><div class="dv-h"><h3>Timeline</h3></div>';
+if(d.timeline&&d.timeline.length>0){h+='<div class="tl">';for(var i=0;i<d.timeline.length;i++){var t=d.timeline[i];h+='<div class="tl-item"><div class="tl-c"><div class="tt">'+t.title+'</div>'+(t.description?'<div class="td">'+t.description+'</div>':'')+'<div class="tm">'+rt(t.created_at)+' · '+(t.actor||'System')+'</div></div></div>';}h+='</div>';}else h+='<div class="empty">No events</div>';
+el.innerHTML=h+'</div>';document.getElementById('pTitle').textContent=p.name;}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+
+async function loadUnitDetail(el){
+el.innerHTML='<div class="ld"><div class="sp"></div> Loading unit...</div>';
+try{var d=await api('/api/banksia/units/'+cu),u=d.unit,p=d.property,tn=d.current_tenant;
+var h='<div class="back-link" onclick="nav(\'portfolio\','+cp+')">← Back to '+(p?p.name:'Property')+'</div><div class="dv"><div class="dv-h"><h3>🚪 '+u.name+'</h3>'+sbs(u.status)+'</div><div class="dv-g"><div class="dv-f"><div class="dl">Property</div><div class="dv">'+(p?p.name:'—')+'</div></div><div class="dv-f"><div class="dl">Rent</div><div class="dv">£'+(u.rent_amount||0)+'/mo</div></div><div class="dv-f"><div class="dl">Deposit</div><div class="dv">£'+(u.deposit_amount||0)+(u.deposit_protected?' (Protected)':'')+'</div></div><div class="dv-f"><div class="dl">Open Maintenance</div><div class="dv">'+d.open_maintenance+'</div></div></div></div>';
+h+='<div class="dv"><div class="dv-h"><h3>👤 Tenant</h3></div>';
+if(tn){h+='<div class="dv-g"><div class="dv-f"><div class="dl">Name</div><div class="dv">'+(tn.full_name||tn.first_name+' '+tn.last_name)+'</div></div>'+(tn.email?'<div class="dv-f"><div class="dl">Email</div><div class="dv">'+tn.email+'</div></div>':'')+(tn.phone?'<div class="dv-f"><div class="dl">Phone</div><div class="dv">'+tn.phone+'</div></div>':'')+(tn.employer?'<div class="dv-f"><div class="dl">Employer</div><div class="dv">'+tn.employer+'</div></div>':'')+'</div>';}else h+='<div class="empty">No current tenant</div>';
+h+='</div><div class="dv"><div class="dv-h"><h3>🔧 Maintenance ('+d.maintenance_count+')</h3></div>';
+if(d.maintenance&&d.maintenance.length>0){h+='<div>';for(var i=0;i<d.maintenance.length;i++){var m=d.maintenance[i];h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F1F5F9"><span>'+m.title+'</span>'+sbs(m.status)+'</div>';}h+='</div>';}else h+='<div class="empty">No maintenance jobs</div>';
+h+='</div><div class="dv"><div class="dv-h"><h3>Timeline</h3></div>';
+if(d.timeline&&d.timeline.length>0){h+='<div class="tl">';for(var i=0;i<d.timeline.length;i++){var t=d.timeline[i];h+='<div class="tl-item"><div class="tl-c"><div class="tt">'+t.title+'</div>'+(t.description?'<div class="td">'+t.description+'</div>':'')+'<div class="tm">'+rt(t.created_at)+' · '+(t.actor||'System')+'</div></div></div>';}h+='</div>';}else h+='<div class="empty">No events</div>';
+el.innerHTML=h+'</div>';document.getElementById('pTitle').textContent=u.name;}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+
+async function loadCompliance(el){
+el.innerHTML='<div class="ld"><div class="sp"></div> Loading compliance...</div>';
+try{var d=await api('/api/banksia/compliance');
+var h='<div class="dv"><div class="dv-h"><h3>All Compliance Records ('+d.total+')</h3></div>';
+if(d.compliance.length>0){h+='<div style="font-size:13px">';for(var i=0;i<d.compliance.length;i++){var c=d.compliance[i];h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #F1F5F9"><div><strong>'+c.cert_type.replace(/_/g,' ').replace(/\b\w/g,function(s){return s.toUpperCase()})+'</strong>'+(c.property?' <span style="color:#64748B;font-size:11px">@ '+c.property+'</span>':'')+'<br><span style="color:#64748B;font-size:11px">'+(c.cert_ref?'Ref: '+c.cert_ref+' · ':'')+'Expires: '+(c.expiry_date||'—')+'</span></div>'+sbs(c.status)+'</div>';}h+='</div>';}else h+='<div class="empty">No compliance records</div>';
+el.innerHTML=h+'</div>';}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+
+async function loadMaint(el){
+el.innerHTML='<div class="ld"><div class="sp"></div> Loading maintenance...</div>';
+try{var d=await api('/api/banksia/maintenance');
+var h='<div class="dv"><div class="dv-h"><h3>All Maintenance Jobs ('+d.total+')</h3></div>';
+if(d.maintenance.length>0){h+='<div style="font-size:13px">';for(var i=0;i<d.maintenance.length;i++){var m=d.maintenance[i];h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #F1F5F9"><div><strong>'+m.title+'</strong>'+(m.property?'<br><span style="color:#64748B;font-size:11px">'+m.property+(m.unit?' · '+m.unit:'')+'</span>':'')+'</div><div style="text-align:right">'+sbs(m.status)+'<br><span style="font-size:11px;color:#64748B">'+(m.priority||'')+'</span></div></div>';}h+='</div>';}else h+='<div class="empty">No maintenance jobs</div>';
+el.innerHTML=h+'</div>';}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+
+async function loadTenants(el){
+el.innerHTML='<div class="ld"><div class="sp"></div> Loading tenants...</div>';
+try{var d=await api('/api/banksia/tenants');
+var h='<div class="dv"><div class="dv-h"><h3>All Tenants ('+d.total+')</h3></div>';
+if(d.tenants.length>0){h+='<div style="font-size:13px">';for(var i=0;i<d.tenants.length;i++){var t=d.tenants[i];h+='<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9"><div><strong>'+t.full_name+'</strong><br><span style="color:#64748B;font-size:11px">'+(t.email||'')+(t.phone?' · '+t.phone:'')+'</span></div><div style="text-align:right;font-size:11px;color:#64748B">'+(t.property||'')+(t.unit?'<br>'+t.unit:'')+'</div></div>';}h+='</div>';}else h+='<div class="empty">No tenants</div>';
+el.innerHTML=h+'</div>';}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+
+async function loadLandlords(el){
+el.innerHTML='<div class="ld"><div class="sp"></div> Loading landlords...</div>';
+try{var d=await api('/api/banksia/landlords');
+var h='<div class="dv"><div class="dv-h"><h3>Landlords ('+d.total+')</h3></div>';
+if(d.landlords.length>0){h+='<div style="font-size:13px">';for(var i=0;i<d.landlords.length;i++){var l=d.landlords[i];h+='<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9"><div><strong>'+l.name+'</strong>'+(l.company?'<br><span style="color:#64748B;font-size:11px">'+l.company+'</span>':'')+'</div><div style="text-align:right;font-size:12px">'+(l.email?'<div>'+l.email+'</div>':'')+'<span style="color:#64748B">'+l.properties+' properties</span></div></div>';}h+='</div>';}else h+='<div class="empty">No landlords</div>';
+el.innerHTML=h+'</div>';}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+
+async function loadContractors(el){
+el.innerHTML='<div class="ld"><div class="sp"></div> Loading contractors...</div>';
+try{var d=await api('/api/banksia/contractors');
+var h='<div class="dv"><div class="dv-h"><h3>Contractors ('+d.total+')</h3></div>';
+if(d.contractors.length>0){h+='<div style="font-size:13px">';for(var i=0;i<d.contractors.length;i++){var c=d.contractors[i];h+='<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9"><div><strong>'+c.company+'</strong><br><span style="color:#64748B;font-size:11px">'+(c.contact||'')+' · '+(c.trade||'')+'</span></div><div style="text-align:right;font-size:11px;color:#64748B">'+(c.rating?'⭐ '+c.rating+' | ':'')+c.jobs+' jobs</div></div>';}h+='</div>';}else h+='<div class="empty">No contractors</div>';
+el.innerHTML=h+'</div>';}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+
+async function loadAttention(el){
+el.innerHTML='<div class="ld"><div class="sp"></div> Loading attention items...</div>';
+try{var d=await api('/api/banksia/attention');
+document.getElementById('aBadge').style.display=d.total>0?'':'none';document.getElementById('aBadge').textContent=d.total;
+var h='<div class="dv"><div class="dv-h"><h3>⚠️ Items Requiring Attention ('+d.total+')</h3></div>';
+if(d.items.length>0){h+='<div>';for(var i=0;i<d.items.length;i++){var a=d.items[i];h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #F1F5F9"><div><strong>'+a.name+'</strong><br><span style="color:#64748B;font-size:11px">'+(a.reasons?a.reasons.join(', '):'')+'</span></div><div class="ats high"><div style="font-size:18px;font-weight:800">'+a.score+'</div></div></div>';}h+='</div>';}else h+='<div class="empty">All clear — no items requiring attention</div>';
+el.innerHTML=h+'</div>';}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+
+// Load user info
+(async function(){try{var r=await fetch('/api/auth/user');if(r.ok){var d=await r.json();if(d.username){document.getElementById('uName').textContent=d.username;document.getElementById('uAv').textContent=d.username.charAt(0).toUpperCase();if(d.role)document.getElementById('uRole').textContent=d.role;}}}catch(e){}})();
+
+// Initial load
+render();
+loadAttention();
+</script>
+</body>
+</html>

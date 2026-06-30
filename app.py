@@ -9,6 +9,10 @@ app = Flask(__name__)
 app.secret_key = "verv-ops-dash-2026-secure"
 app.config.update(SESSION_COOKIE_SECURE=False, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax')
 
+# ── Register Banksia OS Blueprint ──
+from banksia_api import banksia
+app.register_blueprint(banksia)
+
 # ── Multi-user auth system ──
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
 
@@ -290,6 +294,13 @@ def reset_password_page():
 @require_auth
 def dashboard():
     return render_template("dashboard.html", user=request.current_user)
+
+# ── Banksia OS frontend route ──
+@app.route("/banksia")
+@app.route("/banksia/<path:subpath>")
+@require_auth
+def banksia_os_page(subpath=""):
+    return render_template("banksia.html", user=request.current_user)
 
 # ── Snapshot Management (super admin only) ──
 SNAPSHOT_SCRIPT = os.path.join(os.path.dirname(__file__), "snapshot.py")
