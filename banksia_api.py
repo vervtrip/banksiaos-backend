@@ -8,6 +8,7 @@ import json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flask import Blueprint, jsonify, request, session
 from functools import wraps
+from datetime import datetime, timezone, timedelta
 
 from verv_os_db import *
 
@@ -525,4 +526,84 @@ def api_finance_tenancy(tenancy_id):
         "end_date": t.get("end_date", ""),
         "invoices": invoices,
         "invoice_count": len(invoices),
+    })
+
+
+# ═══════════════════════════════════════════════
+# OPERATIONAL DASHBOARD
+# ═══════════════════════════════════════════════
+
+@banksia.route("/dashboard")
+@require_auth
+def api_operational_dashboard():
+    """Operational home screen — what the team sees every morning."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    week_end = (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%d")
+    month_end = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+
+    # Applicants needing review
+    applicants_pending = count("applicants", "stage NOT IN ('approved','rejected','current_tenant')")
+
+    # References outstanding
+    referencing_outstanding = count("applicants",
+        "referencing_status='pending' AND stage IN ('application_received','referencing')")
+
+    # Guarantors awaiting approval
+    guarantors_pending = raw_query(
+        "SELECT COUNT(*) as cnt FROM guarantors WHERE approved=0 AND guarantee_agreement_signed=0"
+    )[0]["cnt"] if count("guarantors") > 0 else 0
+
+    # Tenancy agreements awaiting signature
+    agreements_pending = count("applicants", "stage='agreement_sent' OR stage='awaiting_signature'")
+
+    # Move-ins this week (from tenants table)
+    move_ins = count("tenants",
+        "move_in_date >= ? AND move_in_date <= ? AND move_in_date IS NOT NULL",
+        [today, week_end])
+
+    # Move-outs this week
+    move_outs = count("tenants",
+        "move_out_date >= ? AND move_out_date <= ? AND move_out_date IS NOT NULL",
+        [today, week_end])
+
+    # Tenancies ending soon (within 30 days)
+    ending_soon = count("tenancies",
+        "end_date >= ? AND end_date <= ? AND status IN ('active','periodic')",
+        [today, month_end])
+
+    # Tenants with arrears (periodic = assumed overdue)
+    arrears_count = count("tenancies",
+        "status='periodic' AND (rent_amount > 0 OR rent_amount IS NOT NULL)")
+
+    total_arrears = 0
+    arrear_tenancies = get_by_field("tenancies", "status", "periodic")
+    for t in arrear_tenancies:
+        total_arrears += float(t.get("rent_amount", 0) or 0)
+
+    # Deposits awaiting registration
+    deposits_pending = count("tenancies",
+        "(deposit_protected IS NULL OR deposit_protected=0) AND deposit_amount > 0")
+
+    # Recent applicants (last 20)
+    recent_applicants = raw_query(
+        "SELECT id, full_name, stage, created_at, property_id FROM applicants ORDER BY created_at DESC LIMIT 20"
+    ) if count("applicants") > 0 else []
+
+    # All stats
+    return jsonify({
+        "applicants_pending": applicants_pending,
+        "referencing_outstanding": referencing_outstanding,
+        "guarantors_pending": guarantors_pending,
+        "agreements_pending": agreements_pending,
+        "move_ins_this_week": move_ins,
+        "move_outs_this_week": move_outs,
+        "tenancies_ending_soon": ending_soon,
+        "tenants_in_arrears": arrears_count,
+        "total_arrears": round(total_arrears, 2),
+        "deposits_pending": deposits_pending,
+        "recent_applicants": recent_applicants,
+        "total_tenancies": count("tenancies"),
+        "total_tenants": count("tenants"),
+        "occupied_units": count("units", "status='occupied'"),
+        "vacant_units": count("units", "status='vacant'"),
     })
