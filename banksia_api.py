@@ -155,11 +155,56 @@ def api_tenancy(tenancy_id):
         return jsonify({"error": "Not found"}), 404
     unit = get("units", t["unit_id"])
     prop = get("properties", unit["property_id"]) if unit else None
-    tenants = get_by_field("tenants","tenancy_id",tenancy_id)
-    docs = raw_query("SELECT * FROM documents WHERE object_type='tenancy' AND object_id=? ORDER BY created_at DESC",[tenancy_id])
+    tenants = get_by_field("tenants", "tenancy_id", tenancy_id)
+    
+    # Maintenance linked to this tenancy's unit
+    maint = get_by_field("maintenance", "unit_id", t["unit_id"]) if t["unit_id"] else []
+    
+    # Documents
+    docs = raw_query(
+        "SELECT * FROM documents WHERE (object_type='tenancy' AND object_id=?) "
+        "OR (object_type='unit' AND object_id=?) ORDER BY created_at DESC",
+        [tenancy_id, t.get("unit_id", 0)])
+    
+    # Communications
+    comms = raw_query(
+        "SELECT * FROM communications WHERE "
+        "(object_type='tenancy' AND object_id=?) "
+        "OR (object_type='tenant' AND object_id IN "
+        "(SELECT id FROM tenants WHERE tenancy_id=?)) "
+        "ORDER BY created_at DESC LIMIT 20",
+        [tenancy_id, tenancy_id])
+    
+    # Tenancy timeline
     tl = get_timeline("tenancy", tenancy_id, 50)
-    return jsonify({"tenancy": t, "unit": unit, "property": prop,
-                    "tenants": tenants, "documents": docs, "timeline": tl})
+    
+    # Finance summary
+    rent = t.get("rent_amount", 0) or 0
+    deposit = t.get("deposit_amount", 0) or 0
+    # Estimate arrears as 1 month overdue for periodic tenancies
+    arrears = rent if t.get("status") in ("periodic",) and rent > 0 else 0
+    
+    return jsonify({
+        "tenancy": t,
+        "unit": unit,
+        "property": prop,
+        "tenants": tenants,
+        "maintenance": maint,
+        "maintenance_count": len(maint),
+        "documents": docs,
+        "communications": comms,
+        "timeline": tl,
+        "finance": {
+            "rent": rent,
+            "rent_frequency": t.get("rent_frequency", "pcm"),
+            "deposit": deposit,
+            "deposit_protected": t.get("deposit_protected", 0),
+            "deposit_scheme": t.get("deposit_scheme", ""),
+            "arrears": round(arrears, 2),
+            "start_date": t.get("start_date", ""),
+            "end_date": t.get("end_date", ""),
+        }
+    })
 
 # ═══════════════════════════════════════════════
 # TENANT CRM
@@ -320,3 +365,164 @@ def api_attention_items():
             })
     items.sort(key=lambda x: x["score"], reverse=True)
     return jsonify({"items": items[:50], "total": len(items)})
+
+
+# ═══════════════════════════════════════════════
+# DOCUMENT MANAGEMENT
+# ═══════════════════════════════════════════════
+
+@banksia.route("/documents")
+@require_auth
+def api_list_documents():
+    docs = list_all("documents", order="created_at DESC")
+    return jsonify({"documents": docs, "total": len(docs)})
+
+@banksia.route("/documents/<int:doc_id>")
+@require_auth
+def api_get_document(doc_id):
+    doc = get("documents", doc_id)
+    if not doc:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify({"document": doc})
+
+@banksia.route("/documents", methods=["POST"])
+@require_auth
+def api_upload_document():
+    data = request.get_json()
+    if not data.get("object_type") or not data.get("object_id"):
+        return jsonify({"error": "object_type and object_id required"}), 400
+    did = insert("documents", {
+        "object_type": data["object_type"],
+        "object_id": data["object_id"],
+        "category": data.get("category", "other"),
+        "title": data.get("title", ""),
+        "file_url": data.get("file_url", ""),
+        "file_type": data.get("file_type", ""),
+        "notes": data.get("notes", ""),
+    })
+    add_timeline(data["object_type"], data["object_id"], "document_uploaded",
+                 f"Document uploaded: {data.get('title','')}", actor=request.current_user.get("username"))
+    return jsonify({"success": True, "id": did}), 201
+
+@banksia.route("/documents/<int:doc_id>", methods=["DELETE"])
+@require_auth
+def api_delete_document(doc_id):
+    doc = get("documents", doc_id)
+    if doc:
+        raw_execute("DELETE FROM documents WHERE id=?", [doc_id])
+    return jsonify({"success": True})
+
+
+# ═══════════════════════════════════════════════
+# COMMUNICATION HUB
+# ═══════════════════════════════════════════════
+
+@banksia.route("/communications")
+@require_auth
+def api_list_communications():
+    comms = list_all("communications", order="created_at DESC")
+    return jsonify({"communications": comms, "total": len(comms)})
+
+@banksia.route("/communications", methods=["POST"])
+@require_auth
+def api_add_communication():
+    data = request.get_json()
+    if not data.get("object_type") or not data.get("object_id"):
+        return jsonify({"error": "object_type and object_id required"}), 400
+    cid = insert("communications", {
+        "object_type": data["object_type"],
+        "object_id": data["object_id"],
+        "channel": data.get("channel", "internal_note"),
+        "direction": data.get("direction", "inbound"),
+        "subject": data.get("subject", ""),
+        "body": data.get("body", ""),
+        "from_name": data.get("from_name", ""),
+        "from_address": data.get("from_address", ""),
+        "to_name": data.get("to_name", ""),
+        "to_address": data.get("to_address", ""),
+        "ai_summary": data.get("ai_summary", ""),
+    })
+    add_timeline(data["object_type"], data["object_id"], "communication_added",
+                 f"{data.get('channel','note')}: {data.get('subject','')[:50]}", actor=request.current_user.get("username"))
+    return jsonify({"success": True, "id": cid}), 201
+
+
+# ═══════════════════════════════════════════════
+# FINANCE MODULE
+# ═══════════════════════════════════════════════
+
+@banksia.route("/finance/portfolio")
+@require_auth
+def api_finance_portfolio():
+    """Portfolio-level financial summary from live tenancy data."""
+    props = list_all("properties")
+    total_rent = 0
+    total_arrears = 0
+    total_deposits = 0
+    total_open_maint = 0
+    prop_data = []
+    for p in props:
+        units = get_by_field("units", "property_id", p["id"])
+        prop_rent = 0
+        prop_arrears = 0
+        for u in units:
+            ts = get_by_field("tenancies", "unit_id", u["id"])
+            for t in ts:
+                if t["status"] in ("active", "periodic"):
+                    rent = float(t.get("rent_amount", 0) or 0)
+                    prop_rent += rent
+                    if t["status"] == "periodic":
+                        prop_arrears += rent
+                    deposit = float(t.get("deposit_amount", 0) or 0)
+                    total_deposits += deposit
+        om = count("maintenance", "property_id=? AND status NOT IN ('completed','confirmed')", [p["id"]])
+        if prop_rent > 0:
+            total_rent += prop_rent
+            total_arrears += prop_arrears
+            total_open_maint += om
+            prop_data.append({
+                "id": p["id"], "name": p["name"],
+                "monthly_rent": round(prop_rent, 2),
+                "arrears": round(prop_arrears, 2),
+                "open_maintenance": om,
+            })
+    return jsonify({
+        "total_monthly_rent": round(total_rent, 2),
+        "total_annual_rent": round(total_rent * 12, 2),
+        "total_arrears": round(total_arrears, 2),
+        "total_deposits": round(total_deposits, 2),
+        "properties": prop_data,
+        "property_count": len(prop_data),
+    })
+
+
+# ═══════════════════════════════════════════════
+# FINANCE — TENANCY-LEVEL
+# ═══════════════════════════════════════════════
+
+@banksia.route("/finance/tenancies/<int:tenancy_id>")
+@require_auth
+def api_finance_tenancy(tenancy_id):
+    t = get("tenancies", tenancy_id)
+    if not t:
+        return jsonify({"error": "Not found"}), 404
+    rent = float(t.get("rent_amount", 0) or 0)
+    deposit = float(t.get("deposit_amount", 0) or 0)
+    arrears = rent if t.get("status") in ("periodic",) and rent > 0 else 0
+    
+    # Payment history (from documents)
+    invoices = raw_query(
+        "SELECT * FROM documents WHERE object_type='tenancy' AND object_id=? AND category='invoice' ORDER BY created_at DESC",
+        [tenancy_id])
+    
+    return jsonify({
+        "rent": rent,
+        "rent_frequency": t.get("rent_frequency", "pcm"),
+        "deposit": deposit,
+        "deposit_protected": t.get("deposit_protected", 0),
+        "arrears": round(arrears, 2),
+        "start_date": t.get("start_date", ""),
+        "end_date": t.get("end_date", ""),
+        "invoices": invoices,
+        "invoice_count": len(invoices),
+    })

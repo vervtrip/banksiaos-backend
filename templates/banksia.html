@@ -94,6 +94,8 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#F8F9FC;color:#1E29
 <div class="ni active" onclick="nav('portfolio')"><span>🏢</span>Portfolio<span class="b-num" id="pBadge" style="display:none">0</span></div>
 <div class="ni" onclick="nav('compliance')"><span>✅</span>Compliance</div>
 <div class="ni" onclick="nav('maintenance')"><span>🔧</span>Maintenance</div>
+<div class="ns">Finance</div>
+<div class="ni" onclick="nav('finance')"><span>💰</span>Finance</div>
 <div class="ns">People</div>
 <div class="ni" onclick="nav('tenants')"><span>👥</span>Tenants</div>
 <div class="ni" onclick="nav('landlords')"><span>🤝</span>Landlords</div>
@@ -112,19 +114,20 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#F8F9FC;color:#1E29
 <div class="bc" id="bContent"></div>
 </div>
 <script>
-var cv='portfolio',cp=null,cu=null;
+var cv='portfolio',cp=null,cu=null,ct=null;
 function ts(){document.getElementById('sOv').classList.toggle('show');document.getElementById('sb').classList.toggle('open');}
 document.querySelectorAll('.ni').forEach(function(e){e.addEventListener('click',function(){if(window.innerWidth<900)ts();});});
 async function api(p,m,b){var o={};if(m){o.method=m;o.headers={'Content-Type':'application/json'};}if(b)o.body=JSON.stringify(b);var r=await fetch(p,o);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
-function nav(v,p,u){cv=v;cp=p||null;cu=u||null;
+function nav(v,p,u,t){cv=v;cp=p||null;cu=u||null;ct=t||null;
 document.querySelectorAll('.ni').forEach(function(e){e.classList.remove('active');});
-var t={portfolio:'Portfolio',compliance:'Compliance',maintenance:'Maintenance',tenants:'Tenants',landlords:'Landlords',contractors:'Contractors',attention:'Executive Attention'};
-document.getElementById('pTitle').textContent=t[v]||'Banksia OS';render();}
+var titles={portfolio:'Portfolio',compliance:'Compliance',maintenance:'Maintenance',tenants:'Tenants',landlords:'Landlords',contractors:'Contractors',attention:'Executive Attention',finance:'Finance'};
+document.getElementById('pTitle').textContent=titles[v]||'Banksia OS';render();}
 function rt(i){if(!i)return'';try{var d=new Date(i),s=Math.floor((new Date()-d)/1000);if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}catch(e){return'';}}
 function sbs(s){var m={occupied:'g',vacant:'gr',reserved:'b',notice_served:'y',attention:'r',active:'g',periodic:'b',expired:'r',completed:'g',in_progress:'y',reported:'b',approved:'b',assigned:'y',confirmed:'g'};return '<span class="sb '+(m[s.toLowerCase()]||'gr')+'">'+s+'</span>';}
 function render(){var e=document.getElementById('bContent');
+if(ct){loadTenancyDetail(e);return;}
 if(cu){loadUnitDetail(e);return;}if(cp){loadPropertyDetail(e);return;}
-if(cv==='portfolio')loadPortfolio(e);else if(cv==='compliance')loadCompliance(e);else if(cv==='maintenance')loadMaint(e);else if(cv==='tenants')loadTenants(e);else if(cv==='landlords')loadLandlords(e);else if(cv==='contractors')loadContractors(e);else if(cv==='attention')loadAttention(e);}
+if(cv==='portfolio')loadPortfolio(e);else if(cv==='compliance')loadCompliance(e);else if(cv==='maintenance')loadMaint(e);else if(cv==='tenants')loadTenants(e);else if(cv==='landlords')loadLandlords(e);else if(cv==='contractors')loadContractors(e);else if(cv==='attention')loadAttention(e);else if(cv==='finance')loadFinance(e);}
 
 async function loadPortfolio(el){
 el.innerHTML='<div class="ld"><div class="sp"></div> Loading portfolio...</div>';
@@ -156,12 +159,64 @@ el.innerHTML='<div class="ld"><div class="sp"></div> Loading unit...</div>';
 try{var d=await api('/api/banksia/units/'+cu),u=d.unit,p=d.property,tn=d.current_tenant;
 var h='<div class="back-link" onclick="nav(\'portfolio\','+cp+')">← Back to '+(p?p.name:'Property')+'</div><div class="dv"><div class="dv-h"><h3>🚪 '+u.name+'</h3>'+sbs(u.status)+'</div><div class="dv-g"><div class="dv-f"><div class="dl">Property</div><div class="dv">'+(p?p.name:'—')+'</div></div><div class="dv-f"><div class="dl">Rent</div><div class="dv">£'+(u.rent_amount||0)+'/mo</div></div><div class="dv-f"><div class="dl">Deposit</div><div class="dv">£'+(u.deposit_amount||0)+(u.deposit_protected?' (Protected)':'')+'</div></div><div class="dv-f"><div class="dl">Open Maintenance</div><div class="dv">'+d.open_maintenance+'</div></div></div></div>';
 h+='<div class="dv"><div class="dv-h"><h3>👤 Tenant</h3></div>';
-if(tn){h+='<div class="dv-g"><div class="dv-f"><div class="dl">Name</div><div class="dv">'+(tn.full_name||tn.first_name+' '+tn.last_name)+'</div></div>'+(tn.email?'<div class="dv-f"><div class="dl">Email</div><div class="dv">'+tn.email+'</div></div>':'')+(tn.phone?'<div class="dv-f"><div class="dl">Phone</div><div class="dv">'+tn.phone+'</div></div>':'')+(tn.employer?'<div class="dv-f"><div class="dl">Employer</div><div class="dv">'+tn.employer+'</div></div>':'')+'</div>';}else h+='<div class="empty">No current tenant</div>';
+if(tn){
+h+='<div class="dv-g"><div class="dv-f"><div class="dl">Name</div><div class="dv">'+(tn.full_name||tn.first_name+' '+tn.last_name)+'</div></div>'+(tn.email?'<div class="dv-f"><div class="dl">Email</div><div class="dv">'+tn.email+'</div></div>':'')+(tn.phone?'<div class="dv-f"><div class="dl">Phone</div><div class="dv">'+tn.phone+'</div></div>':'')+(tn.employer?'<div class="dv-f"><div class="dl">Employer</div><div class="dv">'+tn.employer+'</div></div>':'')+(d.current_tenancy?'<div class="dv-f"><div class="dl">Tenancy</div><div class="dv"><span class="back-link" onclick="nav(\'portfolio\','+cp+','+cu+','+d.current_tenancy.id+')">View Tenancy →</span></div></div>':'')+'</div>';}else h+='<div class="empty">No current tenant</div>';
 h+='</div><div class="dv"><div class="dv-h"><h3>🔧 Maintenance ('+d.maintenance_count+')</h3></div>';
 if(d.maintenance&&d.maintenance.length>0){h+='<div>';for(var i=0;i<d.maintenance.length;i++){var m=d.maintenance[i];h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F1F5F9"><span>'+m.title+'</span>'+sbs(m.status)+'</div>';}h+='</div>';}else h+='<div class="empty">No maintenance jobs</div>';
 h+='</div><div class="dv"><div class="dv-h"><h3>Timeline</h3></div>';
 if(d.timeline&&d.timeline.length>0){h+='<div class="tl">';for(var i=0;i<d.timeline.length;i++){var t=d.timeline[i];h+='<div class="tl-item"><div class="tl-c"><div class="tt">'+t.title+'</div>'+(t.description?'<div class="td">'+t.description+'</div>':'')+'<div class="tm">'+rt(t.created_at)+' · '+(t.actor||'System')+'</div></div></div>';}h+='</div>';}else h+='<div class="empty">No events</div>';
 el.innerHTML=h+'</div>';document.getElementById('pTitle').textContent=u.name;}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+
+async function loadTenancyDetail(el){
+el.innerHTML='<div class="ld"><div class="sp"></div> Loading tenancy...</div>';
+try{var d=await api('/api/banksia/tenancies/'+ct),tn=d.tenants&&d.tenants[0]?d.tenants[0]:null;
+var h='<div class="back-link" onclick="nav(\'portfolio\','+(cp||1)+')">← Back</div>';
+h+='<div class="dv"><div class="dv-h"><h3>📄 Tenancy #'+d.tenancy.arthur_id+'</h3></div><div class="dv-g">'+
+'<div class="dv-f"><div class="dl">Unit</div><div class="dv">'+(d.unit?d.unit.name:'—')+'</div></div>'+
+'<div class="dv-f"><div class="dl">Property</div><div class="dv">'+(d.property?d.property.name:'—')+'</div></div>'+
+'<div class="dv-f"><div class="dl">Status</div><div class="dv">'+sbs(d.tenancy.status)+'</div></div>'+
+'<div class="dv-f"><div class="dl">Start</div><div class="dv">'+(d.tenancy.start_date||'—')+'</div></div>'+
+'<div class="dv-f"><div class="dl">End</div><div class="dv">'+(d.tenancy.end_date||'—')+'</div></div>'+
+'<div class="dv-f"><div class="dl">Notice Period</div><div class="dv">'+(d.tenancy.notice_period||'—')+'</div></div>'+
+'</div></div>';
+h+='<div class="dv"><div class="dv-h"><h3>💰 Finance</h3></div><div class="dv-g"><div class="dv-f"><div class="dl">Rent</div><div class="dv">£'+d.finance.rent+'/'+d.finance.rent_frequency+'</div></div>'+
+'<div class="dv-f"><div class="dl">Deposit</div><div class="dv">£'+d.finance.deposit+' '+sbs(d.finance.deposit_protected?'Protected':'Not protected')+'</div></div>'+
+'<div class="dv-f"><div class="dl">Arrears</div><div class="dv" style="color:'+(d.finance.arrears>0?'#DC2626':'#16A34A')+'">'+(d.finance.arrears>0?'£'+d.finance.arrears:'£0')+'</div></div>'+
+'</div></div>';
+if(tn){
+h+='<div class="dv"><div class="dv-h"><h3>👤 Tenant</h3></div><div class="dv-g">'+
+'<div class="dv-f"><div class="dl">Name</div><div class="dv">'+tn.full_name+'</div></div>'+
+(tn.email?'<div class="dv-f"><div class="dl">Email</div><div class="dv">'+tn.email+'</div></div>':'')+
+(tn.phone?'<div class="dv-f"><div class="dl">Phone</div><div class="dv">'+tn.phone+'</div></div>':'')+
+(tn.passport_number?'<div class="dv-f"><div class="dl">Passport</div><div class="dv">✅ '+tn.passport_number+'</div></div>':'')+
+'</div></div>';}
+h+='<div class="dv"><div class="dv-h"><h3>🔧 Maintenance ('+d.maintenance_count+')</h3></div>';
+if(d.maintenance&&d.maintenance.length>0){h+='<div>';for(var i=0;i<d.maintenance.length;i++){var m=d.maintenance[i];
+h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F1F5F9"><span>'+m.title+'</span>'+sbs(m.status)+'</div>';}h+='</div>';}else h+='<div class="empty">None</div>';
+h+='</div><div class="dv"><div class="dv-h"><h3>📄 Documents ('+d.documents.length+')</h3></div>';
+if(d.documents&&d.documents.length>0){h+='<div>';for(var i=0;i<d.documents.length;i++){var dc=d.documents[i];
+h+='<div style="padding:4px 0;font-size:12px"><strong>'+dc.title+'</strong> <span style="color:#64748B">('+dc.category+')</span></div>';}h+='</div>';}else h+='<div class="empty">No documents</div>';
+h+='</div><div class="dv"><div class="dv-h"><h3>Timeline</h3></div>';
+if(d.timeline&&d.timeline.length>0){h+='<div class="tl">';for(var i=0;i<d.timeline.length;i++){var tl2=d.timeline[i];
+h+='<div class="tl-item"><div class="tl-c"><div class="tt">'+tl2.title+'</div>'+(tl2.description?'<div class="td">'+tl2.description+'</div>':'')+'<div class="tm">'+rt(tl2.created_at)+'</div></div></div>';}h+='</div>';}else h+='<div class="empty">No events</div>';
+el.innerHTML=h+'</div>';document.getElementById('pTitle').textContent='Tenancy #'+(d.tenancy.arthur_id||d.tenancy.id);
+}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+
+async function loadFinance(el){
+el.innerHTML='<div class="ld"><div class="sp"></div> Loading finance...</div>';
+try{var d=await api('/api/banksia/finance/portfolio');
+var h='<div class="dv"><div class="dv-h"><h3>💷 Portfolio Finance</h3></div><div class="dv-g">'+
+'<div class="dv-f"><div class="dl">Monthly Rent</div><div class="dv" style="font-size:20px;font-weight:700;color:#0F172A">£'+(d.total_monthly_rent||0).toLocaleString()+'</div></div>'+
+'<div class="dv-f"><div class="dl">Annual Rent</div><div class="dv" style="font-size:20px;font-weight:700;color:#0F172A">£'+(d.total_annual_rent||0).toLocaleString()+'</div></div>'+
+'<div class="dv-f"><div class="dl">Total Arrears</div><div class="dv" style="font-size:20px;font-weight:700;color:'+(d.total_arrears>0?'#DC2626':'#16A34A')+'">£'+(d.total_arrears||0).toLocaleString()+'</div></div>'+
+'<div class="dv-f"><div class="dl">Total Deposits</div><div class="dv" style="font-size:20px;font-weight:700;color:#0F172A">£'+(d.total_deposits||0).toLocaleString()+'</div></div>'+
+'</div></div>';
+h+='<div class="dv"><div class="dv-h"><h3>Properties</h3></div>';
+if(d.properties&&d.properties.length>0){h+='<div style="font-size:13px">';for(var i=0;i<d.properties.length;i++){var p=d.properties[i];
+h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #F1F5F9"><div><strong>'+p.name+'</strong></div><div style="text-align:right">£'+(p.monthly_rent||0).toLocaleString()+'/mo'+(p.arrears>0?'<br><span style="color:#DC2626">Arrears: £'+p.arrears+'</span>':'')+'</div></div>';}
+h+='</div>';}else h+='<div class="empty">No properties</div>';
+el.innerHTML=h+'</div>';document.getElementById('pTitle').textContent='Finance';
+}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
 
 async function loadCompliance(el){
 el.innerHTML='<div class="ld"><div class="sp"></div> Loading compliance...</div>';
