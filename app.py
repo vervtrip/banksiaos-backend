@@ -469,6 +469,43 @@ def api_project_vervcouk():
 
 # ── Universal Comment API ──
 COMMENT_PROJECTS = {"vervcouk", "vervtrip", "str", "hmo", "maintenance", "tasks"}
+MONDAY_SYNC_PROJECTS = {
+    "vervcouk": {"board_id": "18416089386", "note": "Project Pipeline - verv.co.uk"},
+}
+
+def _push_comment_to_monday(project, item_id, author, body):
+    """Push a dashboard comment to Monday.com as an update on the item."""
+    mtok = get_monday_token()
+    if not mtok:
+        return False
+    if project not in MONDAY_SYNC_PROJECTS:
+        return False
+
+    # Format: prefixed with author and source so it's clear on Monday.com
+    monday_body = f"Dashboard — {author}:\n{body}"
+
+    mutation = """mutation {{
+  create_update (item_id: {item_id}, body: {body}) {{
+    id
+  }}
+}}""".format(item_id=item_id, body=json.dumps(monday_body))
+
+    tmp = f"/tmp/mq_{uuid.uuid4().hex}.json"
+    try:
+        with open(tmp, "w") as f:
+            json.dump({"query": mutation}, f)
+        subprocess.check_output(
+            ["curl", "-s", "--connect-timeout", "10", "--max-time", "15",
+             "-X", "POST", "https://api.monday.com/v2",
+             "-H", f"Authorization: {mtok}",
+             "-H", "Content-Type: application/json",
+             "-d", f"@{tmp}"], timeout=20)
+        return True
+    except Exception:
+        return False
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 @app.route("/api/comments/<project>/<item_id>", methods=["GET"])
 @require_auth
@@ -482,7 +519,7 @@ def api_get_comments(project, item_id):
 @app.route("/api/comments/<project>/<item_id>", methods=["POST"])
 @require_auth
 def api_add_comment(project, item_id):
-    """Add a comment to an item."""
+    """Add a comment to an item. Syncs to Monday.com if applicable."""
     if project not in COMMENT_PROJECTS:
         return jsonify({"error": "Invalid project"}), 400
     data = request.get_json()
@@ -490,8 +527,18 @@ def api_add_comment(project, item_id):
     if not body:
         return jsonify({"error": "Comment body is required"}), 400
     author = request.current_user.get("username", "Unknown")
+
+    # Save locally first
     comment = _add_item_comment(project, item_id, author, body)
-    return jsonify({"success": True, "comment": comment}), 201
+
+    # Bidirectional sync: push to Monday.com
+    monday_ok = _push_comment_to_monday(project, item_id, author, body)
+
+    return jsonify({
+        "success": True,
+        "comment": comment,
+        "synced_to_monday": monday_ok,
+    }), 201
 
 @app.route("/api/comments/<project>/<item_id>/<comment_id>", methods=["DELETE"])
 @require_auth
@@ -879,6 +926,29 @@ def api_summary():
         s["str"]["departures"] = len(dp["result"])
     
     return jsonify(s)
+
+# ── Credentials Handoff ──
+CREDS_FILE = os.path.join(os.path.dirname(__file__), "credentials.json")
+
+@app.route("/api/credentials", methods=["GET", "POST"])
+@require_auth
+def api_credentials():
+    if request.method == "POST":
+        data = request.get_json()
+        if not data or "provider" not in data or "token" not in data:
+            return jsonify({"error": "Must include provider and token"}), 400
+        creds = {}
+        if os.path.exists(CREDS_FILE):
+            with open(CREDS_FILE) as f:
+                creds = json.load(f)
+        creds[data["provider"]] = {"token": data["token"], **data.get("meta", {})}
+        with open(CREDS_FILE, "w") as f:
+            json.dump(creds, f, indent=2)
+        return jsonify({"success": True, "provider": data["provider"]})
+    if os.path.exists(CREDS_FILE):
+        creds = json.load(open(CREDS_FILE))
+        return jsonify({"providers": list(creds.keys()), "count": len(creds)})
+    return jsonify({"providers": [], "count": 0})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5050, debug=False)
