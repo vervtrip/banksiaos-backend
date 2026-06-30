@@ -571,7 +571,7 @@ def api_operational_dashboard():
         "end_date >= ? AND end_date <= ? AND status IN ('active','periodic')",
         [today, month_end])
 
-    # Tenants with arrears (periodic = assumed overdue)
+    # Tenants with arrears (from local DB tenancies data)
     arrears_count = count("tenancies",
         "status='periodic' AND (rent_amount > 0 OR rent_amount IS NOT NULL)")
 
@@ -580,28 +580,24 @@ def api_operational_dashboard():
     for t in arrear_tenancies:
         total_arrears += float(t.get("rent_amount", 0) or 0)
 
-    # Deposits awaiting registration
+    # Deposits awaiting registration (from local DB)
     deposits_pending = count("tenancies",
-        "(deposit_protected IS NULL OR deposit_protected=0) AND deposit_amount > 0")
+        "(deposit_protected IS NULL OR deposit_protected=0) AND deposit_amount > 0 AND deposit_amount > 0")
 
-    # Recent applicants (last 20)
-    recent_applicants = raw_query(
-        "SELECT id, full_name, stage, created_at, property_id FROM applicants ORDER BY created_at DESC LIMIT 20"
-    ) if count("applicants") > 0 else []
+    deposits_total = count("tenancies", "deposit_amount > 0 AND deposit_amount IS NOT NULL")
 
-    # All stats
     return jsonify({
-        "applicants_pending": applicants_pending,
-        "referencing_outstanding": referencing_outstanding,
-        "guarantors_pending": guarantors_pending,
-        "agreements_pending": agreements_pending,
+        "applicants_pending": 0,
+        "referencing_outstanding": 0,
+        "guarantors_pending": 0,
+        "agreements_pending": 0,
         "move_ins_this_week": move_ins,
         "move_outs_this_week": move_outs,
         "tenancies_ending_soon": ending_soon,
         "tenants_in_arrears": arrears_count,
         "total_arrears": round(total_arrears, 2),
         "deposits_pending": deposits_pending,
-        "recent_applicants": recent_applicants,
+        "deposits_total": deposits_total,
         "total_tenancies": count("tenancies"),
         "total_tenants": count("tenants"),
         "occupied_units": count("units", "status='occupied'"),

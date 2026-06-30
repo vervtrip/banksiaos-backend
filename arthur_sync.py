@@ -148,7 +148,7 @@ def sync_units(prop_map):
         if not uid or pid not in prop_map:
             continue
         name = u.get("unit_ref", "") or u.get("unit_type", "") or f"Unit {uid}"
-        status = "occupied" if u.get("unit_vacant") == "0" else "vacant"
+        status = "occupied" if u.get("unit_vacant") is False else "vacant"
         existing = get_by_field("units", "arthur_id", uid)
         if existing:
             vid = existing[0]["id"]

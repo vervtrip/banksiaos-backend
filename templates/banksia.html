@@ -132,28 +132,44 @@ async function loadDashboard(el){
 el.innerHTML='<div class="ld"><div class="sp"></div> Loading...</div>';
 try{var d=await api('/api/banksia/dashboard');
 var h='<div class="sg">'+
-'<div class="sc"><div class="sv '+(d.applicants_pending>0?'o':'b')+'">'+(d.applicants_pending||0)+'</div><div class="sl">Applicants Pending</div></div>'+
-'<div class="sc"><div class="sv '+(d.referencing_outstanding>0?'b':'g')+'">'+(d.referencing_outstanding||0)+'</div><div class="sl">References Outstanding</div></div>'+
-'<div class="sc"><div class="sv '+(d.guarantors_pending>0?'y':'g')+'">'+(d.guarantors_pending||0)+'</div><div class="sl">Guarantors Awaiting</div></div>'+
-'<div class="sc"><div class="sv '+(d.agreements_pending>0?'b':'g')+'">'+(d.agreements_pending||0)+'</div><div class="sl">Agreements Pending</div></div>'+
-'<div class="sc"><div class="sv '+(d.move_ins_this_week>0?'g':'gr')+'">'+(d.move_ins_this_week||0)+'</div><div class="sl">Move-Ins This Week</div></div>'+
-'<div class="sc"><div class="sv '+(d.move_outs_this_week>0?'o':'gr')+'">'+(d.move_outs_this_week||0)+'</div><div class="sl">Move-Outs This Week</div></div>'+
+'<div class="sc" onclick="showDetail(\'vacant\')" style="cursor:pointer"><div class="sv '+(d.vacant_units>0?'o':'g')+'">'+(d.vacant_units||0)+'</div><div class="sl">Vacant Units ›</div></div>'+
+'<div class="sc" onclick="showDetail(\'arrears\')" style="cursor:pointer"><div class="sv r">'+(d.tenants_in_arrears||0)+'</div><div class="sl">Arrears (Tenants) ›</div></div>'+
+'<div class="sc"><div class="sv '+(d.deposits_pending>0?'r':'g')+'">'+(d.deposits_pending||0)+'/'+(d.deposits_total||0)+'</div><div class="sl">Deposits Unregistered</div></div>'+
+'<div class="sc" onclick="showDetail(\'moves\')" style="cursor:pointer"><div class="sv '+(d.move_ins_this_week>0?'g':'gr')+'">'+(d.move_ins_this_week||0)+'/'+(d.move_outs_this_week||0)+'</div><div class="sl">Move In/Out This Week ›</div></div>'+
 '<div class="sc"><div class="sv '+(d.tenancies_ending_soon>0?'r':'g')+'">'+(d.tenancies_ending_soon||0)+'</div><div class="sl">Ending in 30 Days</div></div>'+
-'<div class="sc"><div class="sv r">'+(d.tenants_in_arrears||0)+'</div><div class="sl">Arrears (Tenants)</div></div>'+
-'<div class="sc"><div class="sv '+(d.deposits_pending>0?'r':'g')+'">'+(d.deposits_pending||0)+'</div><div class="sl">Deposits Unregistered</div></div>'+
-'<div class="sc"><div class="sv '+(d.vacant_units>0?'o':'g')+'">'+(d.vacant_units||0)+'</div><div class="sl">Vacant Units</div></div>'+
+'<div class="sc"><div class="sv o">'+(d.total_tenancies||0)+'</div><div class="sl">Total Tenancies</div></div>'+
 '</div>'+
-'<div style="margin-top:12px" class="dc"><div class="dch"><h3>Portfolio Summary</h3></div>'+
+'<div style="margin-top:12px" class="dc"><div class="dch"><h3>Arrears</h3><span class="dvv">£'+(d.total_arrears||0).toLocaleString()+'</span></div>'+
+'<div class="dvv" style="color:'+(d.deposits_pending>0?'#DC2626':'#16A34A')+'">'+(d.deposits_pending>0?d.deposits_pending+' of '+d.deposits_total+' deposits not yet registered':'All deposits registered ✓')+'</div></div>'+
+'<div style="margin-top:12px" class="dc"><div class="dch"><h3>Portfolio</h3></div>'+
 '<div class="sg" style="grid-template-columns:repeat(4,1fr)">'+
-'<div class="sc"><div class="sv b">'+d.total_tenancies+'</div><div class="sl">Tenancies</div></div>'+
 '<div class="sc"><div class="sv b">'+d.total_tenants+'</div><div class="sl">Tenants</div></div>'+
 '<div class="sc"><div class="sv g">'+d.occupied_units+'</div><div class="sl">Occupied</div></div>'+
 '<div class="sc"><div class="sv o">'+d.vacant_units+'</div><div class="sl">Vacant</div></div>'+
-'</div></div>'+
-'<div style="margin-top:12px" class="dc"><div class="dch"><h3>Arrears</h3></div>'+
-'<div class="dvv">£'+(d.total_arrears||0).toLocaleString()+' total across '+d.tenants_in_arrears+' tenancies</div></div>';
-document.getElementById('bStats').textContent=d.total_tenancies+' tenancies · '+d.occupied_units+' occupied';
+'<div class="sc"><div class="sv b">'+d.total_tenancies+'</div><div class="sl">Tenancies</div></div>'+
+'</div></div><div id="dashDetail"></div>';
+document.getElementById('bStats').textContent=d.occupied_units+' occupied · '+d.vacant_units+' vacant';
 el.innerHTML=h;}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+
+async function showDetail(type){
+var el=document.getElementById('dashDetail');if(!el)return;
+el.innerHTML='<div class="ld"><div class="sp"></div> Loading...</div>';
+if(type==='vacant'){
+try{var d=await api('/api/banksia/dashboard/vacant-units');
+var h='<div class="dc"><div class="dch"><h3>Vacant Units ('+d.total+')</h3></div>';
+if(d.items.length){for(var i=0;i<d.items.length;i++){h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F1F5F9;font-size:12px"><span>'+d.items[i].name+' <span style="color:#64748B">@ '+d.items[i].property+'</span></span><span>'+(d.items[i].rent_amount?'£'+d.items[i].rent_amount:'')+'</span></div>';}}else h+='<div class="empty">No vacant units</div>';
+el.innerHTML=h+'</div>';}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+else if(type==='arrears'){
+try{var d=await api('/api/banksia/dashboard/tenants-in-arrears');
+var h='<div class="dc"><div class="dch"><h3>Tenants in Arrears ('+d.total+')</h3></div>';
+if(d.items.length){for(var i=0;i<d.items.length;i++){h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F1F5F9;font-size:12px"><span><strong>'+d.items[i].tenant+'</strong><br><span style="color:#64748B">'+d.items[i].unit+'</span></span><span style="color:#DC2626">£'+d.items[i].amount+'</span></div>';}}else h+='<div class="empty">No arrears</div>';
+el.innerHTML=h+'</div>';}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+else if(type==='moves'){
+try{var d=await api('/api/banksia/dashboard/moves-this-week');
+var h='<div class="dc"><div class="dch"><h3>Move-Ins ('+d.move_ins.length+') / Move-Outs ('+d.move_outs.length+')</h3></div>';
+if(d.move_ins.length||d.move_outs.length){h+='<div style="font-size:12px">';for(var i=0;i<d.move_ins.length;i++){h+='<div style="padding:4px 0;color:#16A34A">📥 '+d.move_ins[i].full_name+' → '+d.move_ins[i].unit_name+' ('+d.move_ins[i].move_in_date+')</div>';}for(var i=0;i<d.move_outs.length;i++){h+='<div style="padding:4px 0;color:#DC2626">📤 '+d.move_outs[i].full_name+' ← '+d.move_outs[i].unit_name+' ('+d.move_outs[i].move_out_date+')</div>';}h+='</div>';}else h+='<div class="empty">No moves this week</div>';
+el.innerHTML=h+'</div>';}catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}}
+}
 
 // ═══════════════════
 // PORTFOLIO — Tree
