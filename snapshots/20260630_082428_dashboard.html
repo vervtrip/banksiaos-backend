@@ -250,39 +250,6 @@ body{background:var(--app);color:var(--text);font-family:var(--body);-webkit-fon
 @supports(padding:max(0px)){
 .main{padding-bottom:max(40px,env(safe-area-inset-bottom))}
 }
-
-/* ===== PROPERTY CARDS (Drill-down) ===== */
-.prop-section{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
-.prop-section .ps-header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--line)}
-.prop-section .ps-header h2{font-family:var(--disp);font-size:16px;font-weight:700}
-.prop-section .ps-header span{font-size:12px;color:var(--muted);font-weight:600}
-.prop-filters{display:flex;gap:8px;padding:12px 22px;border-bottom:1px solid var(--line-2);flex-wrap:wrap}
-.prop-filters .filter-btn{padding:5px 14px;border-radius:20px;border:1px solid var(--line);font-size:12px;font-weight:600;cursor:pointer;background:var(--card);color:var(--muted);transition:.15s}
-.prop-filters .filter-btn.active{background:var(--dev-soft);color:var(--dev);border-color:var(--dev)}
-.prop-filters .filter-btn:hover{border-color:var(--dev)}
-.prop-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;padding:16px 22px}
-.prop-card{border:1px solid var(--line);border-radius:11px;overflow:hidden;cursor:pointer;transition:.15s}
-.prop-card:hover{border-color:var(--dev);box-shadow:0 2px 8px rgba(0,0,0,.06)}
-.prop-card .pc-head{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--card)}
-.prop-card .pc-icon{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;color:#fff;font-weight:700}
-.prop-card .pc-info{flex:1;min-width:0}
-.prop-card .pc-info .pc-name{font-size:13.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.prop-card .pc-info .pc-addr{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.prop-card .pc-meta{display:flex;align-items:center;gap:10px;margin-top:5px}
-.prop-card .pc-meta .pill{font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:20px;font-family:var(--mono)}
-.prop-card .pc-meta .count{font-size:11px;font-weight:700;color:var(--muted)}
-.prop-card .pc-chev{font-size:12px;color:var(--faint);transition:.2s;flex-shrink:0}
-.prop-card.open .pc-chev{transform:rotate(180deg)}
-.prop-card .pc-units{display:none;border-top:1px solid var(--line-2);background:#FAFBFD;padding:8px 16px 12px}
-.prop-card.open .pc-units{display:block}
-.prop-card .unit-row{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--line-2);font-size:12.5px}
-.prop-card .unit-row:last-child{border-bottom:none}
-.prop-card .unit-row .u-name{font-weight:600;flex:1}
-.prop-card .unit-row .u-badge{font-size:9.5px;font-weight:700;padding:1px 7px;border-radius:20px;font-family:var(--mono)}
-.prop-card .unit-row .u-id{font-size:10px;color:var(--faint);font-family:var(--mono);margin-left:8px}
-.prop-empty{padding:40px 22px;text-align:center;color:var(--faint);font-size:13px}
-@media(max-width:768px){.prop-grid{grid-template-columns:1fr}}
-
 </style>
 </head>
 <body>
@@ -323,8 +290,8 @@ body{background:var(--app);color:var(--text);font-family:var(--body);-webkit-fon
 </div>
 </div>
 <div class="user">
-<div class="ava" id="userAvatar">T</div>
-<div><div class="nm" id="userName">Tom</div><div class="rl" id="userRole">admin</div></div>
+<div class="ava" id="userAvatar">{{ user.username[0]|upper if user.username else 'U' }}</div>
+<div><div class="nm" id="userName">{{ user.username if user.username else 'User' }}</div><div class="rl" id="userRole">{{ user.role if user.role else 'admin' }}</div></div>
 </div>
 </aside>
 
@@ -353,7 +320,7 @@ body{background:var(--app);color:var(--text);font-family:var(--body);-webkit-fon
 </div>
 
 <script>
-var CUSER = 'Tom';
+var CUSER = '{{ user.username if user.username else "User" }}';
 
 // Sidebar
 function ts(){
@@ -387,7 +354,6 @@ document.querySelectorAll('.nav').forEach(function(n){
 if(n.textContent.trim().includes(t[p])) n.classList.add('active');
 });
 closeBoards();
-if(p==='dashboard'){renderMain();}
 if(p==='maintenance'){loadMaintenance();}
 if(p==='properties'){loadProperties();}
 if(p==='str'){loadSTR();}
@@ -666,91 +632,16 @@ if(n==='maintenance')loadMaintenance();
 }
 
 async function loadProperties(){
-await loadPropsPage('all');
+var el=document.getElementById('panel-properties');
 }
 async function loadSTR(){
-await loadPropsPage('STR');
+var el=document.getElementById('panel-str');
 }
 async function loadHMO(){
-await loadPropsPage('HMO');
+var el=document.getElementById('panel-hmo');
 }
-
-async function loadPropsPage(typeFilter){
-var mc=document.getElementById('mainContent');
-try{
-var d=await fetch('/api/properties');
-var data=await d.json();
-var props=data.properties||[];
-var totalUnits=props.reduce(function(s,p){return s+(p.units?p.units.length:0);},0);
-var filtered = typeFilter==='all'?props:props.filter(function(p){return p.type===typeFilter;});
-var strCount=props.filter(function(p){return p.type==='STR';}).length;
-var hmoCount=props.filter(function(p){return p.type==='HMO';}).length;
-var h='<div class="prop-section">'+
-'<div class="ps-header"><h2>'+typeFilter.charAt(0).toUpperCase()+typeFilter.slice(1)+' Properties</h2><span>'+filtered.length+' grouped · '+totalUnits+' units</span></div>'+
-'<div class="prop-filters" id="pfFilters">'+
-'<span class="filter-btn'+(typeFilter==='all'?' active':'')+'" onclick="sp('properties')">All ('+props.length+')</span>'+
-'<span class="filter-btn'+(typeFilter==='STR'?' active':'')+'" onclick="sp('str')">Short Stay ('+strCount+')</span>'+
-'<span class="filter-btn'+(typeFilter==='HMO'?' active':'')+'" onclick="sp('hmo')">HMO ('+hmoCount+')</span>'+
-'</div>';
-if(filtered.length===0){
-h+='<div class="prop-empty">No properties found</div>';
-}else{
-h+='<div class="prop-grid">';
-for(var i=0;i<filtered.length;i++){
-var p=filtered[i];
-var icon=p.type==='STR'?'🛏':'🏢';
-var bg=p.type==='STR'?'var(--ok)':'var(--warn)';
-var units=p.units||[];
-var unitText=units.length+' unit'+(units.length!==1?'s':'');
-h+='<div class="prop-card" onclick="togglePropUnits(this)">'+
-'<div class="pc-head">'+
-'<div class="pc-icon" style="background:'+bg+'">'+icon+'</div>'+
-'<div class="pc-info"><div class="pc-name">'+esc(p.name||'Untitled')+'</div><div class="pc-addr">'+esc(p.address||'No address')+'</div>'+
-'<div class="pc-meta"><span class="pill" style="background:'+bg+'20;color:'+bg+'">'+p.type+'</span><span class="count">'+unitText+'</span>'+
-(p.brand?'<span style="font-size:10px;color:var(--faint);font-family:var(--mono)">'+p.brand+'</span>':'')+
-'</div></div><div class="pc-chev">▾</div></div>'+
-'<div class="pc-units">';
-for(var j=0;j<units.length;j++){
-var u=units[j];
-var uStatus=u.status||'active';
-var statusColor=uStatus==='active'?'var(--ok)':'var(--bad)';
-h+='<div class="unit-row"><span class="u-name">'+esc(u.name||'Unit')+'</span>'+
-'<span class="u-badge" style="background:'+statusColor+'15;color:'+statusColor+'">'+uStatus+'</span>'+
-'<span class="u-id">#'+(u.listing_id||u.id||'—')+'</span></div>';
-}
-h+='</div></div>';
-} // end for
-h+='</div>';
-} // end else
-h+='</div>';
-mc.innerHTML = h;
-}catch(e){
-mc.innerHTML = '<div class="err">Failed to load properties: '+e.message+'</div>';
-}
-}
-
-function esc(s){
-if(!s) return '';
-return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;');
-}
-
-function togglePropUnits(el){
-if(el.classList) el.classList.toggle('open');
-else{
-var card=el.currentTarget?el.currentTarget.closest('.prop-card'):null;
-if(card) card.classList.toggle('open');
-}
-}
-
 async function loadMaintenance(){
-var mc=document.getElementById('mainContent');
-try{
-var d=await fetch('/api/maintenance');
-var data=await d.json();
-mc.innerHTML = '<div class="prop-section"><div class="ps-header"><h2>Maintenance</h2><span>'+(data.count||'—')+' items</span></div><div class="prop-empty">Maintenance view coming soon</div></div>';
-}catch(e){
-mc.innerHTML = '<div class="err">Failed to load maintenance</div>';
-}
+var el=document.getElementById('panel-maintenance');
 }
 </script>
 </body>
