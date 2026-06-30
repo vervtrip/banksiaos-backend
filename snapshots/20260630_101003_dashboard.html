@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>VERV Operations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:'Inter',-apple-system,sans-serif;background:#0F172A;color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
+/* ── Auth BG ── */
+.auth-bg{position:fixed;top:0;left:0;right:0;bottom:0;z-index:0;overflow:hidden}
+.auth-bg .gradient{position:absolute;width:600px;height:600px;border-radius:50%;filter:blur(120px);opacity:.15}
+.auth-bg .g1{top:-200px;right:-100px;background:#3B82F6}
+.auth-bg .g2{bottom:-200px;left:-100px;background:#8B5CF6}
+.auth-bg .g3{top:50%;left:50%;transform:translate(-50%,-50%);background:#6366F1;width:800px;height:800px}
+.auth-container{position:relative;z-index:1;width:100%;max-width:420px;padding:20px}
+.auth-card{background:linear-gradient(135deg,rgba(255,255,255,.08),rgba(255,255,255,.02));backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:40px;box-shadow:0 25px 50px rgba(0,0,0,.3)}
+.auth-logo{text-align:center;margin-bottom:32px}
+.auth-logo .logo{font-size:28px;font-weight:900;letter-spacing:-1px}
+.auth-logo .logo span{color:#60A5FA}
+.auth-logo .tagline{font-size:13px;color:#64748B;text-transform:uppercase;letter-spacing:3px;margin-top:6px}
+.auth-logo h2{font-size:20px;font-weight:700;color:#E2E8F0;margin-top:24px}
+.auth-logo p{font-size:14px;color:#64748B;margin-top:4px}
+.form-group{margin-bottom:20px}
+.form-group label{display:block;font-size:13px;font-weight:600;color:#94A3B8;margin-bottom:6px}
+.form-group .input-wrap{position:relative}
+.form-group input{width:100%;padding:12px 16px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px;font-size:15px;font-family:'Inter',sans-serif;color:#E2E8F0;outline:none;transition:all .2s}
+.form-group input:focus{border-color:#3B82F6;box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+.form-group input::placeholder{color:#475569}
+.btn-login{width:100%;padding:12px;background:#3B82F6;border:none;border-radius:10px;font-size:15px;font-weight:600;color:#fff;font-family:'Inter',sans-serif;cursor:pointer;transition:all .2s;margin-top:8px}
+.btn-login:hover{background:#2563EB;transform:translateY(-1px)}
+.btn-login:active{transform:translateY(0)}
+.btn-login:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.auth-error{padding:10px 14px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);border-radius:10px;color:#FCA5A5;font-size:13px;margin-bottom:16px;display:none}
+.auth-error.show{display:block}
+.auth-footer{text-align:center;margin-top:24px;font-size:13px;color:#475569}
+.auth-footer .brand{color:#60A5FA;font-weight:600}
+.loading-spinner{display:inline-block;width:18px;height:18px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+#dashboardApp{display:none}
+
+/* ── Dashboard Styles ── */
+:root{
+--ink:#0B1B2D;--ink-2:#13283F;--app:#F6F8FB;--card:#FFFFFF;--line:#E7ECF3;--line-2:#EEF2F7;
+--text:#1B2A3D;--muted:#69788C;--faint:#97A4B5;
+--dev:#2563EB;--dev-soft:#EAF0FE;--mkt:#7C3AED;--mkt-soft:#F2ECFE;
+--ok:#16A34A;--ok-soft:#E7F6EC;--warn:#D97706;--warn-soft:#FBEFDD;
+--bad:#DC2626;--bad-soft:#FBE9E9;--grey:#64748B;--grey-soft:#EEF1F5;
+--radius:14px;--shadow:0 1px 2px rgba(16,30,54,.04),0 6px 20px rgba(16,30,54,.05);
+--mono:'JetBrains Mono',ui-monospace,monospace;
+--disp:'Plus Jakarta Sans',system-ui,sans-serif;
+--body:'Inter',system-ui,sans-serif;
+}
+body.dash-body{background:var(--app);color:var(--text);font-family:var(--body);-webkit-font-smoothing:antialiased;line-height:1.45}
+.app{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
+.side{background:var(--ink);color:#fff;padding:22px 16px;display:flex;flex-direction:column;gap:6px;position:fixed;top:0;left:0;bottom:0;width:248px;z-index:100;overflow-y:auto;-webkit-overflow-scrolling:touch;transform:translateX(0);transition:transform .25s ease}
+.brand{display:flex;align-items:baseline;gap:2px;padding:6px 8px 18px;letter-spacing:-.5px}
+.brand .nm{font-family:var(--disp);font-weight:800;font-size:22px}
+.brand .dot{color:var(--dev);font-size:22px;font-weight:800}
+.brand .sub{color:#6E8199;font-size:10px;letter-spacing:3px;font-weight:600}
+.navlabel{color:#62788F;font-size:10.5px;font-weight:700;letter-spacing:1.4px;padding:14px 8px 6px}
+.nav{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:9px;color:#C3D0E0;font-size:13.5px;font-weight:500;cursor:pointer;min-height:38px;transition:all .12s}
+.nav:hover{background:rgba(255,255,255,.05);color:#fff}
+.nav.active{background:var(--dev);color:#fff;font-weight:600}
+.nav .ic{width:18px;text-align:center;font-size:15px;flex-shrink:0}
+.nav .bd{margin-left:auto;background:rgba(255,255,255,.12);font-size:10px;padding:1px 7px;border-radius:8px;font-weight:600;color:#fff;min-width:18px;text-align:center}
+.nav-sub{padding-left:8px}
+.side-user{margin-top:auto;padding:10px 8px;border-top:1px solid rgba(255,255,255,.06)}
+.side-user .su-inner{display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,.04)}
+.side-user .av{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--dev),#8B5CF6);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#fff;flex-shrink:0}
+.side-user .info{flex:1;min-width:0}
+.side-user .info .n{font-size:13px;font-weight:600;color:#E2E8F0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.side-user .info .r{font-size:10.5px;color:#6E8199}
+.side-user .lo{width:30px;height:30px;border-radius:8px;border:none;background:rgba(255,255,255,.06);color:#94A3B8;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;transition:all .12s;flex-shrink:0;text-decoration:none}
+.side-user .lo:hover{background:rgba(239,68,68,.2);color:#FCA5A5}
+.main{padding:26px 30px 60px;max-width:1500px;margin-left:248px;min-height:100vh;width:calc(100% - 248px)}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:8px}
+.top h1{font-family:var(--disp);font-size:20px;font-weight:700;color:var(--ink)}
+.top .ts{font-size:12px;color:var(--faint);font-weight:500}
+.sechead{display:flex;align-items:center;gap:10px;padding:18px 0 12px;border-bottom:1px solid var(--line-2);margin-bottom:16px}
+.sechead .bolt{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--dev-soft);color:var(--dev)}
+.sechead.mkt .bolt{background:var(--mkt-soft);color:var(--mkt)}
+.sechead h2{font-family:var(--disp);font-size:16px;font-weight:700;color:var(--ink)}
+.sechead .hint{color:var(--faint);font-size:12px;margin-left:auto;font-weight:500}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
+.pcard{background:var(--card);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);border:1px solid var(--line-2)}
+.pcard .ph{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.pcard .ph h3{font-size:15px;font-weight:700;color:var(--ink)}
+.badge{display:inline-flex;padding:2px 8px;border-radius:5px;font-size:10px;font-weight:600;gap:3px}
+.b-dev{background:var(--dev-soft);color:var(--dev)}
+.b-live{background:var(--ok-soft);color:var(--ok)}
+.b-on{background:var(--warn-soft);color:var(--warn)}
+.b-new{background:var(--mkt-soft);color:var(--mkt)}
+.chiprow{display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap}
+.chip{padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;background:#F1F5F9;color:#64748B}
+.prog{padding:6px 0}
+.pr-top{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:4px}
+.pr-top b{color:var(--ink)}
+.bar{height:5px;background:var(--line);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:3px;transition:width .4s}
+.pri-lab{font-size:10px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.7px;margin:8px 0 4px}
+.pri{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--line-2);font-size:12px}
+.pri:last-child{border-bottom:none}
+.pri .t{color:var(--text);flex:1;padding-right:8px}
+.st{font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;white-space:nowrap}
+.st.prog{background:var(--warn-soft);color:var(--warn)}
+.st.block{background:var(--bad-soft);color:var(--bad)}
+.st.fix{background:var(--ok-soft);color:var(--ok)}
+.st.todo{background:#F1F5F9;color:#64748B}
+.foot{font-size:10.5px;color:var(--muted);padding-top:8px;margin-top:4px;border-top:1px solid var(--line-2)}
+.foot b{color:var(--text)}
+.devtag{display:inline-block;padding:1px 5px;border-radius:3px;background:#F1F5F9;font-size:9px;font-weight:600;color:#64748B;margin-right:2px}
+.devtag .nw{color:var(--dev);font-weight:700}
+.kpi-grid{margin-bottom:20px}
+.ops{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
+.op{flex:1;min-width:120px;background:var(--card);border-radius:10px;padding:14px 16px;box-shadow:var(--shadow);border:1px solid var(--line-2);text-align:center}
+.op .oi{font-size:20px;margin-bottom:4px}
+.op .ov{font-size:22px;font-weight:800;color:var(--ink);font-family:var(--mono)}
+.op .ol{font-size:11px;color:var(--muted);margin-top:2px}
+.mgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
+.mcard{background:var(--card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);border:1px solid var(--line-2)}
+.mh{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:13px;font-weight:600;color:var(--ink)}
+.mh .led{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.mh .src{font-size:9px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.5px;margin-left:auto}
+.mcard .kpi .big{font-size:24px;font-weight:800;color:var(--ink);font-family:var(--mono)}
+.mcard .kpi .delta{font-size:12px;font-weight:600;margin-left:6px}
+.mcard .kpi .delta.up{color:var(--ok)}
+.mcard .kpi .delta.down{color:var(--bad)}
+.kpi-lab{font-size:11px;color:var(--muted);margin-bottom:10px}
+.spark{display:flex;gap:3px;align-items:flex-end;height:36px;margin-bottom:10px}
+.spark i{flex:1;border-radius:2px;min-height:4px;background:var(--dev-soft)}
+.spark i.hi{background:var(--dev)}
+.srow{display:flex;align-items:center;gap:6px;font-size:11px;margin-bottom:4px}
+.srow .nm{width:48px;color:var(--muted);font-weight:500;flex-shrink:0}
+.srow .tr{flex:1;height:4px;background:var(--line);border-radius:2px;overflow:hidden}
+.srow .tr i{display:block;height:100%;border-radius:2px;background:var(--dev-soft)}
+.srow .vv{font-weight:600;font-family:var(--mono);color:var(--text);width:28px;text-align:right;font-size:10px}
+.soc{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+.scell{display:flex;align-items:center;gap:6px;font-size:11px;padding:5px;background:#F8FAFC;border-radius:6px}
+.scell .pl{display:flex;align-items:center;gap:4px;flex:1}
+.scell .pl .d{width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;font-weight:700}
+.scell .fol{font-weight:600;color:var(--text)}
+.scell .lk{font-size:9px;color:var(--faint)}
+.mline{height:1px;background:var(--line);margin:8px 0}
+.sync-ts{font-size:9px;color:var(--faint);margin-top:8px;text-align:right}
+.empty-state{text-align:center;padding:16px;color:var(--faint);font-size:12px}
+.intgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
+.int{display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--card);border-radius:8px;border:1px solid var(--line-2);box-shadow:var(--shadow)}
+.int .lo{width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0}
+.int .nm{flex:1;min-width:0}
+.int .nm b{font-size:12px;color:var(--ink)}
+.int .nm span{font-size:10px;color:var(--muted);display:block}
+.int .stx{font-size:10px;font-weight:600;display:flex;align-items:center;gap:4px}
+.int .stx .d{width:6px;height:6px;border-radius:50%}
+.int .sync{font-size:9px;color:var(--faint);flex-shrink:0}
+.frame{display:none;margin:16px 0}
+.frame.show{display:block}
+.fcap{display:flex;align-items:baseline;gap:8px;padding:6px 0;font-size:13px;margin-bottom:10px}
+.fcap .tagd{font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;text-transform:uppercase}
+.fcap .tagd.dev{background:var(--dev-soft);color:var(--dev)}
+.fcap .tagd.mkt{background:var(--mkt-soft);color:var(--mkt)}
+.fcap b{color:var(--ink)}
+.fcap span{font-size:12px;color:var(--muted)}
+.metarow{display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.meta{padding:10px 14px;background:var(--card);border-radius:8px;border:1px solid var(--line-2);text-align:center;flex:1;min-width:80px}
+.meta .v{font-size:18px;font-weight:800;font-family:var(--mono);color:var(--ink)}
+.meta .k{font-size:10px;color:var(--muted);margin-top:2px}
+.kanban{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.col{background:var(--card);border-radius:8px;border:1px solid var(--line-2);padding:10px;min-height:80px}
+.col .ch{font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:4px}
+.col .ch .n{background:var(--line);padding:0 6px;border-radius:6px;font-size:10px;color:var(--faint)}
+.ktask{padding:7px 8px;background:#F8FAFC;border-radius:6px;margin-bottom:4px;font-size:11px;border:1px solid var(--line-2);cursor:default}
+.ktask.hi{border-left:2px solid var(--dev)}
+.ktask .who{display:flex;align-items:center;gap:4px;margin-top:4px;font-size:10px;color:var(--muted)}
+.ktask .who .av{width:16px;height:16px;border-radius:50%;background:var(--line);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:var(--muted)}
+.mkcols{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mkcols .panel{background:var(--card);border-radius:8px;border:1px solid var(--line-2);padding:12px}
+.mkcols .panel .pt{display:flex;justify-content:space-between;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px}
+.mkcols .panel .pt span:last-child{font-size:9px;color:var(--faint);text-transform:uppercase}
+</style>
+</head>
+<body>
+
+<!-- ═══ LOGIN PAGE ═══ -->
+<div class="auth-bg">
+<div class="gradient g1"></div>
+<div class="gradient g2"></div>
+<div class="gradient g3"></div>
+</div>
+
+<div class="auth-container" id="loginPage">
+<div class="auth-card">
+<div class="auth-logo">
+<div class="logo">VERV<span>.</span></div>
+<div class="tagline">Operations</div>
+<h2>Welcome Back</h2>
+<p>Sign in to your dashboard</p>
+</div>
+<div class="auth-error" id="authError">Invalid credentials. Please try again.</div>
+<form id="loginForm" autocomplete="on">
+<div class="form-group">
+<label for="username">Username</label>
+<div class="input-wrap">
+<input type="text" id="username" placeholder="Enter your username" autocomplete="username" required autofocus>
+</div>
+</div>
+<div class="form-group">
+<label for="password">Password</label>
+<div class="input-wrap">
+<input type="password" id="password" placeholder="Enter your password" autocomplete="current-password" required>
+</div>
+</div>
+<button type="submit" class="btn-login" id="loginBtn">Sign In</button>
+</form>
+<div class="auth-footer">
+<span>VERV Operations — <span class="brand">v2.0</span></span>
+</div>
+</div>
+</div>
+
+<!-- ═══ DASHBOARD ═══ -->
+<div id="dashboardApp">
+<div class="app">
+<div class="side">
+<div class="brand"><span class="nm">VERV</span><span class="dot">.</span><span class="sub" style="margin-left:auto">OPS</span></div>
+<div class="navlabel">OVERVIEW</div>
+<div class="nav active" onclick="sp('dashboard')"><span class="ic">◉</span><span>Dashboard</span></div>
+<div class="navlabel">PROPERTIES</div>
+<div class="nav" onclick="sp('properties')"><span class="ic">🏠</span><span>All Properties</span><span class="bd" id="pCountSide">—</span></div>
+<div class="nav nav-sub" onclick="sp('str')"><span class="ic">🏨</span><span>Short Stay</span></div>
+<div class="nav nav-sub" onclick="sp('hmo')"><span class="ic">🏢</span><span>HMO</span></div>
+<div class="navlabel">OPERATIONS</div>
+<div class="nav" onclick="sp('maintenance')"><span class="ic">🔧</span><span>Maintenance</span><span class="bd" id="mCountSide">—</span></div>
+<div class="navlabel">DEVELOPMENT</div>
+<div class="nav" onclick="document.getElementById('devGrid').scrollIntoView({behavior:'smooth'})"><span class="ic">⚡</span><span>Projects</span></div>
+<div class="side-user">
+<div class="su-inner">
+<div class="av" id="userAvatar">T</div>
+<div class="info"><div class="n" id="userName">Loading...</div><div class="r" id="userRole">loading</div></div>
+<a href="#" class="lo" onclick="logout();return false" title="Sign out">✕</a>
+</div>
+</div>
+</div>
+
+<div class="main">
+<div class="top">
+<h1 id="pageTitle">Dashboard</h1>
+<span class="ts" id="lastUpdated">—</span>
+</div>
+<div id="mainContent"></div>
+</div>
+</div>
+</div>
+
+<script>
+// ── Auth Module (Flask session-based) ──
+const STORED_USER = 'verv_user';
+let username = sessionStorage.getItem(STORED_USER) || '';
+
+// Check if already logged in via cookie
+async function checkSession() {
+try {
+const r = await fetch('/dashboard');
+if(r.ok) {
+const html = await r.text();
+// Extract username from the HTML - the server includes our session info
+if(username) {
+showDashboard(username);
+return;
+}
+// Fallback: try to get from API
+const user = await fetch('/api/auth/user');
+if(user.ok) {
+const data = await user.json();
+username = data.username || username || 'User';
+showDashboard(username);
+return;
+}
+}
+} catch(e) {}
+// Not logged in - show login page
+document.getElementById('loginPage').style.display = '';
+}
+
+// Login form handler
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+e.preventDefault();
+const u = document.getElementById('username').value.trim();
+const p = document.getElementById('password').value;
+const btn = document.getElementById('loginBtn');
+const err = document.getElementById('authError');
+
+err.classList.remove('show');
+btn.disabled = true;
+btn.innerHTML = '<span class="loading-spinner"></span> Signing in...';
+
+try {
+const r = await fetch('/api/auth/login', {
+method: 'POST',
+headers: {'Content-Type': 'application/json'},
+body: JSON.stringify({username: u, password: p})
+});
+
+if(r.ok) {
+const data = await r.json();
+username = data.user?.username || u;
+sessionStorage.setItem(STORED_USER, username);
+showDashboard(username);
+} else {
+err.textContent = 'Invalid username or password. Please try again.';
+err.classList.add('show');
+btn.disabled = false;
+btn.textContent = 'Sign In';
+}
+} catch(e) {
+err.textContent = 'Connection error. Check your network.';
+err.classList.add('show');
+btn.disabled = false;
+btn.textContent = 'Sign In';
+}
+});
+
+function logout() {
+username = '';
+sessionStorage.removeItem(STORED_USER);
+fetch('/api/auth/logout').catch(()=>{});
+document.getElementById('dashboardApp').style.display = 'none';
+document.body.classList.remove('dash-body');
+document.getElementById('loginPage').style.display = '';
+document.getElementById('username').value = '';
+document.getElementById('password').value = '';
+const btn = document.getElementById('loginBtn');
+btn.disabled = false;
+btn.textContent = 'Sign In';
+}
+
+function showDashboard(user) {
+document.getElementById('loginPage').style.display = 'none';
+document.getElementById('dashboardApp').style.display = 'block';
+document.body.classList.add('dash-body');
+document.getElementById('userName').textContent = user || 'User';
+document.getElementById('userAvatar').textContent = (user || 'U').charAt(0).toUpperCase();
+document.getElementById('userRole').textContent = 'admin';
+
+const d = new Date();
+const opts = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+document.getElementById('lastUpdated').textContent = d.toLocaleDateString('en-GB', opts);
+
+loadDashboard();
+loadKPIs();
+}
+
+// ── Navigation ──
+function sp(page) {
+document.querySelectorAll('.nav').forEach(n => n.classList.remove('active'));
+const titles = {dashboard:'Dashboard',properties:'All Properties',str:'Short Stay',hmo:'HMO',maintenance:'Maintenance'};
+document.getElementById('pageTitle').textContent = titles[page] || 'Dashboard';
+document.querySelectorAll('.nav').forEach(n => {
+if(n.textContent.trim().includes(titles[page])) n.classList.add('active');
+});
+if(page === 'dashboard') loadDashboard();
+if(page === 'properties') loadPropertiesPage('all');
+if(page === 'str') loadPropertiesPage('STR');
+if(page === 'hmo') loadPropertiesPage('HMO');
+if(page === 'maintenance') loadMaintenance();
+}
+
+async function api(path) {
+const r = await fetch(path);
+if(!r.ok) throw new Error('HTTP '+r.status);
+return r.json();
+}
+
+// ── Dashboard View ──
+async function loadDashboard() {
+const mc = document.getElementById('mainContent');
+mc.innerHTML = `
+<div class="kpi-grid">
+<div class="ops">
+<div class="op"><div class="oi">🏨</div><div class="ov" id="kpiStr">—</div><div class="ol">STR Properties</div></div>
+<div class="op"><div class="oi">🏢</div><div class="ov" id="kpiHmo">—</div><div class="ol">HMO Properties</div></div>
+<div class="op"><div class="oi">📅</div><div class="ov" id="kpiBook">—</div><div class="ol">Today's Activity</div></div>
+<div class="op"><div class="oi">🔧</div><div class="ov" id="kpiMaint">—</div><div class="ol">Maintenance Jobs</div></div>
+</div>
+</div>
+<div class="sechead dev"><div class="bolt">⚡</div><h2>Development Projects</h2><span class="hint">Last commit · GitHub</span></div>
+<div class="grid4" id="devGrid">
+<div class="pcard"><div class="ph"><h3>Verv.co.uk</h3><span class="badge b-dev">In Development</span></div>
+<div class="chiprow"><span class="chip">Backend: Microservices</span></div>
+<div class="prog"><div class="pr-top"><span>6 active services</span><b>55%</b></div><div class="bar"><i style="width:55%;background:var(--dev)"></i></div></div>
+<div class="pri-lab">High-priority</div>
+<div class="pri"><span class="t">Payment Service</span><span class="st prog">In Progress</span></div>
+<div class="pri"><span class="t">Media Service — S3 config</span><span class="st block">Blocked</span></div>
+<div class="pri"><span class="t">Orchestration Service</span><span class="st prog">In Progress</span></div>
+<div class="foot"><span class="devtag">Faisal · BE</span><span class="devtag">Sabbir · FE</span><span class="devtag">Rahat · Dev <span class="nw">NEW</span></span><br>Last commit: <b>25 Jun</b></div></div>
+<div class="pcard"><div class="ph"><h3>VervTrip</h3><span class="badge b-live">Live</span></div>
+<div class="chiprow"><span class="chip">Production</span></div>
+<div class="prog"><div class="pr-top"><span>Active development</span><b>70%</b></div><div class="bar"><i style="width:70%;background:var(--ok)"></i></div></div>
+<div class="pri-lab">High-priority</div>
+<div class="pri"><span class="t">Reserve Now, Pay Later</span><span class="st prog">In Progress</span></div>
+<div class="pri"><span class="t">Booking Cancellation</span><span class="st fix">Fixed</span></div>
+<div class="pri"><span class="t">Discount Caps</span><span class="st fix">Fixed</span></div>
+<div class="foot"><span class="devtag">Mithu</span><span class="devtag">Adnan</span><br>Last commit: <b>25 Jun</b></div></div>
+<div class="pcard"><div class="ph"><h3>Innovate Rank</h3><span class="badge b-on">Ongoing</span></div>
+<div class="chiprow"><span class="chip">SEO &amp; Optimisation</span></div>
+<div class="prog"><div class="pr-top"><span>Client: Al Isharah</span><b>45%</b></div><div class="bar"><i style="width:45%;background:var(--warn)"></i></div></div>
+<div class="pri-lab">High-priority</div>
+<div class="pri"><span class="t">Accessibility — Deaf-friendly app</span><span class="st prog">In Progress</span></div>
+<div class="pri"><span class="t">Website Optimisation</span><span class="st prog">In Progress</span></div>
+<div class="pri"><span class="t">Case Studies</span><span class="st todo">Pending</span></div>
+<div class="foot"><span class="devtag">Forhad · Marketing</span><span class="devtag">Tarikul · Design</span><br>Live at <b>innovaterank.co.uk</b></div></div>
+<div class="pcard"><div class="ph"><h3>Verv.bd</h3><span class="badge b-new">New</span></div>
+<div class="chiprow"><span class="chip">Payments · SSLCommerz</span></div>
+<div class="prog"><div class="pr-top"><span>Setup &amp; integration</span><b>10%</b></div><div class="bar"><i style="width:10%;background:var(--mkt)"></i></div></div>
+<div class="pri-lab">High-priority</div>
+<div class="pri"><span class="t">SSLCommerz registration</span><span class="st prog">In Progress</span></div>
+<div class="pri"><span class="t">Entity KYC / compliance</span><span class="st todo">To do</span></div>
+<div class="pri"><span class="t">BDT payment flow spec</span><span class="st todo">To do</span></div>
+<div class="foot"><span class="devtag">Faisal · BE</span><span class="devtag">Sabbir · FE</span><br>Site <b>pre-launch</b></div></div>
+</div>
+<div class="sechead dev"><div class="bolt" style="background:var(--grey-soft);color:var(--grey)">🔌</div><h2>System Integrations</h2></div>
+<div class="intgrid">
+<div class="int"><div class="lo" style="background:#3B82F6">H</div><div class="nm"><b>Hostaway</b><span>STR listings</span></div><div class="stx" style="color:var(--ok)"><span class="d" style="background:var(--ok)"></span>Connected</div></div>
+<div class="int"><div class="lo" style="background:#10B981">A</div><div class="nm"><b>Arthur</b><span>HMO tenants</span></div><div class="stx" style="color:var(--warn)"><span class="d" style="background:var(--warn)"></span>Syncing</div></div>
+<div class="int"><div class="lo" style="background:#F59E0B">M</div><div class="nm"><b>Missive</b><span>Team comms</span></div><div class="stx" style="color:var(--ok)"><span class="d" style="background:var(--ok)"></span>Connected</div></div>
+<div class="int"><div class="lo" style="background:#7C3AED">◆</div><div class="nm"><b>Monday.com</b><span>Project boards</span></div><div class="stx" style="color:var(--ok)"><span class="d" style="background:var(--ok)"></span>Connected</div></div>
+<div class="int"><div class="lo" style="background:#0F172A">▦</div><div class="nm"><b>GitHub</b><span>Commits, PRs</span></div><div class="stx" style="color:var(--ok)"><span class="d" style="background:var(--ok)"></span>Connected</div></div>
+</div>`;
+loadKPIs();
+}
+
+// ── KPI Data ──
+async function loadKPIs() {
+try {
+const props = await api('/api/properties');
+const maint = await api('/api/maintenance');
+const strC = props.properties.filter(p=>p.type==='STR').length;
+const hmoC = props.properties.filter(p=>p.type==='HMO').length;
+const tot = props.total || props.properties.length;
+document.getElementById('kpiStr').textContent = strC;
+document.getElementById('kpiHmo').textContent = hmoC;
+document.getElementById('kpiMaint').textContent = maint.count;
+document.getElementById('mCountSide').textContent = maint.count;
+document.getElementById('pCountSide').textContent = tot;
+document.getElementById('kpiBook').textContent = 'Live';
+} catch(e) { console.error(e); }
+}
+
+// ── Property Pages ──
+async function loadPropertiesPage(typeFilter) {
+const mc = document.getElementById('mainContent');
+try {
+const d = await api('/api/properties');
+const props = d.properties || [];
+const filtered = typeFilter === 'all' ? props : props.filter(p => p.type === typeFilter);
+const strCount = props.filter(p => p.type === 'STR').length;
+const hmoCount = props.filter(p => p.type === 'HMO').length;
+const totalUnits = props.reduce((s,p) => s + (p.units ? p.units.length : 0), 0);
+
+let h = `<div style="margin-bottom:16px">
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+<span class="nav${typeFilter==='all'?' active':''}" onclick="sp('properties')" style="display:inline-flex;width:auto;font-size:12px">All (${props.length})</span>
+<span class="nav${typeFilter==='STR'?' active':''}" onclick="sp('str')" style="display:inline-flex;width:auto;font-size:12px">Short Stay (${strCount})</span>
+<span class="nav${typeFilter==='HMO'?' active':''}" onclick="sp('hmo')" style="display:inline-flex;width:auto;font-size:12px">HMO (${hmoCount})</span>
+</div>
+<div style="font-size:12px;color:var(--muted)">${filtered.length} grouped · ${totalUnits} units</div>
+</div>`;
+
+if(filtered.length === 0) {
+h += '<div style="text-align:center;padding:40px;color:var(--faint)">No properties found</div>';
+} else {
+h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px">';
+for(const p of filtered) {
+const icon = p.type === 'STR' ? '🛏' : '🏢';
+const bg = p.type === 'STR' ? 'var(--ok)' : 'var(--warn)';
+const units = p.units || [];
+h += `<div style="background:var(--card);border-radius:10px;border:1px solid var(--line-2);padding:14px;box-shadow:var(--shadow)">
+<div style="display:flex;gap:10px;align-items:flex-start">
+<div style="width:30px;height:30px;border-radius:8px;background:${bg};display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">${icon}</div>
+<div style="flex:1;min-width:0">
+<div style="font-size:13px;font-weight:600;color:var(--ink)">${p.name||'Untitled'}</div>
+<div style="font-size:11px;color:var(--muted)">${p.address||'No address'}</div>
+<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+<span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;background:${bg}20;color:${bg}">${p.type}</span>
+<span style="font-size:10px;color:var(--faint)">${units.length} unit${units.length!==1?'s':''}</span>
+${p.brand ? `<span style="font-size:9px;color:var(--faint)">${p.brand}</span>` : ''}
+</div>
+</div>
+</div>`;
+if(units.length > 0) {
+h += '<div style="margin-top:8px;border-top:1px solid var(--line-2);padding-top:6px">';
+for(const u of units.slice(0,3)) {
+h += `<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0">
+<span style="color:var(--muted)">${u.name||'Unit'}</span>
+<span style="color:var(--text)">#${u.listing_id||u.id||'—'}</span>
+</div>`;
+}
+if(units.length > 3) {
+h += `<div style="font-size:10px;color:var(--faint);text-align:center;padding:2px 0">+${units.length-3} more</div>`;
+}
+h += '</div>';
+}
+h += '</div>';
+}
+h += '</div>';
+}
+mc.innerHTML = h;
+} catch(e) {
+mc.innerHTML = `<div style="padding:20px;color:var(--bad);background:var(--bad-soft);border-radius:10px">Error: ${e.message}</div>`;
+}
+}
+
+// ── Maintenance Page ──
+async function loadMaintenance() {
+const mc = document.getElementById('mainContent');
+try {
+const d = await api('/api/maintenance');
+const items = d.maintenance || [];
+let h = `<div style="margin-bottom:12px;font-size:12px;color:var(--muted)">${items.length} maintenance items</div>`;
+if(items.length === 0) {
+h += '<div style="text-align:center;padding:40px;color:var(--faint)">No maintenance jobs</div>';
+} else {
+h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">';
+h += '<thead><tr>';
+['Issue','Priority','Status','Date Raised'].forEach(th => {
+h += `<th style="text-align:left;padding:8px 10px;color:var(--faint);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid var(--line);white-space:nowrap">${th}</th>`;
+});
+h += '</tr></thead><tbody>';
+for(const m of items.slice(0,200)) {
+const pc = (m.priority||'').toLowerCase();
+const pcCls = pc.includes('high')||pc.includes('critical')?'var(--bad)':pc.includes('medium')?'var(--warn)':'var(--muted)';
+const sc = m.status==='IN PROGRESS'?'var(--warn)':m.status==='COMPLETED'||m.status==='DONE'?'var(--ok)':'var(--muted)';
+h += `<tr style="border-bottom:1px solid var(--line-2)">
+<td style="padding:8px 10px;font-weight:600;color:var(--text)">${m.title||'—'}</td>
+<td style="padding:8px 10px"><span style="font-size:10px;font-weight:600;color:${pcCls}">${m.priority||'—'}</span></td>
+<td style="padding:8px 10px"><span style="font-size:10px;font-weight:600;color:${sc}">${m.status||'—'}</span></td>
+<td style="padding:8px 10px;color:var(--muted)">${m.date_raised||'—'}</td>
+</tr>`;
+}
+h += '</tbody></table></div>';
+}
+mc.innerHTML = h;
+} catch(e) {
+mc.innerHTML = `<div style="padding:20px;color:var(--bad);background:var(--bad-soft);border-radius:10px">Error: ${e.message}</div>`;
+}
+}
+
+// ── Init ──
+// Start: hide login, check session
+document.getElementById('loginPage').style.display = '';
+checkSession();
+</script>
+</body>
+</html>

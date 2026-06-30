@@ -301,8 +301,8 @@ select{font-size:16px!important;padding:10px 12px}
 <div class="ni" onclick="document.getElementById('devSection').scrollIntoView({behavior:'smooth'})"><span>⚡</span><span>Projects</span></div>
 </nav>
 <div class="dash-user">
-<div class="av" id="userAvatar">T</div>
-<div class="info"><div class="n" id="userName">Loading...</div><div class="r" id="userRole">admin</div></div>
+<div class="av" id="userAvatar">{{ user.username[0]|upper if user.username else 'U' }}</div>
+<div class="info"><div class="n" id="userName">{{ user.username if user.username else 'User' }}</div><div class="r" id="userRole">{{ user.role if user.role else 'admin' }}</div></div>
 <a href="/api/auth/logout" class="lo" title="Sign out">✕</a>
 </div>
 </aside>
@@ -763,21 +763,6 @@ h += '</div></div>';
 el.innerHTML = h;
 } catch(e) { el.innerHTML = '<div class="err">'+e.message+'</div>'; }
 }
-
-// Fetch user info from server session
-(async function() {
-    try {
-        var r = await fetch('/api/auth/user');
-        if(r.ok) {
-            var d = await r.json();
-            if(d.username) {
-                document.getElementById('userName').textContent = d.username;
-                document.getElementById('userAvatar').textContent = d.username.charAt(0).toUpperCase();
-            }
-        }
-    } catch(e) {}
-})();
-
 </script>
 </body>
 </html>
