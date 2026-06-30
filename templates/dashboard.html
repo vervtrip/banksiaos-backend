@@ -37,6 +37,46 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#F8F9FC;color:#1E29
 .topbar{display:flex;justify-content:space-between;align-items:center;padding:16px 24px;background:#fff;border-bottom:1px solid #E2E8F0;position:sticky;top:0;z-index:50;min-height:60px}
 .topbar h2{font-size:18px;font-weight:700;color:#0F172A}
 .topbar .right{display:flex;align-items:center;gap:12px}
+/* Search bar */
+.sb{position:relative;display:flex;align-items:center}
+.sb input{border:1px solid #E2E8F0;border-radius:8px;padding:8px 12px 8px 32px;font-size:13px;font-family:'Inter',sans-serif;width:220px;background:#F8F9FC;color:#1E293B;outline:none;transition:all .15s}
+.sb input:focus{width:300px;border-color:#3B82F6;background:#fff}
+.sb .si{position:absolute;left:10px;color:#94A3B8;font-size:13px;pointer-events:none}
+.sr{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid #E2E8F0;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.1);max-height:300px;overflow-y:auto;display:none;z-index:300}
+.sr.show{display:block}
+.sr-item{padding:10px 12px;border-bottom:1px solid #F1F5F9;cursor:pointer;transition:background .1s}
+.sr-item:hover{background:#F8F9FC}
+.sr-item:last-child{border-bottom:none}
+.sr-item .st{font-size:11px;color:#64748B;font-weight:600;text-transform:uppercase}
+.sr-item .stt{font-size:13px;font-weight:500;color:#0F172A}
+.sr-item .ss{font-size:11px;color:#64748B}
+.sr-empty{padding:16px;text-align:center;color:#94A3B8;font-size:13px}
+/* Notification bell */
+.nb{position:relative;cursor:pointer;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid #E2E8F0;background:#fff;font-size:16px;transition:all .15s}
+.nb:hover{background:#F8F9FC;border-color:#CBD5E1}
+.nb-b{position:absolute;top:-4px;right:-4px;background:#EF4444;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:10px;line-height:1.4;min-width:16px;text-align:center}
+.notif-dropdown{position:absolute;top:calc(100% + 8px);right:0;width:340px;background:#fff;border:1px solid #E2E8F0;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.12);display:none;z-index:300;max-height:400px;overflow-y:auto}
+.notif-dropdown.show{display:block}
+.notif-h{padding:12px 14px;border-bottom:1px solid #F1F5F9;display:flex;justify-content:space-between;align-items:center}
+.notif-h strong{font-size:14px}
+.notif-h a{font-size:11px;color:#3B82F6;cursor:pointer;text-decoration:none}
+.notif-item{padding:12px 14px;border-bottom:1px solid #F1F5F9;cursor:pointer;transition:background .1s}
+.notif-item:hover{background:#F8F9FC}
+.notif-item.unread{background:#EFF6FF}
+.notif-item:last-child{border-bottom:none}
+.notif-item .nt{font-size:13px;font-weight:600;color:#0F172A}
+.notif-item .nm{font-size:12px;color:#64748B;margin-top:2px}
+.notif-item .ntm{font-size:10px;color:#94A3B8;margin-top:2px}
+.notif-empty{padding:24px;text-align:center;color:#94A3B8;font-size:13px}
+/* Integration health */
+.il{gap:12px}
+.ii{padding:12px 14px}
+.ii .ii-status{font-size:11px}
+.ii .ii-time{font-size:10px;color:#94A3B8;margin-top:2px}
+.sd{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px}
+.sd.on{background:#22C55E;box-shadow:0 0 4px rgba(34,197,94,.4)}
+.sd.wa{background:#F59E0B;box-shadow:0 0 4px rgba(245,158,11,.4)}
+.sd.er{background:#EF4444;box-shadow:0 0 4px rgba(239,68,68,.4)}
 .cnt{padding:20px 24px;max-width:100%}
 /* ===== KPI ===== */
 .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
@@ -312,6 +352,13 @@ select{font-size:16px!important;padding:10px 12px}
 <h2 id="pageTitle">Dashboard</h2>
 <div class="right">
 <div class="fg"><select id="periodFilter" onchange="rl()"><option value="today">Today</option><option value="week">This Week</option><option value="month" selected>This Month</option><option value="quarter">This Quarter</option></select></div>
+<div class="sb"><span class="si">🔍</span><input type="text" id="searchInput" placeholder="Search..." oninput="doSearch(this.value)" onblur="setTimeout(function(){document.getElementById('searchResults').classList.remove('show')},200)" onfocus="if(this.value.length>=2)document.getElementById('searchResults').classList.add('show')"><div class="sr" id="searchResults"></div></div>
+<div class="nb" onclick="toggleNotifPanel()" id="notifBell">🔔<span class="nb-b" id="notifBadge" style="display:none">0</span>
+<div class="notif-dropdown" id="notifPanel">
+<div class="notif-h"><strong>Notifications</strong><a onclick="markAllRead()">Mark all read</a></div>
+<div id="notifList"><div class="notif-empty">No notifications</div></div>
+</div>
+</div>
 <span class="tm" id="lastUpdated">—</span>
 </div>
 </div>
@@ -413,12 +460,12 @@ dc.innerHTML =
 
 '<div id="devSection" class="card"><div class="card-h"><h3>⚡ verv.co.uk — Development Pipeline</h3></div><div class="card-b" id="vervCoukSection"><div class="loading"><div class="spinner"></div> Loading pipeline...</div></div></div>' +
 
-'<div class="card"><div class="card-h"><h3>System Integrations</h3></div><div class="card-b">' +
-'<div class="il">' +
-'<div class="ii"><div class="ii-icon hw">H</div><div class="ii-info"><div class="ii-name">Hostaway</div><div class="ii-status">30 listings</div></div><span class="badge bg"><span class="sd on"></span>Live</span></div>' +
-'<div class="ii"><div class="ii-icon ar">A</div><div class="ii-info"><div class="ii-name">Arthur</div><div class="ii-status">HMO tenants</div></div><span class="badge ba"><span class="sd wa"></span>Syncing</span></div>' +
-'<div class="ii"><div class="ii-icon ms">M</div><div class="ii-info"><div class="ii-name">Missive</div><div class="ii-status">Team comms</div></div><span class="badge bg"><span class="sd on"></span>Live</span></div>' +
-'<div class="ii"><div class="ii-icon mc">◊</div><div class="ii-info"><div class="ii-name">Monday.com</div><div class="ii-status">Project boards</div></div><span class="badge bg"><span class="sd on"></span>Live</span></div>' +
+'<div class="card"><div class="card-h"><h3>System Integrations</h3><span class="ca" onclick="loadIntegrations()" title="Refresh status">↻</span></div><div class="card-b">' +
+'<div class="il" id="integrationList">' +
+'<div class="ii"><div class="ii-icon hw">H</div><div class="ii-info"><div class="ii-name">Hostaway</div><div class="ii-status">Loading...</div><div class="ii-time"></div></div><span class="badge bgr"><span class="sd wa"></span>Checking...</span></div>' +
+'<div class="ii"><div class="ii-icon ar">A</div><div class="ii-info"><div class="ii-name">Arthur</div><div class="ii-status">Loading...</div><div class="ii-time"></div></div><span class="badge bgr"><span class="sd wa"></span>Checking...</span></div>' +
+'<div class="ii"><div class="ii-icon ms">M</div><div class="ii-info"><div class="ii-name">Missive</div><div class="ii-status">Loading...</div><div class="ii-time"></div></div><span class="badge bgr"><span class="sd wa"></span>Checking...</span></div>' +
+'<div class="ii"><div class="ii-icon mc">◊</div><div class="ii-info"><div class="ii-name">Monday.com</div><div class="ii-status">Loading...</div><div class="ii-time"></div></div><span class="badge bgr"><span class="sd wa"></span>Checking...</span></div>' +
 '</div></div></div>' +
 
 '<div class="tab-bar" id="mainTabs">' +
@@ -437,6 +484,7 @@ loadProperties();
 loadVervCoukPipeline();
 loadDailyFocus();
 loadIntegrations();
+loadNotifications();
 })();
 
 // ========== verv.co.uk Pipeline ==========
@@ -650,85 +698,237 @@ async function loadDailyFocus() {
 }
 
 async function loadIntegrations() {
-  var el = document.querySelector('.il');
-  if(!el) return;
+  var container = document.getElementById('integrationList');
+  if(!container) return;
   var signal = getSignal();
   try {
+    // Don't reassign full HTML — just update each card's status
     var d = await api('/api/connections/status', null, null, signal.signal);
-    // Update integration statuses dynamically
-    var items = el.querySelectorAll('.ii');
-    if(d.connections && items.length) {
-      for(var i=0;i<items.length;i++) {
-        var nameEl = items[i].querySelector('.ii-name');
+    if(d.connections) {
+      var cards = container.querySelectorAll('.ii');
+      var mapping = {'hostaway':0,'arthur':1,'missive':2,'monday.com':3};
+      for(var i=0;i<cards.length;i++) {
+        var nameEl = cards[i].querySelector('.ii-name');
+        var statusEl = cards[i].querySelector('.ii-status');
+        var timeEl = cards[i].querySelector('.ii-time');
+        var badge = cards[i].querySelector('.badge');
         if(!nameEl) continue;
         var name = (nameEl.textContent || '').toLowerCase();
-        var conn = null;
-        for(var k in d.connections) {
-          if(name.indexOf(k.toLowerCase()) !== -1) { conn = d.connections[k]; break; }
+        var idx = mapping[name];
+        if(idx === undefined) continue;
+        var conn = d.connections[idx];
+        if(!conn) continue;
+        var isOk = conn.status === 'ok' || conn.status === 'connected';
+        var isErr = conn.status === 'error';
+        if(badge) {
+          var sdBadge = badge.querySelector('.sd');
+          badge.className = 'badge ' + (isOk ? 'bg' : (isErr ? 'br' : 'ba'));
+          if(sdBadge) {
+            sdBadge.className = 'sd ' + (isOk ? 'on' : (isErr ? 'er' : 'wa'));
+          }
+          badge.innerHTML = (sdBadge ? sdBadge.outerHTML : '') + (isOk ? 'Live' : (isErr ? 'Error' : 'Checking'));
         }
-        if(conn) {
-          var badge = items[i].querySelector('.badge');
-          var sd = badge ? badge.querySelector('.sd') : null;
-          if(badge) {
-            badge.className = 'badge ' + (conn.status === 'connected' || conn.status === 'live' ? 'bg' : 'ba');
-            badge.innerHTML = (sd ? '<span class="sd ' + (conn.status === 'connected' || conn.status === 'live' ? 'on' : 'wa') + '"></span>' : '') + (conn.status === 'connected' || conn.status === 'live' ? 'Live' : 'Issues');
-          }
-          if(items[i].querySelector('.ii-status')) {
-            items[i].querySelector('.ii-status').textContent = conn.detail || conn.status || '';
-          }
+        if(statusEl) {
+          statusEl.textContent = isOk ? 'Connected' : (isErr ? (conn.error || 'Error') : 'Unavailable');
+        }
+        if(timeEl && conn.last_sync) {
+          timeEl.textContent = 'Last checked: ' + conn.last_sync;
         }
       }
     }
   } catch(e) {
     if(e.name === 'AbortError') return;
     console.error('loadIntegrations:', e);
+    container.innerHTML = '<div class="err">Failed to load integration status</div>';
   }
+}
+
+// ========== Global Search ==========
+var searchTimeout = null;
+async function doSearch(q) {
+  clearTimeout(searchTimeout);
+  var resultsEl = document.getElementById('searchResults');
+  if(!resultsEl) return;
+  if(!q || q.length < 2) {
+    resultsEl.classList.remove('show');
+    resultsEl.innerHTML = '';
+    return;
+  }
+  searchTimeout = setTimeout(async function() {
+    resultsEl.innerHTML = '<div class="sr-empty">Searching...</div>';
+    resultsEl.classList.add('show');
+    try {
+      var d = await api('/api/search?q=' + encodeURIComponent(q), null, null, null);
+      if(!d.results || d.results.length === 0) {
+        resultsEl.innerHTML = '<div class="sr-empty">No results found</div>';
+        return;
+      }
+      var html = '';
+      for(var i=0;i<d.results.length;i++) {
+        var r = d.results[i];
+        html += '<div class="sr-item" onclick="handleSearchResult(\'' + r.type.replace(/'/g,"\\'") + '\',' + r.id + ')">' +
+          '<div class="stt">' + r.title + '</div>' +
+          '<div class="ss">' + r.subtitle + '</div>' +
+          '<div class="st">' + r.type + ' · ' + r.source + '</div>' +
+        '</div>';
+      }
+      resultsEl.innerHTML = html;
+    } catch(e) {
+      resultsEl.innerHTML = '<div class="sr-empty">Search failed</div>';
+    }
+  }, 300);
+}
+
+function handleSearchResult(type, id) {
+  document.getElementById('searchResults').classList.remove('show');
+  document.getElementById('searchInput').value = '';
+  // Navigate to relevant tab
+  if(type.indexOf('STR') !== -1) st('str');
+  else if(type.indexOf('HMO') !== -1) st('hmo');
+  else if(type.indexOf('Maintenance') !== -1 || type.indexOf('Job') !== -1) st('maintenance');
+  else st('properties');
+}
+
+// ========== Notifications ==========
+async function loadNotifications() {
+  try {
+    var d = await api('/api/notifications', null, null, null);
+    var badge = document.getElementById('notifBadge');
+    if(d.unread_count > 0) {
+      badge.style.display = '';
+      badge.textContent = d.unread_count > 99 ? '99+' : d.unread_count;
+    } else {
+      badge.style.display = 'none';
+    }
+    var list = document.getElementById('notifList');
+    if(!list) return;
+    if(d.notifications && d.notifications.length > 0) {
+      var html = '';
+      for(var i=0;i<Math.min(d.notifications.length,20);i++) {
+        var n = d.notifications[i];
+        var cls = n.read ? '' : 'unread';
+        html += '<div class="notif-item ' + cls + '" onclick="markNotifRead(\'' + n.id + '\')">' +
+          '<div class="nt">' + n.title + '</div>' +
+          '<div class="nm">' + n.message + '</div>' +
+          '<div class="ntm">' + new Date(n.created_at).toLocaleString('en-GB') + '</div>' +
+        '</div>';
+      }
+      list.innerHTML = html;
+    } else {
+      list.innerHTML = '<div class="notif-empty">No notifications</div>';
+    }
+  } catch(e) {
+    console.error('loadNotifications:', e);
+  }
+}
+
+function toggleNotifPanel() {
+  var panel = document.getElementById('notifPanel');
+  if(panel) {
+    panel.classList.toggle('show');
+    if(panel.classList.contains('show')) loadNotifications();
+  }
+}
+
+async function markNotifRead(id) {
+  try {
+    await api('/api/notifications/read/' + id, 'POST', {}, null);
+    loadNotifications();
+    loadNotifications(); // Refresh badge
+  } catch(e) { console.error(e); }
+}
+
+async function markAllRead() {
+  try {
+    await api('/api/notifications/read-all', 'POST', {}, null);
+    loadNotifications();
+  } catch(e) { console.error(e); }
+}
+
+// ========== Chart helpers ==========
+var revenueChart = null;
+var portfolioChart = null;
+
+function renderRevenueChart(labels, values) {
+  var c1 = document.getElementById('revChart');
+  if(!c1) return;
+  if(revenueChart) { revenueChart.destroy(); revenueChart = null; }
+  var bgColor = values.map(function(v){ return v > 0 ? '#3B82F6' : '#E2E8F0'; });
+  revenueChart = new Chart(c1.getContext('2d'), {
+    type:'bar',
+    data:{
+      labels: labels,
+      datasets:[{label:'Revenue', data:values, backgroundColor:bgColor, borderRadius:6, barThickness:32}]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:function(ctx){return '£'+ctx.parsed.y.toLocaleString();}}}},
+      scales:{
+        y:{beginAtZero:true, grid:{color:'#F1F5F9'}, ticks:{color:'#94A3B8', font:{size:11}, callback:function(v){return '£'+v;}}},
+        x:{grid:{display:false}, ticks:{color:'#94A3B8', font:{size:11}}}
+      }
+    }
+  });
+}
+
+function renderPortfolioChart(strC, hmoC, hybC) {
+  var c2 = document.getElementById('portChart');
+  if(!c2) return;
+  if(portfolioChart) { portfolioChart.destroy(); portfolioChart = null; }
+  portfolioChart = new Chart(c2.getContext('2d'), {
+    type:'doughnut',
+    data:{
+      labels:['STR ('+strC+')','HMO ('+hmoC+')','Hybrid'],
+      datasets:[{data:[strC, hmoC, Math.max(0, hybC)], backgroundColor:['#3B82F6','#8B5CF6','#F97316'], borderWidth:0}]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{position:'bottom', labels:{padding:14, usePointStyle:true, font:{size:12}}}},
+      cutout:'70%'
+    }
+  });
 }
 
 async function loadKPIs() {
 var signal = getSignal();
 try {
-var props = await api('/api/properties', null, null, signal.signal);
-var summary = await api('/api/summary', null, null, signal.signal);
-var maint = await api('/api/maintenance', null, null, signal.signal);
-var strC = props.properties.filter(function(p){return p.type==='STR'||p.type==='Hybrid'}).length;
-var hmoC = props.properties.filter(function(p){return p.type==='HMO'||p.type==='Hybrid'}).length;
-var tot = props.total || props.properties.length;
+var data = await api('/api/dashboard/data', null, null, signal.signal);
+// Update KPI cards
+var strC = data.portfolio.str || 0;
+var hmoC = data.portfolio.hmo || 0;
+var tot = data.portfolio.total || 0;
 document.getElementById('kpiStr').textContent = strC;
 document.getElementById('kpiHmo').textContent = hmoC;
-var arr = summary.str?.arrivals||0, dep = summary.str?.departures||0;
+var arr = data.today.check_ins || 0, dep = data.today.check_outs || 0;
 document.getElementById('kpiBook').textContent = arr + dep;
-document.getElementById('kpiBookT').textContent = '↑ '+arr+' arr / '+dep+' dep';
+document.getElementById('kpiBookT').textContent = '\u2191 '+arr+' arr / '+dep+' dep';
 document.getElementById('kpiBookT').className = 'kt ' + (arr > 0 ? 'up' : 'neutral');
-document.getElementById('kpiMaint').textContent = maint.count;
-document.getElementById('mCountSide').textContent = maint.count;
+var openMaint = data.kpi.open_maintenance || 0;
+document.getElementById('kpiMaint').textContent = openMaint;
+document.getElementById('mCountSide').textContent = openMaint;
 document.getElementById('pCount').textContent = tot;
+
+// Operational cards
 document.getElementById('oBook').textContent = arr + dep;
 document.getElementById('oArr').textContent = arr;
 document.getElementById('oDep').textContent = dep;
-document.getElementById('oMaint').textContent = maint.count;
+document.getElementById('oMaint').textContent = openMaint;
 document.getElementById('oProps').textContent = tot;
 document.getElementById('psStr').textContent = strC;
 document.getElementById('psHmo').textContent = hmoC;
 document.getElementById('psHyb').textContent = Math.max(0,tot-strC-hmoC);
 
-if(window.revenueChart) window.revenueChart.destroy();
-if(window.portfolioChart) window.portfolioChart.destroy();
-var c1 = document.getElementById('revChart');
-if(c1) {
-window.revenueChart = new Chart(c1.getContext('2d'), {
-type:'bar',data:{labels:['Jan','Feb','Mar','Apr','May','Jun'],datasets:[{label:'Revenue',data:[28,32,35,38,42,47],backgroundColor:'#3B82F6',borderRadius:6,barThickness:32}]},
-options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,grid:{color:'#F1F5F9'},ticks:{color:'#94A3B8',font:{size:11}}},x:{grid:{display:false},ticks:{color:'#94A3B8',font:{size:11}}}}}
-});
+// Revenue chart — live data from the API
+var revLabels = data.revenue_chart.labels || ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+var revValues = data.revenue_chart.values || [0,0,0,0,0,0,0];
+renderRevenueChart(revLabels, revValues);
+renderPortfolioChart(strC, hmoC, Math.max(0,tot-strC-hmoC));
+
+// Update last updated
+if(data.last_updated) {
+  document.getElementById('lastUpdated').textContent = new Date(data.last_updated).toLocaleString('en-GB');
 }
-var c2 = document.getElementById('portChart');
-if(c2) {
-window.portfolioChart = new Chart(c2.getContext('2d'), {
-type:'doughnut',data:{labels:['STR ('+strC+')','HMO ('+hmoC+')','Hybrid'],datasets:[{data:[strC,hmoC,Math.max(0,tot-strC-hmoC)],backgroundColor:['#3B82F6','#8B5CF6','#F97316'],borderWidth:0}]},
-options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{padding:14,usePointStyle:true,font:{size:12}}}},cutout:'70%'}
-});
-}
-} catch(e) { if(e.name === 'AbortError') return; console.error(e); }
+} catch(e) { if(e.name === 'AbortError') return; console.error('loadKPIs:', e); }
 }
 
 async function loadProperties() {
@@ -839,6 +1039,7 @@ el.innerHTML = h;
             }
         }
     } catch(e) {}
+    loadNotifications(); // Load notifications after user is confirmed
 })();
 
 // Auto-refresh with visibility check — only refresh when tab is visible
@@ -847,6 +1048,7 @@ var refreshInterval = setInterval(function() {
     loadKPIs();
     loadDailyFocus();
     loadIntegrations();
+    loadNotifications();
   }
 }, 60000);
 

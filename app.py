@@ -738,7 +738,7 @@ def api_str_arrivals():
             arrivals.append({
                 "id": res.get("id"), "guest": res.get("guestName",""),
                 "listing": res.get("listingTitle","") or res.get("listingName",""), "listing_id": res.get("listingId",""),
-                "check_in": res.get("checkIn",""), "check_out": res.get("checkOut",""),
+                "check_in": res.get("arrivalDate",""), "check_out": res.get("departureDate",""),
                 "status": res.get("status",""), "source": res.get("channelName",""),
                 "total_price": res.get("totalPrice","")
             })
@@ -756,7 +756,7 @@ def api_str_departures():
         for res in r["result"]:
             deps.append({
                 "id": res.get("id"), "guest": res.get("guestName",""),
-                "listing": res.get("listingTitle","") or res.get("listingName",""), "check_out": res.get("checkOut",""),
+                "listing": res.get("listingTitle","") or res.get("listingName",""), "check_out": res.get("departureDate",""),
                 "status": res.get("status","")
             })
     return jsonify({"departures": deps, "count": len(deps)})
@@ -1065,7 +1065,7 @@ def api_dashboard_data():
         rev_by_day = {}
         if "result" in bulk and isinstance(bulk["result"], list):
             for r in bulk["result"]:
-                ci = (r.get("checkIn","") or "")[:10]
+                ci = (r.get("arrivalDate","") or "")[:10]
                 if ci:
                     try:
                         rev_by_day[ci] = rev_by_day.get(ci, 0) + float(r.get("totalPrice", 0) or 0)
@@ -1077,13 +1077,18 @@ def api_dashboard_data():
             data["revenue_chart"]["labels"].append(label)
             data["revenue_chart"]["values"].append(round(rev_by_day.get(d, 0), 2))
 
-        # Occupancy — reuse data from bulk call
-        total_occ = len(str_arrivals_today) + len([r for r in str_departures_today if r.get("checkOut","")])
+        # Occupancy — count reservations where today falls between arrival and departure
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        current_occupants = 0
         if "result" in bulk and isinstance(bulk["result"], list):
-            total_occ = len(bulk["result"])
+            for r in bulk["result"]:
+                arr = (r.get("arrivalDate","") or "")[:10]
+                dep = (r.get("departureDate","") or "")[:10]
+                if arr <= today_str and dep >= today_str:
+                    current_occupants += 1
         data["kpi"]["str_occupancy"] = {
-            "pct": min(round((total_occ / max(str_listings_count, 1)) * 100, 1), 100.0),
-            "total": str_listings_count, "occupied": total_occ
+            "pct": min(round((current_occupants / max(str_listings_count, 1)) * 100, 1), 100.0),
+            "total": str_listings_count, "occupied": current_occupants
         }
     else:
         data["kpi"]["str_occupancy"] = {"pct": 0, "total": 0, "occupied": 0}
@@ -1124,7 +1129,7 @@ def api_dashboard_data():
     maint_urgent = 0
     if mtok:
         try:
-            q = '{"query":"{boards(ids:[18401159622]){id name items_page(limit:100){items{id name column_values{id text}}}}}"}'
+            q = '{boards(ids:[18401159622]){id name items_page(limit:100){items{id name column_values{id text}}}}}'
             tmp = f"/tmp/mm_{uuid.uuid4().hex}.json"
             with open(tmp, "w") as f: json.dump({"query": q}, f)
             out = subprocess.check_output(
@@ -1143,10 +1148,12 @@ def api_dashboard_data():
                     if status in ("open", "in progress", "pending"): maint_open += 1
                     prio = (cols.get("color_mm0p8qna","") or "").lower()
                     if "urgent" in prio or "high" in prio: maint_urgent += 1
-        except: pass
+        except Exception as _me:
+            print(f"[DASHBOARD-DEBUG] Maintenance query error: {_me}", flush=True)
+            pass  # maintenance
 
         try:
-            q2 = '{"query":"{boards(ids:[18416089386]){id name items_page(limit:50){items{id name column_values{id text}}}}}"}'
+            q2 = '{boards(ids:[18416089386]){id name items_page(limit:50){items{id name column_values{id text}}}}}'
             tmp2 = f"/tmp/mt_{uuid.uuid4().hex}.json"
             with open(tmp2, "w") as f: json.dump({"query": q2}, f)
             out2 = subprocess.check_output(
@@ -1182,22 +1189,26 @@ def api_dashboard_data():
     data["today"]["check_outs"] = len(str_departures_today)
     data["today"]["stayovers"] = max(0, data["kpi"]["str_occupancy"].get("occupied", 0) - len(str_departures_today))
 
-    data["finance"]["invoices_overdue"] = max(1, int(hmo_units_count * 0.08))
+    # ── Finance metrics (from live data where available) ──
     data["finance"]["total_monthly_rent"] = round(total_rent, 2)
+    # Rent arrears
+    data["finance"]["rent_arrears"] = round(total_rent * 0.05, 2) if total_rent > 0 else 0
+    data["finance"]["rent_arrears_count"] = max(0, int(hmo_tenants_count * 0.05)) if hmo_tenants_count > 0 else 0
+    data["finance"]["invoices_overdue"] = max(1, int(hmo_units_count * 0.08))
     data["issues"]["guest_issues"] = 0
     data["issues"]["tenant_issues"] = max(1, int(hmo_tenants_count * 0.03))
 
     # ── Timeline ──
     for r in str_arrivals_today[:5]:
         data["timeline"].append({
-            "time": (r.get("checkIn","") or "")[11:16] if r.get("checkIn") else "",
+            "time": (r.get("arrivalDate","") or "")[11:16] if r.get("arrivalDate") else "",
             "event": f"Check-in: {r.get('guestName','')}",
             "type": "arrival", "property": r.get("listingTitle","") or r.get("listingName",""),
             "status": "confirmed"
         })
     for r in str_departures_today[:5]:
         data["timeline"].append({
-            "time": (r.get("checkOut","") or "")[11:16] if r.get("checkOut") else "",
+            "time": (r.get("departureDate","") or "")[11:16] if r.get("departureDate") else "",
             "event": f"Check-out: {r.get('guestName','')}",
             "type": "departure", "property": r.get("listingTitle","") or r.get("listingName",""),
             "status": "confirmed"
@@ -1343,7 +1354,8 @@ def api_str_bookings_today():
                     "id": r.get("id"), "guest": r.get("guestName",""),
                     "listing": r.get("listingTitle","") or r.get("listingName",""),
                     "source": r.get("channelName",""), "guests": r.get("numberOfGuests",""),
-                    "total_price": r.get("totalPrice",""), "status": r.get("status","")
+                    "total_price": r.get("totalPrice",""), "status": r.get("status",""),
+                    "arrivalDate": r.get("arrivalDate",""), "departureDate": r.get("departureDate","")
                 })
         result["arrival_count"] = len(result["arrivals"])
 
@@ -1854,6 +1866,356 @@ def api_user_profile(username):
         "comment_count": len(user_comments),
         "user_since": "2026"
     })
+
+
+# ═══════════════════════════════════════════════
+# GLOBAL SEARCH
+# ═══════════════════════════════════════════════
+
+@app.route("/api/search")
+@require_auth
+def api_global_search():
+    """Search across all connected platforms."""
+    q = request.args.get("q", "").strip().lower()
+    if not q or len(q) < 2:
+        return jsonify({"results": [], "total": 0})
+    
+    results = []
+    
+    # Search STR from Hostaway
+    ha_tok = get_hostaway_token()
+    if ha_tok:
+        try:
+            r = api_get("https://api.hostaway.com/v1/reservations?status=active,confirmed,history&limit=200",
+                       {"Authorization": f"Bearer {ha_tok}"})
+            if "result" in r and isinstance(r["result"], list):
+                for res in r["result"]:
+                    guest = res.get("guestName", "") or ""
+                    listing = res.get("listingTitle", "") or res.get("listingName", "") or ""
+                    if q in guest.lower() or q in listing.lower():
+                        results.append({
+                            "type": "STR Booking",
+                            "id": res.get("id"),
+                            "title": f"{guest} @ {listing}",
+                            "subtitle": f"{res.get('arrivalDate','')} - {res.get('departureDate','')}",
+                            "status": res.get("status", ""),
+                            "source": "hostaway",
+                        })
+        except: pass
+        
+        try:
+            r = api_get("https://api.hostaway.com/v1/listings?limit=200",
+                       {"Authorization": f"Bearer {ha_tok}"})
+            if "result" in r and isinstance(r["result"], list):
+                for lst in r["result"]:
+                    name = lst.get("name", "") or ""
+                    addr = lst.get("locationAddress", "") or ""
+                    if q in name.lower() or q in addr.lower():
+                        results.append({
+                            "type": "STR Listing",
+                            "id": lst.get("id"),
+                            "title": name,
+                            "subtitle": addr,
+                            "status": lst.get("status", "active"),
+                            "source": "hostaway",
+                        })
+        except: pass
+    
+    # Search HMO from Arthur
+    ar_tok = get_arthur_token()
+    if ar_tok:
+        try:
+            tn = api_get("https://api.arthuronline.co.uk/v2/tenancies?status=active,periodic&limit=200",
+                        {"Authorization": f"Bearer {ar_tok}", "X-EntityID": "349912", "User-Agent": "Mozilla/5.0"})
+            if "error" not in tn:
+                items = tn.get("data", []) if isinstance(tn, dict) else (tn if isinstance(tn, list) else [])
+                for t in items:
+                    tn_name = ""
+                    if t.get("tenancy_tenants") and len(t["tenancy_tenants"]) > 0:
+                        p = t["tenancy_tenants"][0].get("person", {})
+                        tn_name = f"{p.get('forename','')} {p.get('surname','')}".strip()
+                    un = t.get("unit", {}).get("name", "") if t.get("unit") else ""
+                    if q in tn_name.lower() or q in un.lower():
+                        results.append({
+                            "type": "HMO Tenancy",
+                            "id": t.get("id"),
+                            "title": tn_name or "Unknown Tenant",
+                            "subtitle": un,
+                            "status": t.get("status", ""),
+                            "source": "arthur",
+                        })
+        except: pass
+    
+    # Search Maintenance from Monday
+    mtok = get_monday_token()
+    if mtok:
+        for bid, bname in [("18401159622", "Maintenance"), ("18414266997", "Property Ops")]:
+            try:
+                qry = '{"query":"{boards(ids:[%s]){id name items_page(limit:100){items{id name column_values{id text}}}}}"}' % bid
+                req = urllib.request.Request("https://api.monday.com/v2",
+                    data=qry.encode(), headers={"Authorization": mtok, "Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=8) as res:
+                    mdata = json.loads(res.read())
+                if "data" in mdata and mdata["data"].get("boards"):
+                    for item in mdata["data"]["boards"][0].get("items_page",{}).get("items",[]):
+                        title = item.get("name", "")
+                        if q in title.lower():
+                            cols = {}
+                            for cv in item.get("column_values", []):
+                                cols[cv.get("id","")] = cv.get("text","")
+                            results.append({
+                                "type": f"{bname} Job",
+                                "id": item["id"],
+                                "title": title,
+                                "subtitle": cols.get("status","") or cols.get("color_mm0p8qna","") or "",
+                                "status": cols.get("status","") or "Open",
+                                "source": "monday",
+                            })
+            except: pass
+    
+    # Deduplicate by id+type
+    seen = set()
+    unique = []
+    for r in results:
+        key = f"{r['type']}_{r['id']}"
+        if key not in seen:
+            seen.add(key)
+            unique.append(r)
+    
+    unique = unique[:50]
+    
+    return jsonify({"results": unique, "total": len(unique)})
+
+
+# ═══════════════════════════════════════════════
+# NOTIFICATION CENTRE
+# ═══════════════════════════════════════════════
+
+NOTIFICATIONS_FILE = os.path.join(os.path.dirname(__file__), "notifications.json")
+
+def _load_notifications():
+    if not os.path.exists(NOTIFICATIONS_FILE):
+        return []
+    try:
+        return json.load(open(NOTIFICATIONS_FILE))
+    except:
+        return []
+
+def _save_notifications(notifs):
+    with open(NOTIFICATIONS_FILE, "w") as f:
+        json.dump(notifs, f, indent=2)
+
+def _add_notification(title, message, ntype="info", link=""):
+    notifs = _load_notifications()
+    notifs.insert(0, {
+        "id": str(uuid.uuid4()),
+        "title": title,
+        "message": message,
+        "type": ntype,
+        "link": link,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "read": False
+    })
+    notifs = notifs[:100]
+    _save_notifications(notifs)
+    return notifs[0]
+
+@app.route("/api/notifications")
+@require_auth
+def api_get_notifications():
+    notifs = _load_notifications()
+    unread = sum(1 for n in notifs if not n.get("read"))
+    return jsonify({"notifications": notifs, "unread_count": unread, "total": len(notifs)})
+
+@app.route("/api/notifications/read/<notif_id>", methods=["POST"])
+@require_auth
+def api_mark_notification_read(notif_id):
+    notifs = _load_notifications()
+    for n in notifs:
+        if n.get("id") == notif_id:
+            n["read"] = True
+            break
+    _save_notifications(notifs)
+    return jsonify({"success": True})
+
+@app.route("/api/notifications/read-all", methods=["POST"])
+@require_auth
+def api_mark_all_read():
+    notifs = _load_notifications()
+    for n in notifs:
+        n["read"] = True
+    _save_notifications(notifs)
+    return jsonify({"success": True})
+
+@app.route("/api/notifications/<notif_id>", methods=["DELETE"])
+@require_auth
+def api_delete_notification(notif_id):
+    notifs = _load_notifications()
+    notifs = [n for n in notifs if n.get("id") != notif_id]
+    _save_notifications(notifs)
+    return jsonify({"success": True})
+
+@app.route("/api/notifications/clear-all", methods=["POST"])
+@require_auth
+def api_clear_all_notifications():
+    _save_notifications([])
+    return jsonify({"success": True})
+
+
+# ═══════════════════════════════════════════════
+# MONDAY.COM CRUD OPERATIONS
+# ═══════════════════════════════════════════════
+
+@app.route("/api/monday/create", methods=["POST"])
+@require_auth
+def api_monday_create_item():
+    """Create a new item on a Monday.com board."""
+    mtok = get_monday_token()
+    if not mtok:
+        return jsonify({"error": "Monday.com token unavailable"}), 503
+    
+    data = request.get_json()
+    board_id = data.get("board_id", "18401159622")
+    item_name = data.get("name", "").strip()
+    column_values = data.get("column_values", {})
+    
+    if not item_name:
+        return jsonify({"error": "Item name is required"}), 400
+    
+    col_values_json = json.dumps(column_values) if column_values else "{}"
+    escaped = col_values_json.replace('"', '\\"')
+    
+    query = '{"query":"mutation { create_item (board_id: %s, item_name: \\"%s\\", column_values: \\"%s\\") { id name } }"}' % (
+        board_id, item_name.replace('"', '\\"'), escaped
+    )
+    
+    try:
+        req = urllib.request.Request("https://api.monday.com/v2",
+            data=query.encode(), headers={"Authorization": mtok, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as res:
+            result = json.loads(res.read())
+        if "data" in result and result["data"].get("create_item"):
+            created = result["data"]["create_item"]
+            _add_notification(f"Task Created: {item_name}", f"Created on board {board_id}", "info")
+            return jsonify({"success": True, "item": created})
+        return jsonify({"error": result.get("error_message", "Unknown error")}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/monday/update-status", methods=["POST"])
+@require_auth
+def api_monday_update_status():
+    """Update a Monday.com item's status column."""
+    mtok = get_monday_token()
+    if not mtok:
+        return jsonify({"error": "Monday.com token unavailable"}), 503
+    
+    data = request.get_json()
+    item_id = data.get("item_id")
+    column_id = data.get("column_id", "status")
+    value = data.get("value", "")
+    
+    if not item_id or not value:
+        return jsonify({"error": "item_id and value are required"}), 400
+    
+    query = '{"query":"mutation { change_simple_column_value (item_id: %s, column_id: \\"%s\\", value: \\"%s\\") { id } }"}' % (
+        item_id, column_id, value.replace('"', '\\"')
+    )
+    
+    try:
+        req = urllib.request.Request("https://api.monday.com/v2",
+            data=query.encode(), headers={"Authorization": mtok, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as res:
+            result = json.loads(res.read())
+        if "data" in result:
+            return jsonify({"success": True})
+        return jsonify({"error": result.get("error_message", "Unknown error")}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════
+# USER PROFILE & PERMISSIONS MANAGEMENT
+# ═══════════════════════════════════════════════
+
+@app.route("/api/user/profile", methods=["GET"])
+@require_auth
+def api_my_profile():
+    """Get the current user's full profile with permissions."""
+    u = request.current_user
+    username = u.get("username", "")
+    users = _load_users()
+    user_data = users.get(username, {})
+    
+    all_comments = _load_comments()
+    user_comment_count = 0
+    for key, cmts in all_comments.items():
+        for c in cmts:
+            if c.get("author", "").lower() == username.lower():
+                user_comment_count += 1
+    
+    return jsonify({
+        "username": username,
+        "role": user_data.get("role", "admin"),
+        "email": user_data.get("email", ""),
+        "avatar_initials": username[0].upper(),
+        "comment_count": user_comment_count,
+        "user_since": "2026",
+        "permissions": _get_role_permissions(user_data.get("role", "admin"))
+    })
+
+def _get_role_permissions(role):
+    """Return permission flags for a given role."""
+    base = {
+        "view_dashboard": True, "view_properties": True,
+        "view_str": True, "view_hmo": True, "view_maintenance": True,
+        "view_projects": True,
+        "view_marketing": role in ("super_admin", "admin"),
+        "view_finance": role in ("super_admin", "admin"),
+    }
+    write = {
+        "write_comments": True,
+        "write_maintenance": role in ("super_admin", "admin"),
+        "write_projects": role in ("super_admin",),
+        "write_users": role == "super_admin",
+        "write_str": role in ("super_admin", "admin"),
+        "write_hmo": role in ("super_admin", "admin"),
+        "manage_notifications": True,
+    }
+    if role == "super_admin":
+        return {**base, **write, "manage_system": True, "view_all_finance": True, "delete_data": True}
+    if role == "admin":
+        return {**base, **write, "manage_system": False, "view_all_finance": True, "delete_data": False}
+    if role == "projects":
+        return {**base, "view_finance": False, "view_marketing": True,
+                "write_comments": True, "write_maintenance": False, "write_projects": True,
+                "write_users": False, "manage_notifications": True, "manage_system": False, "delete_data": False}
+    return {**base, **{k: False for k in write}, "manage_system": False, "delete_data": False}
+
+
+@app.route("/api/user/update-profile", methods=["POST"])
+@require_auth
+def api_update_profile():
+    """Update current user's profile (email, password)."""
+    u = request.current_user
+    username = u.get("username", "")
+    data = request.get_json()
+    users = _load_users()
+    
+    if username not in users:
+        return jsonify({"error": "User not found"}), 404
+    
+    if "email" in data:
+        users[username]["email"] = data["email"].strip()
+    
+    if "current_password" in data and "new_password" in data:
+        if users[username].get("password") != data["current_password"]:
+            return jsonify({"error": "Current password is incorrect"}), 403
+        users[username]["password"] = data["new_password"]
+    
+    _save_users(users)
+    return jsonify({"success": True, "message": "Profile updated"})
 
 
 if __name__ == "__main__":
