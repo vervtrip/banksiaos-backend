@@ -339,11 +339,6 @@ var opts = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
 var el = document.getElementById('lastUpdated');
 if(el) el.textContent = d.toLocaleDateString('en-GB', opts);
 })();
-// Add AbortController for stale HTTP request cancellation
-function getSignal() {
-  var controller = new AbortController();
-  return { signal: controller.signal, controller: controller };
-}
 
 function sp(page) {
 document.querySelectorAll('.ni').forEach(function(n){ n.classList.remove('active'); });
@@ -370,14 +365,13 @@ if(name==='maintenance') loadMaintenance();
 }
 }
 
-async function api(path, method, body, signal) {
+async function api(path, method, body) {
 var opts = {};
 if(method === 'POST' || method === 'PUT' || method === 'DELETE') {
 opts.method = method;
 opts.headers = {'Content-Type':'application/json'};
 if(body) opts.body = JSON.stringify(body);
 }
-if(signal) opts.signal = signal;
 var r = await fetch(path, opts);
 if(!r.ok) throw new Error('HTTP '+r.status);
 return r.json();
@@ -435,17 +429,14 @@ dc.innerHTML =
 loadKPIs();
 loadProperties();
 loadVervCoukPipeline();
-loadDailyFocus();
-loadIntegrations();
 })();
 
 // ========== verv.co.uk Pipeline ==========
 async function loadVervCoukPipeline() {
 var el = document.getElementById('vervCoukSection');
 if(!el) return;
-var signal = getSignal();
 try {
-var d = await api('/api/projects/vervcouk', null, null, signal.signal);
+var d = await api('/api/projects/vervcouk');
 var total = d.overall.total_items || d.items.length;
 var ip = d.items.filter(function(i){return /in progress/i.test(i.status)}).length;
 var wo = d.items.filter(function(i){return /working on it/i.test(i.status)}).length;
@@ -503,7 +494,7 @@ h += '<div class="vc-header" style="border-top:1px solid #F1F5F9;padding-top:12p
 '<div class="vc-meta"><span class="vc-meta-item">📊 <strong>' + total + '</strong> workstreams</span><span class="vc-meta-item">⏱ <strong>' + totalHours + '</strong> hours</span><span class="vc-meta-item">📋 <strong>' + d.overall.total_subtasks + '</strong> subtasks</span></div>' +
 '<span class="tm">Faisal Ahmed</span></div>';
 el.innerHTML = h;
-} catch(e) { if(e.name === 'AbortError') return; el.innerHTML = '<div class="err">' + e.message + '</div>'; }
+} catch(e) { el.innerHTML = '<div class="err">' + e.message + '</div>'; }
 }
 
 function buildVervCard(item) {
@@ -584,9 +575,8 @@ var inp = document.getElementById(threadId + '-inp');
 if(!inp || !inp.value.trim()) return;
 var body = inp.value.trim();
 inp.disabled = true;
-var signal = getSignal();
 try {
-var result = await api('/api/comments/vervcouk/' + itemId, 'POST', {body: body}, signal.signal);
+var result = await api('/api/comments/vervcouk/' + itemId, 'POST', {body: body});
 if(result && result.comment) {
 /* Insert new comment above the input row */
 var thread = document.getElementById(threadId);
@@ -611,7 +601,6 @@ if(badge) badge.classList.add('has-cmts');
 }
 inp.value = '';
 } catch(e) {
-if(e.name === 'AbortError') return;
 console.error('Comment failed:', e);
 } finally {
 inp.disabled = false;
@@ -638,59 +627,11 @@ c.style.display = 'none';
 }
 
 // ========== Data functions ==========
-async function loadDailyFocus() {
-  var signal = getSignal();
-  try {
-    var d = await api('/api/dashboard/data', null, null, signal.signal);
-    console.log('Daily focus data loaded');
-  } catch(e) {
-    if(e.name === 'AbortError') return;
-    console.error('loadDailyFocus:', e);
-  }
-}
-
-async function loadIntegrations() {
-  var el = document.querySelector('.il');
-  if(!el) return;
-  var signal = getSignal();
-  try {
-    var d = await api('/api/connections/status', null, null, signal.signal);
-    // Update integration statuses dynamically
-    var items = el.querySelectorAll('.ii');
-    if(d.connections && items.length) {
-      for(var i=0;i<items.length;i++) {
-        var nameEl = items[i].querySelector('.ii-name');
-        if(!nameEl) continue;
-        var name = (nameEl.textContent || '').toLowerCase();
-        var conn = null;
-        for(var k in d.connections) {
-          if(name.indexOf(k.toLowerCase()) !== -1) { conn = d.connections[k]; break; }
-        }
-        if(conn) {
-          var badge = items[i].querySelector('.badge');
-          var sd = badge ? badge.querySelector('.sd') : null;
-          if(badge) {
-            badge.className = 'badge ' + (conn.status === 'connected' || conn.status === 'live' ? 'bg' : 'ba');
-            badge.innerHTML = (sd ? '<span class="sd ' + (conn.status === 'connected' || conn.status === 'live' ? 'on' : 'wa') + '"></span>' : '') + (conn.status === 'connected' || conn.status === 'live' ? 'Live' : 'Issues');
-          }
-          if(items[i].querySelector('.ii-status')) {
-            items[i].querySelector('.ii-status').textContent = conn.detail || conn.status || '';
-          }
-        }
-      }
-    }
-  } catch(e) {
-    if(e.name === 'AbortError') return;
-    console.error('loadIntegrations:', e);
-  }
-}
-
 async function loadKPIs() {
-var signal = getSignal();
 try {
-var props = await api('/api/properties', null, null, signal.signal);
-var summary = await api('/api/summary', null, null, signal.signal);
-var maint = await api('/api/maintenance', null, null, signal.signal);
+var props = await api('/api/properties');
+var summary = await api('/api/summary');
+var maint = await api('/api/maintenance');
 var strC = props.properties.filter(function(p){return p.type==='STR'||p.type==='Hybrid'}).length;
 var hmoC = props.properties.filter(function(p){return p.type==='HMO'||p.type==='Hybrid'}).length;
 var tot = props.total || props.properties.length;
@@ -728,16 +669,15 @@ type:'doughnut',data:{labels:['STR ('+strC+')','HMO ('+hmoC+')','Hybrid'],datase
 options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{padding:14,usePointStyle:true,font:{size:12}}}},cutout:'70%'}
 });
 }
-} catch(e) { if(e.name === 'AbortError') return; console.error(e); }
+} catch(e) { console.error(e); }
 }
 
 async function loadProperties() {
 var el = document.getElementById('panel-properties');
 if(!el) return;
 el.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
-var signal = getSignal();
 try {
-var d = await api('/api/properties', null, null, signal.signal);
+var d = await api('/api/properties');
 var h = '<div class="card"><div class="card-h"><h3>Properties ('+d.total+')</h3></div><div class="card-b"><div class="tw"><table><thead><tr><th>Name</th><th>Type</th><th>Brand</th><th>Status</th><th>Address</th></tr></thead><tbody>';
 for(var i=0;i<d.properties.length;i++) {
 var p = d.properties[i];
@@ -747,17 +687,16 @@ h += '<tr><td class="fw" data-label="Property">'+p.name+'</td><td data-label="Ty
 }
 h += '</tbody></table></div></div></div>';
 el.innerHTML = h;
-} catch(e) { if(e.name === 'AbortError') return; el.innerHTML = '<div class="err">'+e.message+'</div>'; }
+} catch(e) { el.innerHTML = '<div class="err">'+e.message+'</div>'; }
 }
 
 async function loadSTR() {
 var el = document.getElementById('panel-str');
 if(!el) return;
 el.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
-var signal = getSignal();
 try {
-var list = await api('/api/str/listings', null, null, signal.signal);
-var s = await api('/api/summary', null, null, signal.signal);
+var list = await api('/api/str/listings');
+var s = await api('/api/summary');
 var h = '<div class="card"><div class="card-h"><h3>STR Listings ('+list.count+')</h3></div><div class="card-b"><div class="tw"><table><thead><tr><th>Name</th><th>Bedrooms</th><th>Guests</th><th>Status</th></tr></thead><tbody>';
 for(var i=0;i<list.listings.length;i++) {
 var l = list.listings[i];
@@ -766,17 +705,16 @@ h += '<tr><td class="fw" data-label="Name">'+l.name+'</td><td class="tm" data-la
 h += '</tbody></table></div></div></div>';
 h += '<div class="card"><div class="card-h"><h3>Today</h3></div><div class="card-b"><div class="grid-2"><div><div class="ops-card"><div class="oi">🚪</div><div class="ov">'+(s.str?.arrivals||0)+'</div><div class="ol">Arrivals</div></div></div><div><div class="ops-card"><div class="oi">🚶</div><div class="ov">'+(s.str?.departures||0)+'</div><div class="ol">Departures</div></div></div></div></div></div>';
 el.innerHTML = h;
-} catch(e) { if(e.name === 'AbortError') return; el.innerHTML = '<div class="err">'+e.message+'</div>'; }
+} catch(e) { el.innerHTML = '<div class="err">'+e.message+'</div>'; }
 }
 
 async function loadHMO() {
 var el = document.getElementById('panel-hmo');
 if(!el) return;
 el.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
-var signal = getSignal();
 try {
-var tResp = await api('/api/hmo/tenants', null, null, signal.signal);
-var pResp = await api('/api/hmo/properties', null, null, signal.signal);
+var tResp = await api('/api/hmo/tenants');
+var pResp = await api('/api/hmo/properties');
 var h = '<div class="grid-2"><div class="card"><div class="card-h"><h3>Tenants ('+tResp.count+')</h3></div><div class="card-b">';
 if(tResp.tenants.length) {
 h += '<div class="tw"><table><thead><tr><th>Tenant</th><th>Property</th><th>Rent</th><th>Status</th></tr></thead><tbody>';
@@ -800,16 +738,15 @@ h += '</tbody></table></div>';
 } else h += '<div class="empty">No HMO properties</div>';
 h += '</div></div></div>';
 el.innerHTML = h;
-} catch(e) { if(e.name === 'AbortError') return; el.innerHTML = '<div class="err">'+e.message+'</div>'; }
+} catch(e) { el.innerHTML = '<div class="err">'+e.message+'</div>'; }
 }
 
 async function loadMaintenance() {
 var el = document.getElementById('panel-maintenance');
 if(!el) return;
 el.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
-var signal = getSignal();
 try {
-var d = await api('/api/maintenance', null, null, signal.signal);
+var d = await api('/api/maintenance');
 var h = '<div class="card"><div class="card-h"><h3>Maintenance ('+d.count+')</h3></div><div class="card-b">';
 if(d.maintenance.length) {
 h += '<div class="tw"><table><thead><tr><th>Issue</th><th>Priority</th><th>Status</th><th>Date</th></tr></thead><tbody>';
@@ -824,7 +761,7 @@ h += '</tbody></table></div>';
 } else h += '<div class="empty">No jobs</div>';
 h += '</div></div>';
 el.innerHTML = h;
-} catch(e) { if(e.name === 'AbortError') return; el.innerHTML = '<div class="err">'+e.message+'</div>'; }
+} catch(e) { el.innerHTML = '<div class="err">'+e.message+'</div>'; }
 }
 
 // Fetch user info from server session
@@ -840,15 +777,6 @@ el.innerHTML = h;
         }
     } catch(e) {}
 })();
-
-// Auto-refresh with visibility check — only refresh when tab is visible
-var refreshInterval = setInterval(function() {
-  if(!document.hidden) {
-    loadKPIs();
-    loadDailyFocus();
-    loadIntegrations();
-  }
-}, 60000);
 
 </script>
 </body>
