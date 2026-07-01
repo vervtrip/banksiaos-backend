@@ -1,0 +1,1681 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Banksia OS — HMO Operations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,sans-serif;background:#0F172A;color:#e2e8f0;min-height:100vh;display:flex;overflow-x:hidden}
+a{color:#60a5fa;text-decoration:none}
+/* ── SIDEBAR ── */
+.sidebar{width:240px;background:#1e293b;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;transform:translateX(0);transition:transform .25s ease;border-right:1px solid rgba(255,255,255,.06)}
+.sidebar .brand{padding:18px 20px 14px;border-bottom:1px solid rgba(255,255,255,.08)}
+.sidebar .brand h1{font-size:20px;font-weight:800;color:#fff;letter-spacing:-.5px}
+.sidebar .brand h1 span{color:#3b82f6}
+.sidebar .brand .tagline{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:2px;margin-top:2px}
+.sidebar .nav{padding:12px 0;flex:1;overflow-y:auto}
+.sidebar .nav-item{display:flex;align-items:center;gap:12px;padding:10px 20px;color:#94a3b8;font-size:13px;font-weight:500;cursor:pointer;transition:all .15s;border-left:3px solid transparent;position:relative}
+.sidebar .nav-item:hover{color:#e2e8f0;background:rgba(255,255,255,.04)}
+.sidebar .nav-item.active{color:#fff;background:rgba(59,130,246,.12);border-left-color:#3b82f6}
+.sidebar .nav-item .icon{font-size:16px;width:20px;text-align:center;flex-shrink:0}
+.sidebar .nav-item .badge{background:#3b82f6;color:#fff;font-size:10px;padding:2px 6px;border-radius:8px;margin-left:auto}
+.sidebar .user-section{padding:14px 20px;border-top:1px solid rgba(255,255,255,.08);font-size:12px;color:#64748b}
+.sidebar .user-section .name{color:#e2e8f0;font-weight:600;font-size:13px}
+/* ── MAIN ── */
+.main{margin-left:240px;flex:1;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:14px 28px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,.06);position:sticky;top:0;z-index:50;min-height:60px}
+.topbar .left{display:flex;align-items:center;gap:16px}
+.topbar .hamburger{display:none;background:none;border:none;color:#94a3b8;font-size:22px;cursor:pointer;padding:4px}
+.topbar .page-title{font-size:16px;font-weight:700;color:#f1f5f9}
+.topbar .page-subtitle{font-size:12px;color:#64748b;margin-top:2px}
+.topbar .right{display:flex;align-items:center;gap:16px}
+.topbar .user-info{text-align:right}
+.topbar .user-info .name{font-size:13px;font-weight:600;color:#e2e8f0}
+.topbar .user-info .role{font-size:11px;color:#64748b}
+.topbar .date-display{font-size:12px;color:#64748b;background:rgba(255,255,255,.04);padding:6px 12px;border-radius:8px}
+.content{padding:24px 28px;flex:1}
+/* ── KPI CARDS ── */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:28px}
+.kpi-card{background:#1e293b;border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:18px 20px;transition:all .2s;cursor:default}
+.kpi-card:hover{border-color:rgba(59,130,246,.3);transform:translateY(-1px)}
+.kpi-card .label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+.kpi-card .value{font-size:26px;font-weight:700;color:#f1f5f9;letter-spacing:-.5px}
+.kpi-card .sub{font-size:12px;color:#64748b;margin-top:4px}
+.kpi-card .value.green{color:#10b981}
+.kpi-card .value.blue{color:#3b82f6}
+.kpi-card .value.amber{color:#f59e0b}
+.kpi-card .value.red{color:#ef4444}
+.kpi-card .value.purple{color:#8b5cf6}
+/* ── TABLES ── */
+.table-wrap{background:#1e293b;border:1px solid rgba(255,255,255,.06);border-radius:12px;overflow:hidden}
+.table-toolbar{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid rgba(255,255,255,.06);gap:12px;flex-wrap:wrap}
+.table-toolbar .left{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.table-toolbar .right{display:flex;align-items:center;gap:10px}
+.table-toolbar input,.table-toolbar select{padding:8px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:13px;font-family:'Inter',sans-serif;outline:none}
+.table-toolbar input:focus,.table-toolbar select:focus{border-color:#3b82f6}
+.table-toolbar .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:500;font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:none}
+.btn-primary{background:#3b82f6;color:#fff}
+.btn-primary:hover{background:#2563eb}
+.btn-success{background:#10b981;color:#fff}
+.btn-success:hover{background:#059669}
+.btn-danger{background:#ef4444;color:#fff}
+.btn-danger:hover{background:#dc2626}
+.btn-ghost{background:transparent;color:#94a3b8;border:1px solid #334155}
+.btn-ghost:hover{background:rgba(255,255,255,.04);color:#e2e8f0}
+.btn-sm{padding:6px 10px;font-size:12px}
+table{width:100%;border-collapse:collapse}
+thead th{text-align:left;padding:10px 14px;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid rgba(255,255,255,.06);white-space:nowrap;cursor:pointer;user-select:none}
+thead th:hover{color:#94a3b8}
+thead th .sort-icon{display:inline-block;margin-left:4px;opacity:.4}
+tbody td{padding:10px 14px;font-size:13px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle}
+tbody tr:hover{background:rgba(255,255,255,.02)}
+tbody tr{cursor:pointer}
+tbody tr:last-child td{border-bottom:none}
+.pagination{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;font-size:13px;color:#64748b}
+.pagination .page-btn{padding:6px 12px;border-radius:6px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;cursor:pointer;font-size:12px;font-family:'Inter',sans-serif}
+.pagination .page-btn:disabled{opacity:.3;cursor:not-allowed}
+.pagination .page-btn:hover:not(:disabled){background:rgba(255,255,255,.06)}
+/* ── BADGES ── */
+.badge{display:inline-block;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:600}
+.badge-active{background:rgba(16,185,129,.15);color:#10b981}
+.badge-inactive{background:rgba(100,116,139,.15);color:#94a3b8}
+.badge-pending{background:rgba(245,158,11,.15);color:#f59e0b}
+.badge-new{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge-viewing{background:rgba(245,158,11,.15);color:#f59e0b}
+.badge-application{background:rgba(139,92,246,.15);color:#a78bfa}
+.badge-referencing{background:rgba(249,115,22,.15);color:#fb923c}
+.badge-guarantor{background:rgba(236,72,153,.15);color:#f472b6}
+.badge-approved{background:rgba(16,185,129,.15);color:#34d399}
+.badge-agreement,.badge-signature{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge-move-in{background:rgba(16,185,129,.15);color:#10b981}
+.badge-rejected{background:rgba(239,68,68,.15);color:#ef4444}
+.badge-withdrawn{background:rgba(100,116,139,.15);color:#94a3b8}
+.badge-vacant{background:rgba(239,68,68,.15);color:#ef4444}
+.badge-occupied{background:rgba(16,185,129,.15);color:#10b981}
+/* ── DETAIL PANEL ── */
+.detail-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:200}
+.detail-overlay.open{display:block}
+.detail-panel{position:fixed;top:0;right:-600px;width:580px;max-width:100vw;bottom:0;background:#1e293b;border-left:1px solid rgba(255,255,255,.08);z-index:201;transition:right .3s ease;overflow-y:auto;box-shadow:-10px 0 30px rgba(0,0,0,.4)}
+.detail-panel.open{right:0}
+.detail-header{display:flex;justify-content:space-between;align-items:flex-start;padding:20px 24px;border-bottom:1px solid rgba(255,255,255,.08);position:sticky;top:0;background:#1e293b;z-index:2}
+.detail-header h2{font-size:18px;font-weight:700;color:#f1f5f9}
+.detail-header .close-btn{background:none;border:none;color:#64748b;font-size:22px;cursor:pointer;padding:4px}
+.detail-header .close-btn:hover{color:#e2e8f0}
+.detail-body{padding:20px 24px}
+.detail-section{margin-bottom:24px}
+.detail-section h3{font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.detail-field{}
+.detail-field .label{font-size:11px;color:#64748b;margin-bottom:2px}
+.detail-field .val{font-size:13px;color:#e2e8f0;word-break:break-word}
+.detail-field .val.full{grid-column:1/-1}
+/* ── FORMS ── */
+.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:300;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:#1e293b;border:1px solid rgba(255,255,255,.08);border-radius:16px;width:480px;max-width:90vw;max-height:90vh;overflow-y:auto;padding:28px 32px}
+.modal h2{font-size:18px;font-weight:700;color:#f1f5f9;margin-bottom:4px}
+.modal .sub{font-size:13px;color:#64748b;margin-bottom:20px}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:12px;font-weight:500;color:#94a3b8;margin-bottom:4px}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:9px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:13px;font-family:'Inter',sans-serif;outline:none}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,.1)}
+.form-group textarea{resize:vertical;min-height:60px}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+.form-actions .btn{padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;font-family:'Inter',sans-serif;cursor:pointer;border:none;transition:all .15s}
+.form-actions .btn-cancel{background:transparent;color:#94a3b8;border:1px solid #334155}
+.form-actions .btn-cancel:hover{color:#e2e8f0}
+.form-actions .btn-submit{background:#3b82f6;color:#fff}
+.form-actions .btn-submit:hover{background:#2563eb}
+/* ── APPLICANT PIPELINE ── */
+.pipeline{display:flex;gap:12px;overflow-x:auto;padding-bottom:16px;min-height:60vh}
+.pipeline-col{flex:0 0 220px;min-width:200px;background:#1e293b;border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:12px;display:flex;flex-direction:column}
+.pipeline-col .col-header{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#64748b;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;justify-content:space-between}
+.pipeline-col .col-header .count{background:rgba(255,255,255,.06);padding:2px 7px;border-radius:6px;font-size:11px}
+.pipeline-card{background:#0f172a;border:1px solid rgba(255,255,255,.06);border-radius:8px;padding:12px;margin-bottom:8px;cursor:pointer;transition:all .15s}
+.pipeline-card:hover{border-color:rgba(59,130,246,.3);transform:translateY(-1px)}
+.pipeline-card .name{font-size:13px;font-weight:600;color:#e2e8f0}
+.pipeline-card .meta{font-size:11px;color:#64748b;margin-top:4px;display:flex;flex-direction:column;gap:2px}
+/* ── SEARCH ── */
+.search-bar{display:flex;gap:8px;margin-bottom:24px}
+.search-bar input{flex:1;padding:12px 16px;border-radius:10px;border:1px solid #334155;background:#1e293b;color:#e2e8f0;font-size:15px;font-family:'Inter',sans-serif;outline:none}
+.search-bar input:focus{border-color:#3b82f6}
+.search-bar .btn{padding:12px 20px}
+.search-group{margin-bottom:24px}
+.search-group h3{font-size:14px;font-weight:600;color:#94a3b8;margin-bottom:10px;text-transform:capitalize}
+.search-item{padding:10px 14px;background:#1e293b;border:1px solid rgba(255,255,255,.06);border-radius:8px;margin-bottom:6px;cursor:pointer;transition:all .15s}
+.search-item:hover{border-color:rgba(59,130,246,.3)}
+.search-item .title{font-size:13px;font-weight:600;color:#e2e8f0}
+.search-item .desc{font-size:11px;color:#64748b;margin-top:2px}
+/* ── FINANCE ── */
+.finance-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-bottom:24px}
+.finance-card{background:#1e293b;border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:18px 20px}
+.finance-card .label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+.finance-card .value{font-size:22px;font-weight:700;color:#f1f5f9}
+.finance-card .value.green{color:#10b981}
+.finance-card .value.red{color:#ef4444}
+.finance-card .value.blue{color:#3b82f6}
+/* ── EMPTY STATE ── */
+.empty-state{text-align:center;padding:48px 20px;color:#64748b}
+.empty-state .icon{font-size:48px;margin-bottom:12px}
+.empty-state h3{color:#94a3b8;font-size:16px;margin-bottom:4px}
+.empty-state p{font-size:13px}
+/* ── LOADING ── */
+.loading{display:flex;align-items:center;justify-content:center;padding:48px;color:#64748b;font-size:14px}
+.spinner{width:20px;height:20px;border:2px solid rgba(255,255,255,.08);border-top-color:#3b82f6;border-radius:50%;animation:spin .6s linear infinite;margin-right:10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* ── TOAST ── */
+.toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:500;z-index:999;opacity:0;transform:translateY(10px);transition:all .3s;max-width:400px}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.success{background:#10b981;color:#fff}
+.toast.error{background:#ef4444;color:#fff}
+.toast.info{background:#3b82f6;color:#fff}
+/* ── RENT COLLECTION ── */
+.rent-collection{display:flex;flex-direction:column;gap:8px}
+.rent-collection .rc-header{display:flex;justify-content:space-between;font-size:13px;color:#94a3b8}
+.rent-collection .rc-header .rc-collected{color:#10b981;font-weight:600}
+.rent-collection .rc-header .rc-expected{color:#94a3b8}
+.rent-collection .rc-bar{height:10px;background:#0f172a;border-radius:6px;overflow:hidden;position:relative}
+.rent-collection .rc-bar .rc-fill{height:100%;border-radius:6px;transition:width .6s ease;background:linear-gradient(90deg,#10b981,#34d399)}
+.rent-collection .rc-bar .rc-fill.warning{background:linear-gradient(90deg,#f59e0b,#fbbf24)}
+.rent-collection .rc-bar .rc-fill.danger{background:linear-gradient(90deg,#ef4444,#f87171)}
+.rent-collection .rc-stats{display:flex;justify-content:space-between;font-size:12px;color:#64748b;margin-top:2px}
+.rent-collection .rc-stats .rc-pct{font-weight:600;color:#e2e8f0}
+/* ── ALERTS ── */
+.alert-item{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;transition:all .15s}
+.alert-item:last-child{border-bottom:none}
+.alert-item:hover{background:rgba(255,255,255,.02)}
+.alert-item .alert-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.alert-item .alert-icon.warning{background:rgba(245,158,11,.15);color:#f59e0b}
+.alert-item .alert-icon.danger{background:rgba(239,68,68,.15);color:#ef4444}
+.alert-item .alert-icon.info{background:rgba(59,130,246,.15);color:#60a5fa}
+.alert-item .alert-icon.success{background:rgba(16,185,129,.15);color:#10b981}
+.alert-item .alert-body{flex:1}
+.alert-item .alert-body .alert-title{font-size:13px;font-weight:600;color:#e2e8f0}
+.alert-item .alert-body .alert-desc{font-size:12px;color:#64748b;margin-top:2px}
+.alert-item .alert-action{font-size:12px;color:#3b82f6;font-weight:500;white-space:nowrap}
+/* ── RENEWAL ITEMS ── */
+.renewal-item{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;transition:all .15s}
+.renewal-item:last-child{border-bottom:none}
+.renewal-item:hover{background:rgba(255,255,255,.02)}
+.renewal-item .renewal-info{flex:1}
+.renewal-item .renewal-info .renewal-tenant{font-size:13px;font-weight:600;color:#e2e8f0}
+.renewal-item .renewal-info .renewal-meta{font-size:11px;color:#64748b;margin-top:2px}
+.renewal-item .renewal-date{font-size:12px;color:#f59e0b;white-space:nowrap}
+.kpi-card{cursor:pointer}
+/* ── RESPONSIVE ── */
+@media(max-width:768px){
+.sidebar{transform:translateX(-100%)}
+.sidebar.open{transform:translateX(0)}
+.main{margin-left:0}
+.topbar .hamburger{display:block}
+.kpi-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}
+.detail-panel{width:100vw}
+.form-row{grid-template-columns:1fr}
+.pipeline{flex-direction:column}
+.pipeline-col{flex:1 1 auto}
+}
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#334155;border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:#475569}
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<div class="sidebar" id="sidebar">
+  <div class="brand">
+    <h1>Banksia<span>OS</span></h1>
+    <div class="tagline">HMO Operations</div>
+  </div>
+  <div class="nav">
+    <div class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
+      <span class="icon">📊</span> Dashboard
+    </div>
+    <div class="nav-item" data-page="properties" onclick="navigate('properties')">
+      <span class="icon">🏘️</span> Properties
+    </div>
+    <div class="nav-item" data-page="units" onclick="navigate('units')">
+      <span class="icon">🚪</span> Units
+    </div>
+    <div class="nav-item" data-page="tenancies" onclick="navigate('tenancies')">
+      <span class="icon">📋</span> Tenancies
+    </div>
+    <div class="nav-item" data-page="tenants" onclick="navigate('tenants')">
+      <span class="icon">👤</span> Tenants
+    </div>
+    <div class="nav-item" data-page="applicants" onclick="navigate('applicants')">
+      <span class="icon">📝</span> Applicants
+    </div>
+    <div class="nav-item" data-page="finance" onclick="navigate('finance')">
+      <span class="icon">💰</span> Finance
+    </div>
+    <div class="nav-item" data-page="search" onclick="navigate('search')">
+      <span class="icon">🔍</span> Search
+    </div>
+    <div class="nav-item" data-page="documents" onclick="navigate('documents')">
+      <span class="icon">📄</span> Documents
+    </div>
+    <div class="nav-item" data-page="access" onclick="navigate('access')">
+      <span class="icon">🔑</span> Access
+    </div>
+    <div class="nav-item" data-page="users" onclick="navigate('users')">
+      <span class="icon">👥</span> Users
+    </div>
+  </div>
+  <div class="user-section">
+    <div class="name" id="sidebar-user-name">{{ user.username }}</div>
+    <div style="margin-top:4px">{{ user.role }}</div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main" id="main-content">
+  <div class="topbar">
+    <div class="left">
+      <button class="hamburger" onclick="toggleSidebar()">☰</button>
+      <div>
+        <div class="page-title" id="page-title">Dashboard</div>
+        <div class="page-subtitle" id="page-subtitle">HMO operations overview</div>
+      </div>
+    </div>
+    <div class="right">
+      <div class="user-info">
+        <div class="name">{{ user.username }}</div>
+        <div class="role">{{ user.role }}</div>
+      </div>
+      <div class="date-display" id="date-display"></div>
+    </div>
+  </div>
+  <div class="content" id="page-content"></div>
+</div>
+
+<!-- DETAIL PANEL -->
+<div class="detail-overlay" id="detail-overlay" onclick="closeDetail()"></div>
+<div class="detail-panel" id="detail-panel">
+  <div class="detail-header">
+    <h2 id="detail-title">Detail</h2>
+    <button class="close-btn" onclick="closeDetail()">✕</button>
+  </div>
+  <div class="detail-body" id="detail-body"></div>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal" id="modal-content" onclick="e=>e.stopPropagation()">
+    <div id="modal-inner"></div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+const user = {{ user | tojson | safe }};
+const API = '/api/banksia-os';
+
+// ── INIT ──
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('date-display').textContent = new Date().toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short', year:'numeric' });
+  navigate('dashboard');
+});
+
+// ── NAVIGATION ──
+function navigate(page) {
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  const nav = document.querySelector(`.nav-item[data-page="${page}"]`);
+  if (nav) nav.classList.add('active');
+  if (window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open');
+  closeDetail();
+  renderPage(page);
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+}
+
+// ── DETAIL PANEL ──
+function openDetail(title, html) {
+  document.getElementById('detail-title').textContent = title;
+  document.getElementById('detail-body').innerHTML = html;
+  document.getElementById('detail-overlay').classList.add('open');
+  document.getElementById('detail-panel').classList.add('open');
+}
+function closeDetail() {
+  document.getElementById('detail-overlay').classList.remove('open');
+  document.getElementById('detail-panel').classList.remove('open');
+}
+
+// ── MODAL ──
+function openModal(html) {
+  document.getElementById('modal-inner').innerHTML = html;
+  document.getElementById('modal-overlay').classList.add('open');
+}
+function closeModal(e) {
+  if (e && e.target !== document.getElementById('modal-overlay')) return;
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+// ── TOAST ──
+function showToast(msg, type='success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast ' + type + ' show';
+  setTimeout(() => t.classList.remove('show'), 3500);
+}
+
+// ── API HELPER ──
+async function api(path, opts={}) {
+  const res = await fetch(API + path, {
+    headers: {'Content-Type':'application/json','Accept':'application/json'},
+    ...opts
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || 'API error');
+  return data;
+}
+
+// ── FORMATTERS ──
+function fmtDate(d) { if (!d) return '—'; try{return new Date(d).toLocaleDateString('en-GB')}catch(e){return d} }
+function fmtMoney(n) { if (n==null) return '—'; return '£' + Number(n).toLocaleString('en-GB', {minimumFractionDigits:2,maximumFractionDigits:2}) }
+function fmtPct(n) { if (n==null) return '—'; return Number(n).toFixed(1) + '%' }
+function statusBadge(s) {
+  const map = {'active':'badge-active','inactive':'badge-inactive','pending':'badge-pending','vacant':'badge-vacant','occupied':'badge-occupied',
+    'new':'badge-new','viewing':'badge-viewing','application':'badge-application','referencing':'badge-referencing','guarantor':'badge-guarantor',
+    'approved':'badge-approved','agreement':'badge-agreement','signature':'badge-signature','move in':'badge-move-in','move_in':'badge-move-in','rejected':'badge-rejected','withdrawn':'badge-withdrawn',
+    'available':'badge-vacant','tenanted':'badge-occupied','periodic':'badge-active','fixed term':'badge-active'};
+  const cls = map[(s||'').toLowerCase()] || 'badge-pending';
+  return `<span class="badge ${cls}">${escHtml(s||'Unknown')}</span>`;
+}
+function escHtml(s) { if (s==null) return ''; const d=document.createElement('div'); d.textContent=String(s); return d.innerHTML; }
+
+// ══════════════════════════════════════════
+// PAGE RENDERERS
+// ══════════════════════════════════════════
+
+function renderPage(page) {
+  const titles = {
+    dashboard: ['Dashboard', 'HMO operations overview'],
+    properties: ['Properties', 'Manage your property portfolio'],
+    units: ['Units', 'Individual rooms and flats'],
+    tenancies: ['Tenancies', 'All active and past tenancies'],
+    tenants: ['Tenants', 'Current and former tenants'],
+    applicants: ['Applicants', 'Applicant pipeline and referencing'],
+    finance: ['Finance', 'Rent, arrears, and deposits'],
+    search: ['Search', 'Search across all records'],
+    documents: ['Documents', 'Tenancy agreements, Section 21 notices, and more'],
+    access: ['Access', 'Keys, codes, and fobs management'],
+    users: ['Users', 'Team members and permissions']
+  };
+  const t = titles[page] || ['Page', ''];
+  document.getElementById('page-title').textContent = t[0];
+  document.getElementById('page-subtitle').textContent = t[1];
+  const fns = {
+    dashboard: renderDashboard,
+    properties: renderProperties,
+    units: renderUnits,
+    tenancies: renderTenancies,
+    tenants: renderTenants,
+    applicants: renderApplicants,
+    finance: renderFinance,
+    search: renderSearch,
+    documents: renderDocuments,
+    access: renderAccess,
+    users: renderUsers
+  };
+  const fn = fns[page];
+  if (fn) fn(); else document.getElementById('page-content').innerHTML = '<div class="loading"><div class="spinner"></div>Loading...</div>';
+}
+
+// ── DASHBOARD ──
+async function renderDashboard() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading dashboard...</div>';
+  try {
+    const [dashRes, finRes] = await Promise.all([
+      api('/dashboard'),
+      api('/finance/overview').catch(() => null)
+    ]);
+    const d = dashRes.data;
+    const fin = finRes ? finRes.data : {};
+    const rentCollected = fin.total_collected_monthly || fin.total_paid_this_month || 0;
+    const rentExpected = fin.total_expected_monthly || fin.monthly_income || d.monthly_rent_income || 0;
+    const rentPct = rentExpected > 0 ? Math.min(Math.round((rentCollected / rentExpected) * 100), 100) : 0;
+    const rentBarClass = rentPct >= 90 ? '' : (rentPct >= 70 ? 'warning' : 'danger');
+    const pendingApps = d.pending_applicants || d.total_pending_applicants || 0;
+    const hasAlerts = (d.total_arrears > 0) || (pendingApps > 0) || (d.upcoming_move_outs_count > 0);
+
+    el.innerHTML = `
+      <div class="kpi-grid">
+        <div class="kpi-card" onclick="navigate('properties')"><div class="label">🏘️ Properties</div><div class="value blue">${d.total_properties||0}</div><div class="sub">Total portfolio</div></div>
+        <div class="kpi-card" onclick="navigate('units')"><div class="label">🚪 Units</div><div class="value blue">${d.total_units||0}</div><div class="sub">${d.active_tenancies||0} tenanted</div></div>
+        <div class="kpi-card" onclick="navigate('tenancies')"><div class="label">📋 Active Tenancies</div><div class="value green">${d.active_tenancies||0}</div><div class="sub">Of ${d.total_tenancies||0} total</div></div>
+        <div class="kpi-card" onclick="navigate('tenancies')"><div class="label">📊 Occupancy Rate</div><div class="value ${(d.unit_occupancy_rate||0)>=80?'green':'amber'}">${fmtPct(d.unit_occupancy_rate)}</div><div class="sub">Unit fill rate</div></div>
+        <div class="kpi-card" onclick="navigate('tenants')"><div class="label">👤 Tenants</div><div class="value purple">${d.total_tenants||0}</div><div class="sub">Registered tenants</div></div>
+        <div class="kpi-card" onclick="navigate('applicants')"><div class="label">📝 Applicants</div><div class="value blue">${d.total_applicants||0}</div><div class="sub">${pendingApps} pending</div></div>
+        <div class="kpi-card" onclick="navigate('finance')"><div class="label">💰 Monthly Rent</div><div class="value green">${fmtMoney(d.monthly_rent_income)}</div><div class="sub">Gross monthly income</div></div>
+        <div class="kpi-card" onclick="navigate('finance')"><div class="label">⚠️ Arrears</div><div class="value red">${fmtMoney(d.total_arrears)}</div><div class="sub">Outstanding</div></div>
+        <div class="kpi-card" onclick="navigate('finance')"><div class="label">🏦 Deposits Held</div><div class="value blue">${fmtMoney(d.total_deposits_held)}</div><div class="sub">Active tenancies</div></div>
+        <div class="kpi-card" onclick="navigate('tenancies')"><div class="label">📥 Moving In (This Month)</div><div class="value green">${d.recent_arrivals_count||0}</div><div class="sub">Expected arrivals</div></div>
+        <div class="kpi-card" onclick="navigate('tenancies')"><div class="label">📤 Moving Out (This Month)</div><div class="value amber">${d.upcoming_move_outs_count||0}</div><div class="sub">Expected departures</div></div>
+      </div>
+      ${d.leading_property?`<div class="kpi-grid" style="margin-top:0"><div class="kpi-card" style="grid-column:1/-1"><div class="label">🏆 Leading Property</div><div class="value blue">${escHtml(d.leading_property.name)}</div><div class="sub">${fmtMoney(d.leading_property.total_rent)}/mo · highest rental income</div></div></div>`:''}
+      <!-- Rent Collection -->
+      <div class="table-wrap" style="margin-bottom:14px">
+        <div class="table-toolbar"><strong>💰 Rent Collection</strong><span style="font-size:12px;color:#64748b">This month</span></div>
+        <div style="padding:16px 18px">
+          <div class="rent-collection">
+            <div class="rc-header">
+              <span class="rc-collected">Collected: ${fmtMoney(rentCollected)}</span>
+              <span class="rc-expected">Expected: ${fmtMoney(rentExpected)}</span>
+            </div>
+            <div class="rc-bar"><div class="rc-fill ${rentBarClass}" style="width:${rentPct}%"></div></div>
+            <div class="rc-stats">
+              <span class="rc-pct">${rentPct}% collected</span>
+              <span>${fmtMoney(Math.max(rentExpected-rentCollected,0))} outstanding</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Two-column: Ending Soon + Moving In -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+        <div class="table-wrap">
+          <div class="table-toolbar"><strong>🔔 Ending Soon (60 days)</strong></div>
+          <div id="ending-soon-list"><div class="loading" style="padding:24px"><div class="spinner"></div></div></div>
+        </div>
+        <div class="table-wrap">
+          <div class="table-toolbar"><strong>📥 Moving In This Month</strong></div>
+          <div id="moving-in-list"><div class="loading" style="padding:24px"><div class="spinner"></div></div></div>
+        </div>
+      </div>
+      <!-- Alerts & Attention Needed -->
+      <div class="table-wrap">
+        <div class="table-toolbar"><strong>🔔 Alerts &amp; Attention Needed</strong></div>
+        <div id="alerts-list">
+          ${hasAlerts?`<div class="loading" style="padding:24px"><div class="spinner"></div></div>`:`<div class="empty-state" style="padding:24px"><p>✓ All clear — no immediate attention needed</p></div>`}
+        </div>
+      </div>
+    `;
+    // Load ending soon
+    api('/tenancies/ending-soon').then(r => {
+      const items = r.data || [];
+      let html = '';
+      if (items.length===0) html = '<div class="empty-state" style="padding:24px"><p>No tenancies ending soon</p></div>';
+      else {
+        html = '<table><thead><tr><th>Property</th><th>Tenant</th><th>Ends</th><th>Rent</th></tr></thead><tbody>';
+        items.forEach(t => {
+          html += `<tr onclick="showTenancy(${t.id})"><td>${escHtml(t.full_address||t.ref||'—')}</td><td>${escHtml(t.main_tenant_name||'—')}</td><td>${fmtDate(t.end_date)}</td><td>${fmtMoney(t.rent_amount)}</td></tr>`;
+        });
+        html += '</tbody></table>';
+      }
+      document.getElementById('ending-soon-list').innerHTML = html;
+    }).catch(() => document.getElementById('ending-soon-list').innerHTML = '<div class="empty-state" style="padding:24px"><p>Could not load</p></div>');
+    // Load moving in
+    api('/tenancies/moving-in-this-month').then(r => {
+      const items = r.data || [];
+      let html = '';
+      if (items.length===0) html = '<div class="empty-state" style="padding:24px"><p>No arrivals this month</p></div>';
+      else {
+        html = '<table><thead><tr><th>Property</th><th>Tenant</th><th>Move In</th><th>Rent</th></tr></thead><tbody>';
+        items.forEach(t => {
+          html += `<tr onclick="showTenancy(${t.id})"><td>${escHtml(t.full_address||t.ref||'—')}</td><td>${escHtml(t.main_tenant_name||'—')}</td><td>${fmtDate(t.move_in_date||t.start_date)}</td><td>${fmtMoney(t.rent_amount)}</td></tr>`;
+        });
+        html += '</tbody></table>';
+      }
+      document.getElementById('moving-in-list').innerHTML = html;
+    }).catch(() => document.getElementById('moving-in-list').innerHTML = '<div class="empty-state" style="padding:24px"><p>Could not load</p></div>');
+    // Load alerts
+    api('/tenancies/ending-soon?days=30').then(r => {
+      const urgent = (r.data||[]).filter(t => {
+        const end = new Date(t.end_date);
+        const now = new Date();
+        const days = Math.ceil((end-now)/(1000*60*60*24));
+        return days <= 30;
+      });
+      let alerts = [];
+      // Arrears alert
+      if (d.total_arrears > 0) alerts.push({icon:'danger', emoji:'⚠️', title:'Arrears Outstanding', desc:`${fmtMoney(d.total_arrears)} in unpaid rent — review finance section`, action:'View Finance', nav:'finance'});
+      // Ending within 30 days
+      if (urgent.length > 0) alerts.push({icon:'warning', emoji:'🔔', title:`${urgent.length} tenanc${urgent.length===1?'y':'ies'} ending within 30 days`, desc:'Renewal or move-out action required soon', action:'View Tenancies', nav:'tenancies'});
+      // Pending applicants
+      if (pendingApps > 0) alerts.push({icon:'info', emoji:'📝', title:`${pendingApps} pending applicant${pendingApps===1?'':'s'}`, desc:'Applicants awaiting status update in the pipeline', action:'View Applicants', nav:'applicants'});
+      // Upcoming move-outs
+      if (d.upcoming_move_outs_count > 0) alerts.push({icon:'warning', emoji:'📤', title:`${d.upcoming_move_outs_count} move-out${d.upcoming_move_outs_count===1?'':'s'} this month`, desc:'Departures need check-out inspections and unit turnover', action:'View Tenancies', nav:'tenancies'});
+      // Occupancy rate low
+      const occRate = d.unit_occupancy_rate || 0;
+      if (occRate < 70 && occRate > 0) alerts.push({icon:'danger', emoji:'📊', title:`Occupancy rate at ${fmtPct(occRate)}`, desc:'Below 70% — consider marketing vacant units', action:'View Units', nav:'units'});
+      let html = '';
+      if (alerts.length===0) { html = '<div class="empty-state" style="padding:24px"><p>✓ All clear — no immediate attention needed</p></div>'; }
+      else {
+        alerts.forEach(a => {
+          html += `<div class="alert-item" onclick="navigate('${a.nav}')">
+            <div class="alert-icon ${a.icon}">${a.emoji}</div>
+            <div class="alert-body">
+              <div class="alert-title">${escHtml(a.title)}</div>
+              <div class="alert-desc">${escHtml(a.desc)}</div>
+            </div>
+            <div class="alert-action">${a.action} →</div>
+          </div>`;
+        });
+      }
+      document.getElementById('alerts-list').innerHTML = html;
+    }).catch(() => {
+      // Show basic alerts even if 30-day endpoint fails
+      let alerts = [];
+      if (d.total_arrears > 0) alerts.push({icon:'danger', emoji:'⚠️', title:'Arrears Outstanding', desc:`${fmtMoney(d.total_arrears)} in unpaid rent`, action:'View Finance', nav:'finance'});
+      if (pendingApps > 0) alerts.push({icon:'info', emoji:'📝', title:`${pendingApps} pending applicant${pendingApps===1?'':'s'}`, desc:'Awaiting status update', action:'View Applicants', nav:'applicants'});
+      let html = '';
+      if (alerts.length===0) { html = '<div class="empty-state" style="padding:24px"><p>✓ All clear</p></div>'; }
+      else {
+        alerts.forEach(a => {
+          html += `<div class="alert-item" onclick="navigate('${a.nav}')">
+            <div class="alert-icon ${a.icon}">${a.emoji}</div>
+            <div class="alert-body">
+              <div class="alert-title">${escHtml(a.title)}</div>
+              <div class="alert-desc">${escHtml(a.desc)}</div>
+            </div>
+            <div class="alert-action">View →</div>
+          </div>`;
+        });
+      }
+      document.getElementById('alerts-list').innerHTML = html;
+    });
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><h3>Failed to load dashboard</h3><p>${escHtml(e.message)}</p></div>`;
+  }
+}
+
+// ── PROPERTIES ──
+let propsState = { page:1, perPage:20, search:'', total:0 };
+
+// ── PAGINATION ──
+function paginationControls(state, fnName) {
+  const totalPages = Math.ceil(state.total / state.perPage) || 1;
+  return `<div class="pagination"><span>${state.total} total — Page ${state.page} of ${totalPages}</span><div><button class="page-btn" onclick="${fnName}(${state.page-1})" ${state.page<=1?'disabled':''}>← Prev</button><button class="page-btn" style="margin-left:6px" onclick="${fnName}(${state.page+1})" ${state.page>=totalPages?'disabled':''}>Next →</button></div></div>`;
+}
+async function renderProperties() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading properties...</div>';
+  try {
+    const {page,perPage,search} = propsState;
+    const res = await api(`/properties?page=${page}&per_page=${perPage}&search=${encodeURIComponent(search)}`);
+    propsState.total = res.total;
+    const items = res.data || [];
+    let html = '<div class="table-wrap">';
+    html += '<div class="table-toolbar"><div class="left">';
+    html += `<input placeholder="Search properties..." value="${escHtml(search)}" onkeyup="if(event.key==='Enter'){propsState.search=this.value;propsState.page=1;renderProperties()}" style="width:220px">`;
+    html += '</div><div class="right"></div></div>';
+    if (items.length===0) {
+      html += '<div class="empty-state"><div class="icon">🏘️</div><h3>No properties found</h3></div>';
+    } else {
+      html += '<table><thead><tr><th>Ref</th><th>Name</th><th>Address</th><th>City</th><th>Type</th><th>Units</th></tr></thead><tbody>';
+      items.forEach(p => {
+        html += `<tr onclick="showProperty(${p.id})"><td>${escHtml(p.ref||'—')}</td><td><strong>${escHtml(p.name||'—')}</strong></td><td>${escHtml(p.address_line_1||'')}</td><td>${escHtml(p.city||'')}</td><td>${escHtml(p.property_type||'—')}</td><td>${p.total_units||0}</td></tr>`;
+      });
+      html += '</tbody></table>';
+      html += paginationControls(propsState, 'propsPagination');
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><h3>Failed to load properties</h3><p>${escHtml(e.message)}</p></div>`;
+  }
+}
+function propsPagination(p) { propsState.page=p; renderProperties(); }
+async function showProperty(id) {
+  try {
+    const res = await api(`/properties/${id}`);
+    const p = res.data;
+    let html = `<div class="detail-section"><h3>Overview</h3><div class="detail-grid">`;
+    const fields = [['Ref','ref'],['Name','name'],['Address Line 1','address_line_1'],['Address Line 2','address_line_2'],['City','city'],['County','county'],['Postcode','postcode'],['Country','country'],['Property Type','property_type'],['Total Units','total_units'],['Rentable Units','rentable_units'],['Max Occupancy','max_occupancy'],['Bedrooms','bedrooms'],['Bathrooms','bathrooms'],['Council Tax Band','council_tax_band'],['Council Account','council_account_no'],['Owner','property_owner_name'],['Features','features'],['Notes','notes']];
+    fields.forEach(([l,f]) => {
+      const v = p[f]; if (v!=null && v!=='') html += `<div class="detail-field"><div class="label">${l}</div><div class="val">${escHtml(v)}</div></div>`;
+    });
+    html += '</div></div>';
+    // Units for this property
+    if (p.units && p.units.length > 0) {
+      html += '<div class="detail-section"><h3>Units (' + p.units.length + ')</h3><table><thead><tr><th>Ref</th><th>Type</th><th>Status</th><th>Rent</th></tr></thead><tbody>';
+      p.units.forEach(u => {
+        html += `<tr onclick="closeDetail();propsState.page=1;renderProperties();setTimeout(()=>showUnit(${u.id}),100)"><td>${escHtml(u.unit_ref||'—')}</td><td>${escHtml(u.unit_type||'—')}</td><td>${statusBadge(u.unit_status)}</td><td>${fmtMoney(u.market_rent)}</td></tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+    // Images section
+    try {
+      const imgRes = await api(`/properties/${id}/images`);
+      if (imgRes.data && imgRes.data.length > 0) {
+        html += '<div class="detail-section"><h3>Gallery</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">';
+        imgRes.data.forEach(img => {
+          html += `<img src="${escHtml(img)}" style="width:100%;height:150px;object-fit:cover;border-radius:8px;border:1px solid rgba(255,255,255,.06)" loading="lazy">`;
+        });
+        html += '</div></div>';
+      }
+    } catch(e) {}
+    // Image upload button
+    html += `<div class="detail-section"><button class="btn btn-primary btn-sm" onclick="uploadPropertyImage(${id})">📷 Upload Image</button></div>`;
+    openDetail(p.name||'Property', html);
+  } catch(e) {
+    showToast('Failed to load property: ' + e.message, 'error');
+  }
+}
+
+// ── UNITS ──
+let unitsState = { page:1, perPage:20, search:'', property_id:'', total:0 };
+async function renderUnits() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading units...</div>';
+  try {
+    const {page,perPage,search,property_id} = unitsState;
+    let url = `/units?page=${page}&per_page=${perPage}&search=${encodeURIComponent(search)}`;
+    if (property_id) url += `&property_id=${property_id}`;
+    const res = await api(url);
+    unitsState.total = res.total;
+    const items = res.data || [];
+    let html = '<div class="table-wrap">';
+    html += '<div class="table-toolbar"><div class="left">';
+    html += `<input placeholder="Search units..." value="${escHtml(search)}" onkeyup="if(event.key==='Enter'){unitsState.search=this.value;unitsState.page=1;renderUnits()}" style="width:200px">`;
+    html += `<select onchange="unitsState.property_id=this.value;unitsState.page=1;renderUnits()"><option value="">All Properties</option></select>`;
+    html += '</div><div class="right"></div></div>';
+    if (items.length===0) {
+      html += '<div class="empty-state"><div class="icon">🚪</div><h3>No units found</h3></div>';
+    } else {
+      html += '<table><thead><tr><th>Ref</th><th>Type</th><th>Status</th><th>Address</th><th>Rent</th><th>Bedrooms</th></tr></thead><tbody>';
+      items.forEach(u => {
+        html += `<tr onclick="showUnit(${u.id})"><td>${escHtml(u.unit_ref||'—')}</td><td>${escHtml(u.unit_type||'—')}</td><td>${statusBadge(u.unit_status)}</td><td>${escHtml(u.full_address||'')}</td><td>${fmtMoney(u.market_rent)}</td><td>${u.bedrooms||'—'}</td></tr>`;
+      });
+      html += '</tbody></table>';
+      html += paginationControls(unitsState, 'unitsPagination');
+    }
+    html += '</div>';
+    el.innerHTML = html;
+    // Load property options for filter
+    api('/properties?per_page=100').then(r => {
+      const opts = (r.data||[]).map(p => `<option value="${p.id}"${property_id==p.id?' selected':''}>${escHtml(p.name||p.ref||p.id)}</option>`).join('');
+      el.querySelector('select').innerHTML = '<option value="">All Properties</option>' + opts;
+    }).catch(()=>{});
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><h3>Failed to load units</h3><p>${escHtml(e.message)}</p></div>`;
+  }
+}
+function unitsPagination(p) { unitsState.page=p; renderUnits(); }
+async function showUnit(id) {
+  try {
+    const res = await api(`/units/${id}`);
+    const u = res.data;
+    let html = `<div class="detail-section"><h3>Unit Details</h3><div class="detail-grid">`;
+    const fields = [['Ref','unit_ref'],['Type','unit_type'],['Status','unit_status'],['Full Address','full_address'],['Market Rent','market_rent'],['Frequency','market_rent_frequency'],['Deposit Amount','deposit_amount'],['Description','short_description'],['Furnished','furnished'],['Max Occupancy','max_occupancy'],['Bedrooms','bedrooms'],['Bathrooms','bathrooms'],['Council Tax Band','council_tax_band'],['Available From','available_from'],['Days Vacant','days_vacant'],['Features','features'],['Notes','notes']];
+    fields.forEach(([l,f]) => {
+      const v = u[f]; if (v!=null && v!=='') html += `<div class="detail-field"><div class="label">${l}</div><div class="val">${f.includes('rent')||f.includes('deposit')?fmtMoney(v):escHtml(v)}</div></div>`;
+    });
+    html += '</div></div>';
+    openDetail(u.unit_ref||'Unit', html);
+  } catch(e) {
+    showToast('Failed to load unit: ' + e.message, 'error');
+  }
+}
+
+// ── TENANCY DETAIL + Rent Schedule ──
+async function showTenancy(id) {
+  try {
+    const [tenRes, rentRes] = await Promise.all([
+      api(`/tenancies/${id}`),
+      api(`/finance/rent-schedule/${id}`).catch(() => null)
+    ]);
+    const t = tenRes.data;
+    const schedule = rentRes ? rentRes.data : null;
+    let html = `<div class="detail-section"><h3>Tenancy Details</h3><div class="detail-grid">`;
+    const fields = [['Ref','ref'],['Status','status'],['Full Address','full_address'],['Tenancy Type','tenancy_type'],['Contract Type','contract_type'],['Start Date','start_date'],['End Date','end_date'],['Renewal Start','renewal_start'],['Renewal End','renewal_end'],['Break Clause','break_clause_date'],['Notice Period','notice_period'],['Move In Date','move_in_date'],['Move Out Date','move_out_date'],['Rent Amount','rent_amount'],['Rent Frequency','rent_frequency'],['Deposit Held By','deposit_held_by'],['Deposit Scheme','deposit_scheme'],['Deposit Registered Amount','deposit_registered_amount'],['Rent Review Date','rent_review_date'],['Section 21 Served','section_21_served'],['Rent Payment Bank','rent_payment_bank'],['Notes','notes']];
+    fields.forEach(([l,f]) => {
+      const v = t[f];
+      if (v!=null && v!=='') {
+        let val = escHtml(v);
+        if (f.includes('rent')||f.includes('deposit')) val = fmtMoney(v);
+        if (f==='section_21_served') val = v ? 'Yes' : 'No';
+        if (f.includes('date')) val = fmtDate(v);
+        html += `<div class="detail-field"><div class="label">${l}</div><div class="val">${val}</div></div>`;
+      }
+    });
+    html += '</div></div>';
+    // Tenants on this tenancy
+    if (t.tenants && t.tenants.length > 0) {
+      html += '<div class="detail-section"><h3>Tenants (' + t.tenants.length + ')</h3>';
+      const tnts = typeof t.tenants === 'string' ? JSON.parse(t.tenants) : t.tenants;
+      if (Array.isArray(tnts)) {
+        tnts.forEach(tn => {
+          const name = typeof tn === 'string' ? tn : (tn.name||tn.first_name+' '+tn.last_name||'—');
+          html += `<div style="padding:8px 12px;background:#0f172a;border-radius:8px;margin-bottom:4px;font-size:13px">${escHtml(name)}</div>`;
+        });
+      }
+      html += '</div>';
+    }
+    // Rent Schedule
+    if (schedule && schedule.payments && schedule.payments.length > 0) {
+      html += '<div class="detail-section"><h3>Rent Schedule (' + schedule.payments.length + ' payments)</h3>';
+      html += '<table><thead><tr><th>#</th><th>Due Date</th><th>Amount</th><th>Period</th></tr></thead><tbody>';
+      schedule.payments.forEach((p,i) => {
+        html += `<tr><td>${i+1}</td><td>${fmtDate(p.due_date||p.date)}</td><td>${fmtMoney(p.amount)}</td><td>${escHtml(p.period||'')}</td></tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+    // Finance summary from tenancy-summary API
+    try {
+      const finRes = await api(`/finance/tenancy-summary/${id}`);
+      const fin = finRes.data;
+      html += `<div class="detail-section"><h3>Financial Summary</h3><div class="detail-grid">
+        <div class="detail-field"><div class="label">Total Expected</div><div class="val">${fmtMoney(fin.total_expected)}</div></div>
+        <div class="detail-field"><div class="label">Total Paid</div><div class="val" style="color:#10b981">${fmtMoney(fin.total_paid)}</div></div>
+        <div class="detail-field"><div class="label">Balance</div><div class="val" style="color:${(fin.balance||0)>=0?'#10b981':'#ef4444'}">${fmtMoney(fin.balance)}</div></div>
+        <div class="detail-field"><div class="label">Next Payment</div><div class="val">${fmtDate(fin.next_payment_date)}</div></div>
+        <div class="detail-field"><div class="label">Arrears</div><div class="val" style="color:#ef4444">${fmtMoney(fin.arrears)}</div></div>
+      </div></div>`;
+    } catch(e) {}
+    // End tenancy button
+    if (t.status && t.status.toLowerCase() !== 'ended') {
+      html += `<div class="detail-section" style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-success btn-sm" onclick="showRenewForm(${t.id})">🔄 Renew</button>
+        <button class="btn btn-primary btn-sm" onclick="showRentReviewForm(${t.id})">📈 Rent Review</button>
+        <button class="btn btn-amber btn-sm" style="background:#d97706;color:#fff" onclick="showSection21Form(${t.id})">⚖️ Section 21</button>
+        <button class="btn btn-danger btn-sm" onclick="showEndTenancyForm(${t.id})">End Tenancy</button>
+      </div>`;
+    }
+    openDetail('Tenancy ' + (t.ref||'#'+id), html);
+  } catch(e) {
+    showToast('Failed to load tenancy: ' + e.message, 'error');
+  }
+}
+let tenState = { page:1, perPage:20, search:'', status:'', total:0 };
+async function renderTenancies() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading tenancies...</div>';
+  try {
+    const {page,perPage,search,status} = tenState;
+    let url = `/tenancies?page=${page}&per_page=${perPage}&search=${encodeURIComponent(search)}`;
+    if (status) url += `&status=${status}`;
+    const res = await api(url);
+    tenState.total = res.total;
+    const items = res.data || [];
+    let html = '<div class="table-wrap">';
+    html += '<div class="table-toolbar"><div class="left">';
+    html += `<input placeholder="Search tenancies..." value="${escHtml(search)}" onkeyup="if(event.key==='Enter'){tenState.search=this.value;tenState.page=1;renderTenancies()}" style="width:200px">`;
+    html += `<select onchange="tenState.status=this.value;tenState.page=1;renderTenancies()"><option value=""${status==''?' selected':''}>Active (Current/Periodic)</option><option value="Current"${status=='Current'?' selected':''}>Current</option><option value="Periodic"${status=='Periodic'?' selected':''}>Periodic</option><option value="all"${status=='all'?' selected':''}>All (Including Past)</option><option value="Past"${status=='Past'?' selected':''}>Past</option></select>`;
+    html += '</div><div class="right">';
+    html += `<button class="btn btn-primary btn-sm" onclick="showNewTenancyForm()">+ New Tenancy</button> `;
+    html += `<button class="btn btn-ghost btn-sm" onclick="tenState.status='';tenState.search='';tenState.page=1;renderTenancies()">Clear</button></div></div>`;
+    if (items.length===0) {
+      html += '<div class="empty-state"><div class="icon">📋</div><h3>No tenancies found</h3></div>';
+    } else {
+      html += '<table><thead><tr><th>Ref</th><th>Property</th><th>Tenant</th><th>Status</th><th>Start</th><th>End</th><th>Rent</th></tr></thead><tbody>';
+      items.forEach(t => {
+        html += `<tr onclick="showTenancy(${t.id})"><td>${escHtml(t.ref||'—')}</td><td>${escHtml(t.full_address||'—')}</td><td>${escHtml(t.main_tenant_name||'—')}</td><td>${statusBadge(t.status)}</td><td>${fmtDate(t.start_date)}</td><td>${fmtDate(t.end_date)}</td><td>${fmtMoney(t.rent_amount)}</td></tr>`;
+      });
+      html += '</tbody></table>';
+      html += paginationControls(tenState, 'tenPagination');
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><h3>Failed to load tenancies</h3><p>${escHtml(e.message)}</p></div>`;
+  }
+}
+function tenPagination(p) { tenState.page=p; renderTenancies(); }
+
+// ── NEW TENANCY FORM ──
+async function showNewTenancyForm() {
+  let props = [];
+  try {
+    const r = await api('/properties?per_page=100');
+    props = r.data || [];
+  } catch(e) {}
+  let propOpts = props.map(p => `<option value="${p.id}">${escHtml(p.name||p.ref||p.id)}</option>`).join('');
+  openModal(`
+    <h2>Create Tenancy</h2>
+    <div class="sub">Add a new tenancy record to the system</div>
+    <div class="form-group"><label>Property</label><select id="newten-prop" onchange="loadUnitsForTenancy(this.value)">${propOpts}</select></div>
+    <div class="form-group"><label>Unit</label><select id="newten-unit"><option value="">Select a property first</option></select></div>
+    <div class="form-row">
+      <div class="form-group"><label>Start Date</label><input type="date" id="newten-start"></div>
+      <div class="form-group"><label>End Date</label><input type="date" id="newten-end"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Rent Amount (£)</label><input type="number" step="0.01" id="newten-rent" placeholder="e.g. 850"></div>
+      <div class="form-group"><label>Rent Frequency</label><select id="newten-freq"><option value="pcm">Per Calendar Month</option><option value="pw">Per Week</option></select></div>
+    </div>
+    <div class="form-group"><label>Main Tenant Name</label><input type="text" id="newten-tenant" placeholder="Primary tenant name"></div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button>
+      <button class="btn btn-submit" onclick="submitNewTenancy()">Create Tenancy</button>
+    </div>
+  `);
+}
+async function loadUnitsForTenancy(propId) {
+  if (!propId) return;
+  try {
+    const r = await api(`/units?property_id=${propId}&per_page=50`);
+    const opts = (r.data||[]).map(u => `<option value="${u.id}">${escHtml(u.unit_ref||'Unit '+u.id)} — ${escHtml(u.full_address||'')}</option>`).join('');
+    document.getElementById('newten-unit').innerHTML = '<option value="">Select unit...</option>' + opts;
+  } catch(e) {
+    document.getElementById('newten-unit').innerHTML = '<option value="">Error loading units</option>';
+  }
+}
+async function submitNewTenancy() {
+  const payload = {
+    property_id: parseInt(document.getElementById('newten-prop').value),
+    unit_id: parseInt(document.getElementById('newten-unit').value),
+    start_date: document.getElementById('newten-start').value,
+    end_date: document.getElementById('newten-end').value,
+    rent_amount: parseFloat(document.getElementById('newten-rent').value) || 0,
+    rent_frequency: document.getElementById('newten-freq').value,
+    main_tenant_name: document.getElementById('newten-tenant').value
+  };
+  if (!payload.unit_id) { showToast('Please select a unit', 'error'); return; }
+  if (!payload.start_date) { showToast('Please select a start date', 'error'); return; }
+  try {
+    await api('/tenancies', { method:'POST', body:JSON.stringify(payload) });
+    closeModal(null);
+    showToast('Tenancy created successfully');
+    renderTenancies();
+  } catch(e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
+}
+function showEndTenancyForm(id) {
+  openModal(`
+    <h2>End Tenancy</h2>
+    <div class="sub">Record the move-out date for this tenancy</div>
+    <div class="form-group"><label>Move Out Date</label><input type="date" id="endten-date"></div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button>
+      <button class="btn btn-danger" onclick="submitEndTenancy(${id})">End Tenancy</button>
+    </div>
+  `);
+}
+async function submitEndTenancy(id) {
+  const date = document.getElementById('endten-date').value;
+  if (!date) { showToast('Please select a move out date', 'error'); return; }
+  try {
+    await api(`/tenancies/${id}/end`, { method:'POST', body:JSON.stringify({move_out_date:date}) });
+    closeModal(null);
+    showToast('Tenancy ended successfully');
+    renderTenancies();
+  } catch(e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
+}
+
+// ── TENANCY LIFECYCLE FORMS ──
+function showRenewForm(id) {
+  openModal(`
+    <h2>Renew Tenancy</h2>
+    <div class="sub">Extend the tenancy with a new end date and optional rent update</div>
+    <div class="form-group"><label>New End Date</label><input type="date" id="renew-end"></div>
+    <div class="form-group"><label>New Rent Amount (£) — leave blank to keep current</label><input type="number" step="0.01" id="renew-rent" placeholder="e.g. 950"></div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button>
+      <button class="btn btn-success" onclick="submitRenew(${id})">Renew</button>
+    </div>
+  `);
+}
+async function submitRenew(id) {
+  const endDate = document.getElementById('renew-end').value;
+  if (!endDate) { showToast('New end date is required', 'error'); return; }
+  const payload = {end_date: endDate};
+  const rent = document.getElementById('renew-rent').value;
+  if (rent) payload.rent_amount = parseFloat(rent);
+  try {
+    await api(`/tenancies/${id}/renew`, { method:'POST', body:JSON.stringify(payload) });
+    closeModal(null);
+    showToast('Tenancy renewed');
+    closeDetail();
+    setTimeout(() => showTenancy(id), 200);
+  } catch(e) { showToast('Failed: ' + e.message, 'error'); }
+}
+
+function showRentReviewForm(id) {
+  openModal(`
+    <h2>Record Rent Review</h2>
+    <div class="sub">Update the rent amount for this tenancy</div>
+    <div class="form-group"><label>New Rent Amount (£)</label><input type="number" step="0.01" id="rr-rent" placeholder="e.g. 950"></div>
+    <div class="form-group"><label>Review Date</label><input type="date" id="rr-date"></div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button>
+      <button class="btn btn-primary" onclick="submitRentReview(${id})">Update Rent</button>
+    </div>
+  `);
+}
+async function submitRentReview(id) {
+  const rent = document.getElementById('rr-rent').value;
+  if (!rent) { showToast('New rent amount is required', 'error'); return; }
+  const payload = {new_rent_amount: parseFloat(rent)};
+  const date = document.getElementById('rr-date').value;
+  if (date) payload.review_date = date;
+  try {
+    await api(`/tenancies/${id}/rent-review`, { method:'POST', body:JSON.stringify(payload) });
+    closeModal(null);
+    showToast('Rent updated');
+    closeDetail();
+    setTimeout(() => showTenancy(id), 200);
+  } catch(e) { showToast('Failed: ' + e.message, 'error'); }
+}
+
+function showSection21Form(id) {
+  openModal(`
+    <h2>Section 21 Notice</h2>
+    <div class="sub">Record that a Section 21 notice has been served</div>
+    <div class="form-group"><label>Served Date</label><input type="date" id="s21-date"></div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button>
+      <button class="btn btn-submit" onclick="submitSection21(${id})">Record S21</button>
+    </div>
+  `);
+}
+async function submitSection21(id) {
+  const payload = {};
+  const date = document.getElementById('s21-date').value;
+  if (date) payload.served_date = date;
+  try {
+    await api(`/tenancies/${id}/section-21`, { method:'POST', body:JSON.stringify(payload) });
+    closeModal(null);
+    showToast('Section 21 recorded');
+    closeDetail();
+    setTimeout(() => showTenancy(id), 200);
+  } catch(e) { showToast('Failed: ' + e.message, 'error'); }
+}
+
+// ── TENANTS ──
+let tenantState = { page:1, perPage:20, search:'', total:0 };
+async function renderTenants() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading tenants...</div>';
+  try {
+    const {page,perPage,search} = tenantState;
+    const res = await api(`/tenants?page=${page}&per_page=${perPage}&search=${encodeURIComponent(search)}`);
+    tenantState.total = res.total;
+    const items = res.data || [];
+    let html = '<div class="table-wrap">';
+    html += '<div class="table-toolbar"><div class="left">';
+    html += `<input placeholder="Search tenants..." value="${escHtml(search)}" onkeyup="if(event.key==='Enter'){tenantState.search=this.value;tenantState.page=1;renderTenants()}" style="width:220px">`;
+    html += '</div><div class="right"></div></div>';
+    if (items.length===0) {
+      html += '<div class="empty-state"><div class="icon">👤</div><h3>No tenants found</h3></div>';
+    } else {
+      html += '<table><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Status</th><th>Tenancies</th></tr></thead><tbody>';
+      items.forEach(t => {
+        html += `<tr onclick="showTenant(${t.id})"><td><strong>${escHtml(t.first_name||'')} ${escHtml(t.last_name||'')}</strong></td><td>${escHtml(t.email||'—')}</td><td>${escHtml(t.phone||'—')}</td><td>${statusBadge(t.status||'active')}</td><td>${t.tenancy_count||0}</td></tr>`;
+      });
+      html += '</tbody></table>';
+      html += paginationControls(tenantState, 'tenantPagination');
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><h3>Failed to load tenants</h3><p>${escHtml(e.message)}</p></div>`;
+  }
+}
+function tenantPagination(p) { tenantState.page=p; renderTenants(); }
+async function showTenant(id) {
+  try {
+    const res = await api(`/tenants/${id}`);
+    const t = res.data;
+    let html = `<div class="detail-section"><h3>Personal Details</h3><div class="detail-grid">`;
+    const fields = [['First Name','first_name'],['Last Name','last_name'],['Email','email'],['Phone','phone'],['Mobile','mobile'],['Date of Birth','date_of_birth'],['Gender','gender'],['Nationality','nationality'],['Status','status'],['Passport No','passport_number'],['NI Number','ni_number'],['Current Address','current_address'],['Previous Address','previous_address'],['Employment','employment_status'],['Employer','employer_name'],['Annual Income','annual_income'],['Guarantor Name','guarantor_name'],['Guarantor Email','guarantor_email'],['Guarantor Phone','guarantor_phone'],['Guarantor Address','guarantor_address'],['Notes','notes']];
+    fields.forEach(([l,f]) => {
+      const v = t[f]; if (v!=null && v!=='') {
+        let val = escHtml(v);
+        if (f==='annual_income') val = fmtMoney(v);
+        html += `<div class="detail-field"><div class="label">${l}</div><div class="val">${val}</div></div>`;
+      }
+    });
+    html += '</div></div>';
+    // Tenancy history
+    if (t.tenancies && t.tenancies.length > 0) {
+      html += '<div class="detail-section"><h3>Tenancy History (' + t.tenancies.length + ')</h3>';
+      t.tenancies.forEach(tn => {
+        html += `<div style="padding:10px 14px;background:#0f172a;border-radius:8px;margin-bottom:6px;font-size:13px">
+          <div style="font-weight:600;color:#e2e8f0">${escHtml(tn.full_address||'—')}</div>
+          <div style="color:#64748b;margin-top:2px">${fmtDate(tn.start_date)} → ${fmtDate(tn.end_date)} | ${fmtMoney(tn.rent_amount)}/${tn.rent_frequency||'pcm'}</div>
+        </div>`;
+      });
+      html += '</div>';
+    }
+    openDetail((t.first_name||'') + ' ' + (t.last_name||'') || 'Tenant', html);
+  } catch(e) {
+    showToast('Failed to load tenant: ' + e.message, 'error');
+  }
+}
+
+// ── APPLICANTS ──
+let appState = { page:1, perPage:50, search:'', status:'', total:0 };
+const PIPELINE_STAGES = ['New','Viewing','Application','Referencing','Guarantor','Approved','Agreement','Signature','Move In','Rejected','Withdrawn'];
+async function renderApplicants() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading applicants...</div>';
+  try {
+    const res = await api('/applicants?per_page=200');
+    appState.total = res.total;
+    const items = res.data || [];
+    // Group by status for pipeline view
+    const grouped = {};
+    PIPELINE_STAGES.forEach(s => grouped[s.toLowerCase()] = []);
+    items.forEach(a => {
+      const key = (a.status||'new').toLowerCase();
+      if (grouped[key]) grouped[key].push(a);
+    });
+    let html = '<div style="margin-bottom:16px;display:flex;gap:8px;align-items:center">';
+    html += `<button class="btn btn-primary btn-sm" onclick="showNewApplicantForm()">+ New Applicant</button>`;
+    html += '</div>';
+    html += '<div class="pipeline">';
+    PIPELINE_STAGES.forEach(stage => {
+      const key = stage.toLowerCase();
+      const apps = grouped[key] || [];
+      html += `<div class="pipeline-col">
+        <div class="col-header"><span>${stage}</span><span class="count">${apps.length}</span></div>`;
+      if (apps.length===0) {
+        html += `<div style="text-align:center;padding:16px;color:#475569;font-size:12px">No applicants</div>`;
+      } else {
+        apps.forEach(a => {
+          html += `<div class="pipeline-card" onclick="showApplicant(${a.id})">
+            <div class="name">${escHtml(a.first_name||'')} ${escHtml(a.last_name||'')}</div>
+            <div class="meta"><span>📋 ${escHtml(a.property_name||a.property_interest||'—')}</span><span>📅 ${fmtDate(a.created||a.applied_at||'')}</span></div>
+          </div>`;
+        });
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><h3>Failed to load applicants</h3><p>${escHtml(e.message)}</p></div>`;
+  }
+}
+async function showApplicant(id) {
+  try {
+    const res = await api(`/applicants/${id}`);
+    const a = res.data;
+    let html = `<div class="detail-section"><h3>Applicant Details</h3><div class="detail-grid">`;
+    const fields = [['First Name','first_name'],['Last Name','last_name'],['Email','email'],['Phone','phone'],['Mobile','mobile'],['Date of Birth','date_of_birth'],['Status','status'],['Property Interest','property_interest'],['Property Name','property_name'],['Property Address','property_address'],['Employer','employer_name'],['Employment','employment_status'],['Annual Income','annual_income'],['Guarantor','guarantor_name'],['Guarantor Email','guarantor_email'],['Notes','notes'],['Created','created']];
+    fields.forEach(([l,f]) => {
+      const v = a[f]; if (v!=null && v!=='') {
+        let val = escHtml(v);
+        if (f==='annual_income') val = fmtMoney(v);
+        html += `<div class="detail-field"><div class="label">${l}</div><div class="val">${val}</div></div>`;
+      }
+    });
+    html += '</div></div>';
+    // Status update buttons
+    html += '<div class="detail-section"><h3>Update Status</h3><div style="display:flex;flex-wrap:wrap;gap:6px">';
+    PIPELINE_STAGES.forEach(s => {
+      const key = s.toLowerCase().replace(/\s+/g,'_');
+      const current = (a.status||'').toLowerCase();
+      html += `<button class="btn btn-sm ${key===current?'btn-primary':'btn-ghost'}" onclick="updateApplicantStatus(${id},'${key}')">${s}</button>`;
+    });
+    html += '</div></div>';
+    openDetail((a.first_name||'') + ' ' + (a.last_name||'') || 'Applicant', html);
+  } catch(e) {
+    showToast('Failed to load applicant: ' + e.message, 'error');
+  }
+}
+async function updateApplicantStatus(id, status) {
+  try {
+    await api(`/applicants/${id}/status`, { method:'POST', body:JSON.stringify({status}) });
+    showToast('Status updated');
+    closeDetail();
+    renderApplicants();
+  } catch(e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
+}
+async function showNewApplicantForm() {
+  let props = [];
+  try { const r = await api('/properties?per_page=100'); props = r.data||[]; } catch(e){}
+  const propOpts = props.map(p => `<option value="${escHtml(p.name||p.ref||p.id)}">${escHtml(p.name||p.ref||p.id)}</option>`).join('');
+  openModal(`
+    <h2>New Applicant</h2>
+    <div class="sub">Add a new applicant to the pipeline</div>
+    <div class="form-row">
+      <div class="form-group"><label>First Name</label><input type="text" id="newapp-first"></div>
+      <div class="form-group"><label>Last Name</label><input type="text" id="newapp-last"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Email</label><input type="email" id="newapp-email"></div>
+      <div class="form-group"><label>Phone</label><input type="tel" id="newapp-phone"></div>
+    </div>
+    <div class="form-group"><label>Property Interest</label><select id="newapp-prop">${propOpts}</select></div>
+    <div class="form-group"><label>Notes</label><textarea id="newapp-notes" rows="3"></textarea></div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button>
+      <button class="btn btn-submit" onclick="submitNewApplicant()">Add Applicant</button>
+    </div>
+  `);
+}
+async function submitNewApplicant() {
+  const payload = {
+    first_name: document.getElementById('newapp-first').value,
+    last_name: document.getElementById('newapp-last').value,
+    email: document.getElementById('newapp-email').value,
+    phone: document.getElementById('newapp-phone').value,
+    property_interest: document.getElementById('newapp-prop').value,
+    notes: document.getElementById('newapp-notes').value
+  };
+  if (!payload.first_name || !payload.last_name) { showToast('Name is required', 'error'); return; }
+  try {
+    await api('/applicants', { method:'POST', body:JSON.stringify(payload) });
+    closeModal(null);
+    showToast('Applicant added');
+    renderApplicants();
+  } catch(e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
+}
+
+// ── FINANCE ──
+let finState = { page:1, perPage:20, txnType:'', total:0 };
+async function renderFinance() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading finance...</div>';
+  try {
+    // Overview
+    let overviewRes, txnsRes, depRes;
+    try { overviewRes = await api('/finance/overview'); } catch(e) { overviewRes = null; }
+    try { txnsRes = await api(`/finance/transactions?page=${finState.page}&per_page=${finState.perPage}`); } catch(e) { txnsRes = null; }
+    try { depRes = await api('/finance/deposits?per_page=50'); } catch(e) { depRes = null; }
+
+    const overview = overviewRes ? overviewRes.data : {};
+    const txns = txnsRes ? (txnsRes.data || []) : [];
+    const depData = depRes ? (depRes.data || []) : [];
+
+    let html = '<div class="finance-cards">';
+    html += `<div class="finance-card"><div class="label">Monthly Rent Income</div><div class="value green">${fmtMoney(overview.monthly_income||overview.monthly_rent_income)}</div></div>`;
+    html += `<div class="finance-card"><div class="label">Total Arrears</div><div class="value red">${fmtMoney(overview.total_arrears)}</div></div>`;
+    html += `<div class="finance-card"><div class="label">Total Deposits Held</div><div class="value blue">${fmtMoney(overview.total_deposits_held||overview.total_deposits)}</div></div>`;
+    html += '</div>';
+
+    // Transactions table
+    html += '<div class="table-wrap" style="margin-bottom:24px">';
+    html += '<div class="table-toolbar"><strong>Transactions</strong><div class="right"></div></div>';
+    if (txns.length===0) {
+      html += '<div class="empty-state"><p>No transactions found</p></div>';
+    } else {
+      html += '<table><thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Category</th><th>Amount</th></tr></thead><tbody>';
+      txns.forEach(t => {
+        const amt = parseFloat(t.amount||t.gross_amount||0);
+        html += `<tr><td>${fmtDate(t.date||t.transaction_date||t.created)}</td><td>${escHtml(t.description||t.narrative||'—')}</td><td>${escHtml(t.type||t.transaction_type||'—')}</td><td>${escHtml(t.category||'—')}</td><td style="color:${amt>=0?'#10b981':'#ef4444'};font-weight:600">${fmtMoney(amt)}</td></tr>`;
+      });
+      html += '</tbody></table>';
+      if (txnsRes && txnsRes.total > finState.perPage) {
+        finState.total = txnsRes.total;
+        html += paginationControls(finState, 'finPagination');
+      }
+    }
+    html += '</div>';
+
+    // Deposits table
+    html += '<div class="table-wrap">';
+    html += '<div class="table-toolbar"><strong>Deposits</strong></div>';
+    if (depData.length===0) {
+      html += '<div class="empty-state"><p>No deposits recorded</p></div>';
+    } else {
+      html += '<table><thead><tr><th>Tenant</th><th>Property</th><th>Amount</th><th>Scheme</th><th>Registered</th></tr></thead><tbody>';
+      depData.forEach(d => {
+        html += `<tr><td>${escHtml(d.tenant_name||d.main_tenant_name||'—')}</td><td>${escHtml(d.property_name||d.full_address||'—')}</td><td>${fmtMoney(d.amount||d.deposit_amount)}</td><td>${escHtml(d.scheme||d.deposit_scheme||'—')}</td><td>${statusBadge(d.registered||d.deposit_registered?'Yes':'No')}</td></tr>`;
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><h3>Failed to load finance data</h3><p>${escHtml(e.message)}</p></div>`;
+  }
+}
+function finPagination(p) { finState.page=p; renderFinance(); }
+
+// ── SEARCH ──
+let searchTerm = '';
+async function renderSearch() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = `
+    <div class="search-bar">
+      <input id="search-input" placeholder="Search properties, tenancies, tenants, applicants..." value="${escHtml(searchTerm)}" onkeyup="if(event.key==='Enter'){searchTerm=this.value;doSearch()}">
+      <button class="btn btn-primary" onclick="searchTerm=document.getElementById('search-input').value;doSearch()">Search</button>
+    </div>
+    <div id="search-results"></div>
+  `;
+  if (searchTerm) doSearch();
+}
+async function doSearch() {
+  const el = document.getElementById('search-results');
+  if (!searchTerm) { el.innerHTML = '<div class="empty-state"><div class="icon">🔍</div><h3>Enter a search term</h3><p>Search across properties, units, tenancies, tenants, and applicants</p></div>'; return; }
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Searching...</div>';
+  try {
+    const res = await api(`/search?q=${encodeURIComponent(searchTerm)}&type=all`);
+    const data = res.data || {};
+    const groups = ['properties','units','tenancies','tenants','applicants'];
+    let html = '';
+    let total = 0;
+    groups.forEach(key => {
+      const items = data[key] || [];
+      total += items.length;
+      if (items.length > 0) {
+        html += `<div class="search-group"><h3>${key.charAt(0).toUpperCase()+key.slice(1)} (${items.length})</h3>`;
+        items.forEach(item => {
+          let title = '', desc = '';
+          if (key==='properties') { title = item.name||item.ref||''; desc = item.address_line_1+', '+item.city; }
+          else if (key==='units') { title = item.unit_ref||item.full_address||''; desc = item.unit_type+' — '+fmtMoney(item.market_rent); }
+          else if (key==='tenancies') { title = item.main_tenant_name||item.ref||''; desc = item.full_address+' | '+fmtMoney(item.rent_amount); }
+          else if (key==='tenants') { title = (item.first_name||'')+' '+(item.last_name||''); desc = item.email||item.phone||''; }
+          else if (key==='applicants') { title = (item.first_name||'')+' '+(item.last_name||''); desc = item.property_interest||item.email||''; }
+          const id = item.id;
+          html += `<div class="search-item" onclick="navigateToResult('${key}',${id})">
+            <div class="title">${escHtml(title||'—')}</div>
+            <div class="desc">${escHtml(desc||'')}</div>
+          </div>`;
+        });
+        html += '</div>';
+      }
+    });
+    if (total===0) {
+      html = '<div class="empty-state"><div class="icon">🔍</div><h3>No results</h3><p>No matches found for "'+escHtml(searchTerm)+'"</p></div>';
+    }
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><h3>Search failed</h3><p>${escHtml(e.message)}</p></div>`;
+  }
+}
+function navigateToResult(type, id) {
+  const map = { properties:'properties', units:'units', tenancies:'tenancies', tenants:'tenants', applicants:'applicants' };
+  const page = map[type] || 'search';
+  navigate(page);
+  setTimeout(() => {
+    const fns = { properties: showProperty, units: showUnit, tenancies: showTenancy, tenants: showTenant, applicants: showApplicant };
+    const fn = fns[type];
+    if (fn) fn(id);
+  }, 200);
+}
+
+// ── DOCUMENTS ──
+async function renderDocuments() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading documents...</div>';
+  try {
+    const [tplRes, genRes] = await Promise.all([
+      api('/documents/templates'),
+      api('/documents/generated')
+    ]);
+    const templates = tplRes.data || [];
+    const generated = genRes.data || [];
+
+    let html = '';
+
+    // ── Templates section ──
+    html += '<div class="table-wrap" style="margin-bottom:24px">';
+    html += '<div class="table-toolbar"><strong>Document Templates</strong><div class="right">';
+    html += '<button class="btn btn-primary btn-sm" onclick="showUploadTemplateForm()">+ Upload Template</button>';
+    html += '</div></div>';
+    if (templates.length===0) {
+      html += '<div class="empty-state"><div class="icon">📄</div><h3>No templates uploaded</h3><p>Upload Word (.docx) templates with {{FieldName}} placeholders for mail merge</p></div>';
+    } else {
+      html += '<table><thead><tr><th>Name</th><th>Description</th><th>Created</th><th></th></tr></thead><tbody>';
+      templates.forEach(t => {
+        html += `<tr>
+          <td><strong>${escHtml(t.name)}</strong></td>
+          <td>${escHtml(t.description||'—')}</td>
+          <td>${fmtDate(t.created)}</td>
+          <td><button class="btn btn-sm btn-ghost" onclick="window.open('${API}/documents/templates/${t.id}/download','_blank')">⬇ Download</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteTemplate('${t.id}')" style="margin-left:4px">✕</button></td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+
+    // ── Generate form ──
+    html += '<div class="table-wrap" style="margin-bottom:24px">';
+    html += '<div class="table-toolbar"><strong>Generate Document</strong></div>';
+    html += '<div style="padding:16px 18px">';
+    html += '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">';
+    html += '<div><label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px">Template</label><select id="gen-template"><option value="">Select template...</option></select></div>';
+    html += '<div><label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px">Tenancy ID</label><input type="number" id="gen-tenancy" placeholder="Tenancy ID" style="width:140px"></div>';
+    html += '<div><button class="btn btn-primary btn-sm" onclick="generateDocument()">Generate</button></div>';
+    html += '</div></div></div>';
+
+    // ── Generated documents ──
+    html += '<div class="table-wrap">';
+    html += '<div class="table-toolbar"><strong>Generated Documents</strong></div>';
+    if (generated.length===0) {
+      html += '<div class="empty-state"><p>No documents generated yet</p></div>';
+    } else {
+      html += '<table><thead><tr><th>Template</th><th>Tenancy</th><th>Generated</th><th></th></tr></thead><tbody>';
+      generated.slice().reverse().forEach(d => {
+        html += `<tr>
+          <td>${escHtml(d.template)}</td>
+          <td>#${d.tenancy_id}</td>
+          <td>${fmtDate(d.generated)}</td>
+          <td><button class="btn btn-sm btn-primary" onclick="window.open('${API}/documents/generated/${d.id}/download','_blank')">⬇ Download</button></td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+
+    el.innerHTML = html;
+
+    // Populate template dropdown
+    const sel = document.getElementById('gen-template');
+    if (sel) {
+      sel.innerHTML = '<option value="">Select template...</option>' +
+        templates.map(t => `<option value="${t.id}">${escHtml(t.name)}</option>`).join('');
+    }
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><h3>Failed to load documents</h3><p>${escHtml(e.message)}</p></div>`;
+  }
+}
+
+async function showUploadTemplateForm() {
+  openModal(`
+    <h2>Upload Template</h2>
+    <div class="sub">Upload a Word (.docx) file with {{FieldName}} merge fields</div>
+    <div class="form-group"><label>Template Name</label><input type="text" id="tpl-name" placeholder="e.g. AST Agreement"></div>
+    <div class="form-group"><label>Description (optional)</label><input type="text" id="tpl-desc" placeholder="e.g. Assured Shorthold Tenancy Agreement"></div>
+    <div class="form-group"><label>File (.docx)</label><input type="file" id="tpl-file" accept=".docx"></div>
+    <div style="font-size:12px;color:#64748b;margin-bottom:12px;padding:10px;background:#0f172a;border-radius:8px">
+      <strong>Available merge fields:</strong><br>
+      {{TenantName}}, {{PropertyAddress}}, {{RentAmount}}, {{TenancyStartDate}}, {{TenancyEndDate}},<br>
+      {{DepositAmount}}, {{LandlordName}}, {{Date}}, {{AgentName}}, and 40+ more
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button>
+      <button class="btn btn-submit" onclick="submitUploadTemplate()">Upload</button>
+    </div>
+  `);
+}
+
+async function submitUploadTemplate() {
+  const name = document.getElementById('tpl-name').value;
+  const desc = document.getElementById('tpl-desc').value;
+  const fileInput = document.getElementById('tpl-file');
+  const file = fileInput.files[0];
+  if (!name || !file) { showToast('Name and file are required', 'error'); return; }
+  if (!file.name.endsWith('.docx')) { showToast('Only .docx files are supported', 'error'); return; }
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('name', name);
+  formData.append('description', desc);
+  try {
+    const res = await fetch(API + '/documents/templates', { method:'POST', body:formData });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error);
+    closeModal(null);
+    showToast('Template uploaded');
+    renderDocuments();
+  } catch(e) {
+    showToast('Upload failed: ' + e.message, 'error');
+  }
+}
+
+async function deleteTemplate(id) {
+  if (!confirm('Delete this template?')) return;
+  try {
+    await api('/documents/templates/' + id, { method:'DELETE' });
+    showToast('Template deleted');
+    renderDocuments();
+  } catch(e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
+}
+
+async function generateDocument() {
+  const template_id = document.getElementById('gen-template').value;
+  const tenancy_id = document.getElementById('gen-tenancy').value;
+  if (!template_id || !tenancy_id) { showToast('Select a template and enter a tenancy ID', 'error'); return; }
+  try {
+    const res = await api('/documents/generate', { method:'POST', body:JSON.stringify({template_id, tenancy_id:parseInt(tenancy_id)}) });
+    showToast('Document generated!');
+    renderDocuments();
+  } catch(e) {
+    showToast('Generation failed: ' + e.message, 'error');
+  }
+}
+
+// ── ACCESS MANAGEMENT ──
+let accessState = { page:1, perPage:20, property_id:'', total:0 };
+async function renderAccess() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading access records...</div>';
+  try {
+    const {page,perPage,property_id} = accessState;
+    let url = `/access?page=${page}&per_page=${perPage}`;
+    if (property_id) url += `&property_id=${property_id}`;
+    const res = await api(url);
+    accessState.total = res.total;
+    const items = res.data || [];
+    let html = '<div class="table-wrap">';
+    html += '<div class="table-toolbar"><div class="left">';
+    html += `<select onchange="accessState.property_id=this.value;accessState.page=1;renderAccess()" style="width:200px"><option value="">All Properties</option></select>`;
+    html += '</div><div class="right">';
+    html += '<button class="btn btn-primary btn-sm" onclick="showNewAccessForm()">+ Add Access Record</button>';
+    html += '</div></div>';
+    if (items.length===0) {
+      html += '<div class="empty-state"><div class="icon">🔑</div><h3>No access records found</h3><p>Add keys, codes, or fobs for your properties</p></div>';
+    } else {
+      html += '<table><thead><tr><th>Type</th><th>Label</th><th>Value</th><th>Property</th><th>Assigned To</th><th>Status</th></tr></thead><tbody>';
+      items.forEach(a => {
+        html += `<tr onclick="showAccessDetail(${a.id})">
+          <td>${escHtml(a.type||'—')}</td>
+          <td><strong>${escHtml(a.label||'—')}</strong></td>
+          <td><code>${escHtml(a.identifier||a.value||'—')}</code></td>
+          <td>${escHtml(a.property_name||'#P'+a.property_id||'')}</td>
+          <td>${escHtml(a.assigned_to||'—')}</td>
+          <td>${statusBadge(a.status||'active')}</td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      html += paginationControls(accessState, 'accessPagination');
+    }
+    html += '</div>';
+    el.innerHTML = html;
+    // Load property filter
+    api('/properties?per_page=100').then(r => {
+      const opts = (r.data||[]).map(p => `<option value="${p.id}"${property_id==p.id?' selected':''}>${escHtml(p.name||p.ref||p.id)}</option>`).join('');
+      el.querySelector('select').innerHTML = '<option value="">All Properties</option>' + opts;
+    }).catch(()=>{});
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><h3>Failed to load access records</h3><p>${escHtml(e.message)}</p></div>`;
+  }
+}
+function accessPagination(p) { accessState.page=p; renderAccess(); }
+async function showAccessDetail(id) {
+  try {
+    const res = await api(`/access/${id}`);
+    const a = res.data;
+    let html = `<div class="detail-section"><h3>Access Record</h3><div class="detail-grid">`;
+    const fields = [['Type','type'],['Label','label'],['Identifier/Value','identifier'],['Property ID','property_id'],['Unit ID','unit_id'],['Assigned To','assigned_to'],['Issued Date','issued_date'],['Notes','notes']];
+    fields.forEach(([l,f]) => {
+      const v = a[f]; if (v!=null && v!=='') html += `<div class="detail-field"><div class="label">${l}</div><div class="val">${escHtml(v)}</div></div>`;
+    });
+    html += '</div></div>';
+    html += `<div class="detail-section"><button class="btn btn-danger btn-sm" onclick="deleteAccess(${id})">Delete</button></div>`;
+    openDetail('Access: ' + (a.label||'Record'), html);
+  } catch(e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
+}
+async function showNewAccessForm() {
+  let props = [];
+  try { const r = await api('/properties?per_page=100'); props = r.data||[]; } catch(e){}
+  const propOpts = props.map(p => `<option value="${p.id}">${escHtml(p.name||p.ref||p.id)}</option>`).join('');
+  openModal(`
+    <h2>Add Access Record</h2>
+    <div class="sub">Record a key, code, or fob for a property</div>
+    <div class="form-row">
+      <div class="form-group"><label>Type</label><select id="newacc-type"><option value="key">🔑 Key</option><option value="code">🔢 Code</option><option value="fob">🪪 Fob</option></select></div>
+      <div class="form-group"><label>Status</label><select id="newacc-status"><option value="active">Active</option><option value="inactive">Inactive</option><option value="lost">Lost</option></select></div>
+    </div>
+    <div class="form-group"><label>Label</label><input type="text" id="newacc-label" placeholder="e.g. Front Door Key, Gate Code"></div>
+    <div class="form-group"><label>Value / Identifier</label><input type="text" id="newacc-value" placeholder="e.g. Key #3 or 1234"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Property</label><select id="newacc-prop">${propOpts}</select></div>
+      <div class="form-group"><label>Unit (optional)</label><input type="number" id="newacc-unit" placeholder="Unit ID"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Assigned To</label><input type="text" id="newacc-assigned" placeholder="e.g. Tenant name"></div>
+      <div class="form-group"><label>Issued Date</label><input type="date" id="newacc-date"></div>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="newacc-notes" rows="2"></textarea></div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button>
+      <button class="btn btn-submit" onclick="submitNewAccess()">Add Record</button>
+    </div>
+  `);
+}
+async function submitNewAccess() {
+  const payload = {
+    type: document.getElementById('newacc-type').value,
+    label: document.getElementById('newacc-label').value,
+    identifier: document.getElementById('newacc-value').value,
+    property_id: parseInt(document.getElementById('newacc-prop').value),
+    unit_id: parseInt(document.getElementById('newacc-unit').value) || null,
+    assigned_to: document.getElementById('newacc-assigned').value,
+    issued_date: document.getElementById('newacc-date').value,
+    notes: document.getElementById('newacc-notes').value,
+    status: document.getElementById('newacc-status').value
+  };
+  if (!payload.label) { showToast('Label is required', 'error'); return; }
+  try {
+    await api('/access', { method:'POST', body:JSON.stringify(payload) });
+    closeModal(null);
+    showToast('Access record added');
+    renderAccess();
+  } catch(e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
+}
+async function deleteAccess(id) {
+  if (!confirm('Delete this access record?')) return;
+  try {
+    await api('/access/' + id, { method:'PUT', body:JSON.stringify({status:'inactive'}) });
+    showToast('Access record deactivated');
+    renderAccess();
+  } catch(e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
+}
+
+// ── USERS & PERMISSIONS ──
+async function renderUsers() {
+  const el = document.getElementById('page-content');
+  if (user.role !== 'super_admin') {
+    el.innerHTML = '<div class="empty-state"><div class="icon">🔒</div><h3>Super Admin Only</h3><p>You need super admin permissions to manage users.</p></div>';
+    return;
+  }
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading users...</div>';
+  try {
+    const res = await fetch('/api/users');
+    const data = await res.json();
+    const users = data.users || data || [];
+    let html = '<div class="table-wrap">';
+    html += '<div class="table-toolbar"><strong>Team Members</strong><div class="right">';
+    html += '<button class="btn btn-primary btn-sm" onclick="showAddUserForm()">+ Add User</button>';
+    html += '</div></div>';
+    if (users.length===0) {
+      html += '<div class="empty-state"><p>No users found</p></div>';
+    } else {
+      html += '<table><thead><tr><th>Username</th><th>Role</th><th>Email</th><th></th></tr></thead><tbody>';
+      users.forEach(u => {
+        const uname = typeof u === 'string' ? u : (u.username || u.name || '');
+        const role = u.role || 'admin';
+        const email = u.email || '';
+        html += `<tr>
+          <td><strong>${escHtml(uname)}</strong></td>
+          <td>${statusBadge(role)}</td>
+          <td>${escHtml(email)}</td>
+          <td>${uname !== 'Sami' ? `<button class="btn btn-sm btn-danger" onclick="deleteUser('${escHtml(uname)}')">✕</button>` : ''}</td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><h3>Failed to load users</h3><p>${escHtml(e.message)}</p></div>`;
+  }
+}
+function showAddUserForm() {
+  openModal(`
+    <h2>Add User</h2>
+    <div class="sub">Create a new team member account</div>
+    <div class="form-group"><label>Username</label><input type="text" id="nu-user" placeholder="e.g. jane"></div>
+    <div class="form-group"><label>Email</label><input type="email" id="nu-email" placeholder="e.g. jane@vervrooms.com"></div>
+    <div class="form-group"><label>Password</label><input type="password" id="nu-pass" placeholder="Set initial password"></div>
+    <div class="form-group"><label>Role</label><select id="nu-role"><option value="admin">Admin</option><option value="super_admin">Super Admin</option><option value="projects">Projects (limited)</option></select></div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button>
+      <button class="btn btn-submit" onclick="submitAddUser()">Add User</button>
+    </div>
+  `);
+}
+async function submitAddUser() {
+  const payload = {
+    username: document.getElementById('nu-user').value,
+    email: document.getElementById('nu-email').value,
+    password: document.getElementById('nu-pass').value,
+    role: document.getElementById('nu-role').value
+  };
+  if (!payload.username || !payload.password) { showToast('Username and password required', 'error'); return; }
+  try {
+    const res = await fetch('/api/users', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed');
+    closeModal(null);
+    showToast('User added');
+    renderUsers();
+  } catch(e) { showToast('Failed: ' + e.message, 'error'); }
+}
+async function deleteUser(username) {
+  if (!confirm('Delete user ' + username + '?')) return;
+  try {
+    const res = await fetch('/api/users/' + encodeURIComponent(username), { method:'DELETE' });
+    if (!res.ok) throw new Error('Failed');
+    showToast('User deleted');
+    renderUsers();
+  } catch(e) { showToast('Failed: ' + e.message, 'error'); }
+}
+
+// ── PROPERTY IMAGE UPLOAD ──
+async function uploadPropertyImage(propId) {
+  openModal(`
+    <h2>Upload Image</h2>
+    <div class="sub">Add a photo or document to this property</div>
+    <div class="form-group"><label>Category (optional)</label><select id="upimg-cat"><option value="">General</option><option value="exterior">Exterior</option><option value="interior">Interior</option><option value="floorplan">Floor Plan</option><option value="epc">EPC</option><option value="document">Document</option></select></div>
+    <div class="form-group"><label>Image File</label><input type="file" id="upimg-file" accept="image/*"></div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button>
+      <button class="btn btn-submit" onclick="submitUploadImage(${propId})">Upload</button>
+    </div>
+  `);
+}
+async function submitUploadImage(propId) {
+  const fileInput = document.getElementById('upimg-file');
+  const file = fileInput.files[0];
+  if (!file) { showToast('Select an image file', 'error'); return; }
+  const category = document.getElementById('upimg-cat').value;
+  const formData = new FormData();
+  formData.append('image', file);
+  if (category) formData.append('category', category);
+  try {
+    const res = await fetch(API + `/properties/${propId}/images/upload`, { method:'POST', body:formData });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error);
+    closeModal(null);
+    showToast('Image uploaded');
+    closeDetail();
+    setTimeout(() => showProperty(propId), 200);
+  } catch(e) {
+    showToast('Upload failed: ' + e.message, 'error');
+  }
+}
+</script>
+</body>
+</html>

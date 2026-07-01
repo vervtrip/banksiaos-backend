@@ -13,6 +13,10 @@ app.config.update(SESSION_COOKIE_SECURE=False, SESSION_COOKIE_HTTPONLY=True, SES
 from banksia_api import banksia
 app.register_blueprint(banksia)
 
+# ── Register Banksia OS Blueprint ──
+from banksia_os import banksia_os_bp
+app.register_blueprint(banksia_os_bp)
+
 # ── Multi-user auth system ──
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
 
@@ -167,12 +171,13 @@ def api_get_fast(url, headers, timeout=3):
 # ROUTES
 # ═══════════════════════════════════════════════
 
-# ── Login page ──
+# ── SPA entry — login or dashboard ──
 @app.route("/")
 def login_page():
-    if session.get("user"):
-        return redirect("/dashboard")
-    return render_template("login.html")
+    user = session.get("user")
+    if user:
+        return render_template("dashboard.html", user=user)
+    return render_template("dashboard.html")
 
 # ── Auth API ──
 @app.route("/api/auth/login", methods=["POST"])
@@ -301,6 +306,13 @@ def dashboard():
 @require_auth
 def banksia_os_page(subpath=""):
     return render_template("banksia.html", user=request.current_user)
+
+# ── Banksia OS frontend route (new HMO Operations dashboard) ──
+@app.route("/banksia-os")
+@app.route("/banksia-os/<path:subpath>")
+@require_auth
+def banksia_os_dashboard(subpath=""):
+    return render_template("banksia_os.html", user=request.current_user)
 
 # ── Snapshot Management (super admin only) ──
 SNAPSHOT_SCRIPT = os.path.join(os.path.dirname(__file__), "snapshot.py")

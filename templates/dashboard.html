@@ -2,1056 +2,1590 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>VERV Operations Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% if user %}VERV Dashboard{% else %}VERV — Sign In{% endif %}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
-*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{font-family:'Inter',-apple-system,sans-serif;background:#F8F9FC;color:#1E293B;display:flex;min-height:100vh;overflow-x:hidden}
-/* ===== SIDEBAR ===== */
-.dash-sidebar{width:260px;background:linear-gradient(180deg,#0F172A 0%,#1E293B 100%);color:#fff;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;transform:translateX(0);transition:transform .25s ease}
-.dash-sidebar .brand{padding:24px 20px 20px;border-bottom:1px solid rgba(255,255,255,.08)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,sans-serif;background:#0F172A;color:#1E293B;min-height:100vh;display:flex}
+
+/* ===== LOGIN STATE ===== */
+.login-body{background:linear-gradient(135deg,#0F172A 0%,#1E293B 50%,#0F172A 100%);display:flex;align-items:center;justify-content:center;padding:20px;position:relative;overflow:hidden;width:100%;min-height:100vh}
+.login-body::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle at 30% 40%,rgba(59,130,246,.08) 0%,transparent 50%),radial-gradient(circle at 70% 60%,rgba(139,92,246,.06) 0%,transparent 50%);z-index:0}
+.login-wrap{position:relative;z-index:1;width:100%;max-width:420px}
+.logo-area{text-align:center;margin-bottom:32px}
+.logo-area .logo{font-size:32px;font-weight:800;color:#fff;letter-spacing:-1px}
+.logo-area .logo span{color:#3B82F6}
+.logo-area .tagline{font-size:13px;color:#64748B;text-transform:uppercase;letter-spacing:2.5px;margin-top:4px}
+.logo-area .welcome{font-size:15px;color:#94A3B8;margin-top:12px}
+.login-card{background:#1E293B;border:1px solid rgba(255,255,255,.08);border-radius:20px;padding:36px 32px 32px;box-shadow:0 25px 50px -12px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.05)}
+.login-card h2{color:#F1F5F9;font-size:20px;font-weight:700;margin-bottom:4px}
+.login-card .sub{color:#64748B;font-size:14px;margin-bottom:24px}
+.form-group{margin-bottom:18px}
+.form-group label{display:block;color:#94A3B8;font-size:13px;font-weight:500;margin-bottom:6px}
+.form-group .input-wrap{position:relative}
+.form-group .input-icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:16px;color:#475569;pointer-events:none}
+.form-group input{width:100%;padding:12px 14px 12px 44px;border-radius:12px;border:1px solid #334155;background:#0F172A;color:#F1F5F9;font-size:15px;font-family:'Inter',sans-serif;outline:none;transition:all .2s}
+.form-group input::placeholder{color:#475569}
+.form-group input:focus{border-color:#3B82F6;box-shadow:0 0 0 3px rgba(59,130,246,.15);background:#1E293B}
+.form-group input.error{border-color:#dc2626;box-shadow:0 0 0 3px rgba(220,38,38,.1)}
+.login-btn{width:100%;padding:14px;border:none;border-radius:12px;background:linear-gradient(135deg,#2563eb,#3B82F6);color:#fff;font-size:15px;font-weight:600;font-family:'Inter',sans-serif;cursor:pointer;transition:all .2s;margin-top:4px}
+.login-btn:hover{background:linear-gradient(135deg,#3B82F6,#60A5FA);transform:translateY(-1px);box-shadow:0 8px 25px rgba(59,130,246,.3)}
+.login-btn:active{transform:translateY(0)}
+.login-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.error-msg{display:none;color:#dc2626;font-size:13px;text-align:center;padding:10px;background:rgba(220,38,38,.1);border-radius:10px;margin-bottom:16px}
+.error-msg.show{display:block}
+.loading-spinner{display:none;width:18px;height:18px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;margin:0 auto}
+.loading-spinner.show{display:block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.login-footer{text-align:center;margin-top:20px;color:#475569;font-size:13px}
+.role-msg{text-align:center;color:#475569;font-size:12px;margin-top:16px}
+
+/* ===== AUTHENTICATED SHELL ===== */
+.app-body{background:#f8fafc;display:flex;width:100%;min-height:100vh}
+
+/* Sidebar */
+.dash-sidebar{width:250px;background:#1e293b;color:#fff;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;transform:translateX(0);transition:transform .25s ease}
+.dash-sidebar .brand{padding:20px 20px 16px;border-bottom:1px solid rgba(255,255,255,.08)}
 .dash-sidebar .brand .logo{font-size:22px;font-weight:800;letter-spacing:-0.5px}
-.dash-sidebar .brand .logo span{color:#3B82F6}
+.dash-sidebar .brand .logo span{color:#2563eb}
 .dash-sidebar .brand .tagline{font-size:11px;color:#64748B;text-transform:uppercase;letter-spacing:2px;margin-top:2px}
-.dash-nav{padding:16px 12px;flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
-.nav-s{font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1.5px;padding:16px 12px 8px;font-weight:600}
-.dash-nav .ni{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:8px;color:#94A3B8;text-decoration:none;font-size:14px;font-weight:500;cursor:pointer;margin-bottom:2px;transition:all .15s;min-height:44px}
-.dash-nav .ni:hover{background:rgba(255,255,255,.06);color:#E2E8F0}
-.dash-nav .ni.active{background:rgba(59,130,246,.15);color:#60A5FA;font-weight:600}
-.dash-nav .ni .badge{margin-left:auto;background:#3B82F6;color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}
-.dash-user{margin:12px;padding:14px;border-radius:10px;background:rgba(255,255,255,.05);display:flex;align-items:center;gap:12px}
-.dash-user .av{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3B82F6,#8B5CF6);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;color:#fff;flex-shrink:0}
+.dash-nav{padding:12px 10px;flex:1;overflow-y:auto}
+.nav-section{font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1.5px;padding:16px 12px 6px;font-weight:600}
+.dash-nav .nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;color:#94a3b8;text-decoration:none;font-size:13px;font-weight:500;cursor:pointer;transition:all .15s}
+.dash-nav .nav-item:hover{background:rgba(255,255,255,.06);color:#e2e8f0}
+.dash-nav .nav-item.active{background:rgba(37,99,235,.15);color:#2563eb;font-weight:600}
+.dash-nav .nav-item .nav-icon{font-size:16px;width:22px;text-align:center}
+.dash-user{margin:10px;padding:12px;border-radius:10px;background:rgba(255,255,255,.05);display:flex;align-items:center;gap:10px}
+.dash-user .avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#2563eb,#7c3aed);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#fff;flex-shrink:0}
 .dash-user .info{flex:1;min-width:0}
-.dash-user .info .n{font-size:14px;font-weight:600;color:#E2E8F0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dash-user .info .r{font-size:12px;color:#64748B}
-.dash-user .lo{width:40px;height:40px;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#94A3B8;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .15s;text-decoration:none;flex-shrink:0}
-.dash-user .lo:hover{background:rgba(239,68,68,.15);color:#FCA5A5;border-color:rgba(239,68,68,.3)}
-.menu-toggle{display:none;position:fixed;top:12px;left:12px;z-index:200;width:44px;height:44px;border:none;border-radius:12px;background:#0F172A;color:#fff;font-size:22px;cursor:pointer;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.dash-user .info .name{font-size:13px;font-weight:600;color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dash-user .info .role{font-size:11px;color:#64748b}
+.dash-user .logout-btn{width:34px;height:34px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#94a3b8;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all .15s;text-decoration:none;flex-shrink:0}
+.dash-user .logout-btn:hover{background:rgba(220,38,38,.15);color:#fca5a5;border-color:rgba(220,38,38,.3)}
+
+/* Mobile menu */
+.menu-toggle{display:none;position:fixed;top:10px;left:10px;z-index:200;width:40px;height:40px;border:none;border-radius:10px;background:#1e293b;color:#fff;font-size:20px;cursor:pointer;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.2)}
 .sidebar-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:99}
 .sidebar-overlay.show{display:block}
-/* ===== MAIN ===== */
-.dash-main{margin-left:260px;flex:1;padding:0;min-height:100vh;width:calc(100% - 260px)}
-.topbar{display:flex;justify-content:space-between;align-items:center;padding:16px 24px;background:#fff;border-bottom:1px solid #E2E8F0;position:sticky;top:0;z-index:50;min-height:60px}
-.topbar h2{font-size:18px;font-weight:700;color:#0F172A}
-.topbar .right{display:flex;align-items:center;gap:12px}
-/* Search bar */
-.sb{position:relative;display:flex;align-items:center}
-.sb input{border:1px solid #E2E8F0;border-radius:8px;padding:8px 12px 8px 32px;font-size:13px;font-family:'Inter',sans-serif;width:220px;background:#F8F9FC;color:#1E293B;outline:none;transition:all .15s}
-.sb input:focus{width:300px;border-color:#3B82F6;background:#fff}
-.sb .si{position:absolute;left:10px;color:#94A3B8;font-size:13px;pointer-events:none}
-.sr{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid #E2E8F0;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.1);max-height:300px;overflow-y:auto;display:none;z-index:300}
-.sr.show{display:block}
-.sr-item{padding:10px 12px;border-bottom:1px solid #F1F5F9;cursor:pointer;transition:background .1s}
-.sr-item:hover{background:#F8F9FC}
-.sr-item:last-child{border-bottom:none}
-.sr-item .st{font-size:11px;color:#64748B;font-weight:600;text-transform:uppercase}
-.sr-item .stt{font-size:13px;font-weight:500;color:#0F172A}
-.sr-item .ss{font-size:11px;color:#64748B}
-.sr-empty{padding:16px;text-align:center;color:#94A3B8;font-size:13px}
-/* Notification bell */
-.nb{position:relative;cursor:pointer;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid #E2E8F0;background:#fff;font-size:16px;transition:all .15s}
-.nb:hover{background:#F8F9FC;border-color:#CBD5E1}
-.nb-b{position:absolute;top:-4px;right:-4px;background:#EF4444;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:10px;line-height:1.4;min-width:16px;text-align:center}
-.notif-dropdown{position:absolute;top:calc(100% + 8px);right:0;width:340px;background:#fff;border:1px solid #E2E8F0;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.12);display:none;z-index:300;max-height:400px;overflow-y:auto}
-.notif-dropdown.show{display:block}
-.notif-h{padding:12px 14px;border-bottom:1px solid #F1F5F9;display:flex;justify-content:space-between;align-items:center}
-.notif-h strong{font-size:14px}
-.notif-h a{font-size:11px;color:#3B82F6;cursor:pointer;text-decoration:none}
-.notif-item{padding:12px 14px;border-bottom:1px solid #F1F5F9;cursor:pointer;transition:background .1s}
-.notif-item:hover{background:#F8F9FC}
-.notif-item.unread{background:#EFF6FF}
-.notif-item:last-child{border-bottom:none}
-.notif-item .nt{font-size:13px;font-weight:600;color:#0F172A}
-.notif-item .nm{font-size:12px;color:#64748B;margin-top:2px}
-.notif-item .ntm{font-size:10px;color:#94A3B8;margin-top:2px}
-.notif-empty{padding:24px;text-align:center;color:#94A3B8;font-size:13px}
-/* Integration health */
-.il{gap:12px}
-.ii{padding:12px 14px}
-.ii .ii-status{font-size:11px}
-.ii .ii-time{font-size:10px;color:#94A3B8;margin-top:2px}
-.sd{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px}
-.sd.on{background:#22C55E;box-shadow:0 0 4px rgba(34,197,94,.4)}
-.sd.wa{background:#F59E0B;box-shadow:0 0 4px rgba(245,158,11,.4)}
-.sd.er{background:#EF4444;box-shadow:0 0 4px rgba(239,68,68,.4)}
-.cnt{padding:20px 24px;max-width:100%}
-/* ===== KPI ===== */
-.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
-.kpi-card{background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
-.kpi-card .kh{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
-.kpi-card .ki{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
-.kpi-card .ki.b{background:#EFF6FF;color:#3B82F6}
-.kpi-card .ki.p{background:#F5F3FF;color:#8B5CF6}
-.kpi-card .ki.o{background:#FFF7ED;color:#F97316}
-.kpi-card .ki.g{background:#F0FDF4;color:#22C55E}
-.kpi-card .kl{font-size:12px;color:#64748B;font-weight:500}
-.kpi-card .kv{font-size:24px;font-weight:800;color:#0F172A;line-height:1.2}
-.kpi-card .kt{font-size:11px;font-weight:600;margin-top:4px}
-.kpi-card .kt.up{color:#22C55E}
-.kpi-card .kt.down{color:#EF4444}
-.kpi-card .kt.neutral{color:#64748B}
-/* ===== CHARTS ===== */
-.charts-grid{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:24px}
-/* ===== CARDS ===== */
-.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;margin-bottom:16px}
-.card-h{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #F1F5F9;min-height:48px}
-.card-h h3{font-size:14px;font-weight:600;color:#0F172A}
-.card-h .ca{font-size:12px;color:#3B82F6;cursor:pointer;font-weight:500;padding:6px 0}
-.card-b{padding:14px 16px}
-/* ===== TABS ===== */
-.tab-bar{display:flex;gap:2px;margin-bottom:16px;background:#F1F5F9;border-radius:10px;padding:3px;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
-.tab-bar::-webkit-scrollbar{display:none}
-.tab-btn{padding:10px 16px;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;font-family:'Inter',sans-serif;color:#64748B;background:transparent;white-space:nowrap;flex-shrink:0;min-height:40px}
-.tab-btn.active{background:#fff;color:#0F172A;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.1)}
-.panel{display:none}
-.panel.active{display:block}
-/* ===== BADGES & TAGS ===== */
-.badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600;gap:4px}
-.bg{background:#F0FDF4;color:#16A34A}
-.bb{background:#EFF6FF;color:#2563EB}
-.bp{background:#F5F3FF;color:#7C3AED}
-.ba{background:#FFFBEB;color:#D97706}
-.br{background:#FEF2F2;color:#DC2626}
-.bgr{background:#F1F5F9;color:#64748B}
-.tag{display:inline-flex;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:600}
-.ts{background:#EFF6FF;color:#2563EB}
-.th{background:#F5F3FF;color:#7C3AED}
-.td{background:#FFFBEB;color:#D97706}
-/* ===== GRIDS ===== */
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.ops-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
-.ops-card{text-align:center;padding:14px 8px;border-radius:10px;border:1px solid #F1F5F9}
-.ops-card .oi{font-size:20px;margin-bottom:6px}
-.ops-card .ov{font-size:18px;font-weight:700;color:#0F172A}
-.ops-card .ol{font-size:11px;color:#64748B;margin-top:2px}
-/* ===== COMMENTS ===== */
-.vc-cmt-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#64748B;cursor:pointer;padding:4px 8px;border-radius:6px;background:#F8F9FC;border:1px solid #E2E8F0;margin-top:6px;transition:all .15s;user-select:none}
-.vc-cmt-badge:hover{background:#EFF6FF;border-color:#93C5FD;color:#2563EB}
-.vc-cmt-badge.has-cmts{color:#3B82F6;border-color:#BFDBFE;background:#EFF6FF}
-.vc-cmt-badge .b-count{font-weight:600}
-.vc-cmt-thread{display:none;margin-top:6px;border-top:1px solid #E2E8F0;padding-top:8px}
-.vc-cmt-thread.show{display:block}
-.vc-cmt{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #F1F5F9}
-.vc-cmt:last-child{border-bottom:none}
-.vc-cmt-av{width:28px;height:28px;border-radius:50%;background:#E2E8F0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#475569;flex-shrink:0}
-.vc-cmt-av.s{background:#DBEAFE;color:#2563EB}
-.vc-cmt-body{flex:1;min-width:0}
-.vc-cmt-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.vc-cmt-author{font-size:12px;font-weight:600;color:#0F172A}
-.vc-cmt-time{font-size:10px;color:#94A3B8}
-.vc-cmt-src{font-size:9px;padding:1px 5px;border-radius:4px;font-weight:600}
-.vc-cmt-src.dash{background:#EFF6FF;color:#3B82F6}
-.vc-cmt-src.monday{background:#F0FDF4;color:#16A34A}
-.vc-cmt-text{font-size:12px;color:#475569;margin-top:2px;line-height:1.4;white-space:pre-wrap}
-.vc-cmt-input-row{display:flex;gap:6px;margin-top:8px;padding-top:6px;border-top:1px solid #F1F5F9}
-.vc-cmt-input{flex:1;min-width:0;padding:7px 10px;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;font-family:'Inter',sans-serif;outline:none;transition:border-color .15s}
-.vc-cmt-input:focus{border-color:#3B82F6}
-.vc-cmt-send{padding:7px 14px;border:none;border-radius:6px;background:#3B82F6;color:#fff;font-size:12px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;transition:background .15s;white-space:nowrap}
-.vc-cmt-send:hover{background:#2563EB}
-.vc-cmt-send:disabled{opacity:.5;cursor:default}
-.il{display:flex;flex-direction:column;gap:10px}
-.ii{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;border:1px solid #F1F5F9}
-.ii .ii-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0}
-.ii .ii-icon.hw{background:#EFF6FF;color:#3B82F6}
-.ii .ii-icon.ar{background:#F0FDF4;color:#22C55E}
-.ii .ii-icon.ms{background:#FFFBEB;color:#D97706}
-.ii .ii-icon.mc{background:#F5F3FF;color:#7C3AED}
-.ii .ii-info{flex:1;min-width:0}
-.ii .ii-name{font-size:13px;font-weight:600;color:#0F172A}
-.ii .ii-status{font-size:11px;color:#64748B}
-.ii .badge{flex-shrink:0}
-/* ===== PROGRESS ===== */
-.prog{margin-top:6px}
-.prog-bar{height:6px;background:#F1F5F9;border-radius:3px;overflow:hidden}
-.prog-fill{height:100%;border-radius:3px;background:#3B82F6;transition:width .4s}
-.prog-lbl{display:flex;justify-content:space-between;font-size:11px;color:#64748B;margin-top:4px}
-.sd{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px}
-.sd.on{background:#22C55E}
-.sd.wa{background:#D97706}
-/* ===== TABLES (converted to mobile cards) ===== */
-.tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
-table{width:100%;border-collapse:collapse;font-size:13px;min-width:500px}
-th{text-align:left;padding:10px 12px;color:#64748B;font-weight:600;border-bottom:2px solid #F1F5F9;white-space:nowrap;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
-td{padding:10px 12px;border-bottom:1px solid #F8F9FC;white-space:nowrap}
-tr:hover{background:#F8FAFC}
-/* ===== KANBAN ===== */
-.vc-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px}
-.vc-meta{display:flex;gap:12px;flex-wrap:wrap}
-.vc-meta-item{display:flex;align-items:center;gap:5px;font-size:12px;color:#64748B}
-.vc-meta-item strong{color:#0F172A;font-size:14px}
-.vc-progress-block{margin-bottom:16px;background:#fff;border-radius:10px;border:1px solid #F1F5F9;padding:14px 16px}
-.vc-prog-label{display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px}
-.vc-prog-label strong{color:#0F172A}
-.vc-big-prog{height:8px;background:#F1F5F9;border-radius:4px;overflow:hidden;margin-bottom:10px}
-.vc-big-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,#3B82F6,#8B5CF6);transition:width .4s}
-.vc-counts{display:flex;gap:16px;flex-wrap:wrap}
-.vc-counts .vcc{font-size:11px;display:flex;align-items:center;gap:4px}
-.vcc-d{width:8px;height:8px;border-radius:2px;flex-shrink:0}
-.vcc-d.ip{background:#3B82F6}
-.vcc-d.wo{background:#F97316}
-.vcc-d.dn{background:#22C55E}
-.vcc-d.ns{background:#94A3B8}
-.vc-filter{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
-.vc-filter .vf-btn{padding:8px 14px;border-radius:8px;border:1px solid #E2E8F0;background:#fff;font-family:Inter;font-size:12px;font-weight:500;color:#64748B;cursor:pointer;transition:all .15s;min-height:38px}
-.vc-filter .vf-btn:hover{border-color:#3B82F6;color:#3B82F6}
-.vc-filter .vf-btn.active{background:#3B82F6;color:#fff;border-color:#3B82F6}
-.vc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
-.vc-col{min-width:0}
-.vc-col-h{font-size:12px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.5px;padding:8px 12px;border-radius:8px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
-.vc-col-h.ip{background:#EFF6FF;color:#2563EB}
-.vc-col-h.wo{background:#FFF7ED;color:#F97316}
-.vc-col-h.dn{background:#F0FDF4;color:#16A34A}
-.vc-col-h.ns{background:#F1F5F9;color:#64748B}
-.vc-col-h .vcc-count{font-size:11px;background:rgba(0,0,0,.08);padding:2px 7px;border-radius:10px}
-.vc-card{border:1px solid #F1F5F9;border-radius:10px;padding:12px;margin-bottom:8px;transition:box-shadow .15s;background:#fff}
-.vc-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.06);border-color:#E2E8F0}
-.vc-card .vc-name{font-size:13px;font-weight:600;color:#0F172A;margin-bottom:5px}
-.vc-card .vc-person{font-size:12px;color:#64748B;margin-bottom:3px}
-.vc-card .vc-hour{font-size:11px;color:#3B82F6;font-weight:600}
-.vc-card .vc-subitems{margin-top:8px;border-top:1px solid #F1F5F9;padding-top:6px}
-.vc-card .vc-si{display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:11px;border-bottom:1px solid #F8F9FC}
-.vc-card .vc-si:last-child{border-bottom:none}
-.vc-card .vc-si .si-name{color:#475569;flex:1;padding-right:6px;min-width:0}
-.vc-card .vc-si .si-toggle{cursor:pointer;margin-right:5px;color:#94A3B8;font-size:9px;padding:4px 2px}
-.vc-sub-detail{padding:4px 0 4px 16px;font-size:11px;color:#94A3B8;display:none}
-.vc-sub-detail.show{display:block}
-.vc-pri{width:6px;height:6px;border-radius:50%;display:inline-block;margin-right:4px;flex-shrink:0}
-.vc-pri.high{background:#EF4444}
-.vc-pri.med{background:#F97316}
-.vc-pri.low{background:#22C55E}
-.vc-empty{text-align:center;padding:16px;color:#94A3B8;font-size:12px}
-/* ===== LOADING / ERRORS ===== */
-.loading{display:flex;align-items:center;justify-content:center;padding:32px;color:#94A3B8;font-size:13px;gap:8px}
-.spinner{width:16px;height:16px;border:2px solid #E2E8F0;border-top-color:#3B82F6;border-radius:50%;animation:spin .6s linear infinite}
-.err{color:#DC2626;padding:16px;text-align:center;background:#FEF2F2;border-radius:8px;font-size:13px}
-.empty{text-align:center;padding:24px;color:#94A3B8;font-size:13px}
-.tm{color:#64748B}
-.fw{font-weight:600}
-.fg select{padding:8px 14px;border-radius:8px;border:1px solid #E2E8F0;font-family:Inter;font-size:13px;outline:none;background:#fff;cursor:pointer;min-height:40px}
-@keyframes spin{to{transform:rotate(360deg)}}
 
-/* ===== MOBILE-FIRST RESPONSIVE ===== */
-/* Mobile: <576px */
-@media(max-width:575px){
-body{font-size:15px}
-.dash-sidebar{width:85vw;max-width:300px}
-.menu-toggle{display:flex}
-.dash-sidebar{transform:translateX(-100%)}
+/* Main content area */
+.dash-main{margin-left:250px;flex:1;display:flex;flex-direction:column;min-height:100vh;width:calc(100% - 250px)}
+
+/* Top header bar */
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 24px;background:#fff;border-bottom:1px solid #e2e8f0;position:sticky;top:0;z-index:50;min-height:56px}
+.topbar h2{font-size:18px;font-weight:700;color:#0f172a}
+.topbar .right{display:flex;align-items:center;gap:10px}
+.sb{position:relative;display:flex;align-items:center}
+.sb input{border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px 7px 30px;font-size:13px;font-family:'Inter',sans-serif;width:200px;background:#f8fafc;color:#1e293b;outline:none;transition:all .15s}
+.sb input:focus{width:260px;border-color:#2563eb;background:#fff}
+.sb .si{position:absolute;left:9px;color:#94a3b8;font-size:12px;pointer-events:none}
+
+/* Content area */
+.cnt{padding:20px 24px;flex:1}
+
+/* Loading & Empty states */
+.loading{display:flex;align-items:center;justify-content:center;padding:40px;color:#94a3b8;font-size:13px;gap:8px}
+.spinner{width:18px;height:18px;border:2px solid #e2e8f0;border-top-color:#2563eb;border-radius:50%;animation:spin .6s linear infinite}
+.empty{text-align:center;padding:40px;color:#94a3b8;font-size:14px}
+.error-box{color:#dc2626;padding:16px;text-align:center;background:#fef2f2;border-radius:8px;font-size:13px;margin:16px 0}
+
+/* KPI Grid */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:24px}
+.kpi-card{background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.06);display:flex;flex-direction:column}
+.kpi-card .kpi-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+.kpi-card .kpi-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.kpi-card .kpi-icon.blue{background:#eff6ff;color:#2563eb}
+.kpi-card .kpi-icon.green{background:#f0fdf4;color:#16a34a}
+.kpi-card .kpi-icon.red{background:#fef2f2;color:#dc2626}
+.kpi-card .kpi-icon.amber{background:#fffbeb;color:#f59e0b}
+.kpi-card .kpi-icon.purple{background:#f5f3ff;color:#7c3aed}
+.kpi-card .kpi-icon.teal{background:#f0fdfa;color:#14b8a6}
+.kpi-card .kpi-label{font-size:11px;color:#64748b;font-weight:500;text-transform:uppercase;letter-spacing:.3px}
+.kpi-card .kpi-value{font-size:26px;font-weight:800;color:#0f172a;line-height:1.2}
+.kpi-card .kpi-sub{font-size:11px;color:#64748b;margin-top:4px}
+
+/* Card component */
+.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;margin-bottom:16px}
+.card-header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #f1f5f9}
+.card-header h3{font-size:14px;font-weight:600;color:#0f172a}
+.card-body{padding:14px 16px}
+
+/* Tables */
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px 12px;background:#f8fafc;color:#64748b;font-weight:600;border-bottom:2px solid #f1f5f9;white-space:nowrap;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+td{padding:10px 12px;border-bottom:1px solid #f1f5f9;color:#475569}
+tr.clickable{cursor:pointer}
+tr.clickable:hover{background:#f8fafc}
+.text-muted{color:#94a3b8}
+.font-medium{font-weight:600}
+.font-mono{font-family:monospace;font-size:12px}
+
+/* Pagination */
+.pagination{display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 0}
+.pagination button{padding:7px 14px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;color:#475569;font-size:12px;font-weight:500;cursor:pointer;font-family:'Inter',sans-serif;transition:all .15s}
+.pagination button:hover:not(:disabled){border-color:#2563eb;color:#2563eb}
+.pagination button.active{background:#2563eb;color:#fff;border-color:#2563eb}
+.pagination button:disabled{opacity:.4;cursor:default}
+.pagination .page-info{font-size:12px;color:#94a3b8;padding:0 8px}
+
+/* Search bar for lists */
+.list-search{margin-bottom:14px;position:relative}
+.list-search input{width:100%;padding:9px 12px 9px 36px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:'Inter',sans-serif;outline:none;transition:border-color .15s;background:#fff}
+.list-search input:focus{border-color:#2563eb}
+.list-search .si{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:#94a3b8;font-size:13px;pointer-events:none}
+
+/* Back button */
+.back-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:none;border-radius:8px;background:#f1f5f9;color:#475569;font-size:12px;font-weight:500;cursor:pointer;font-family:'Inter',sans-serif;transition:all .15s;margin-bottom:14px}
+.back-btn:hover{background:#e2e8f0;color:#0f172a}
+
+/* Property detail */
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+.detail-field{margin-bottom:10px}
+.detail-field .detail-label{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.3px;font-weight:600;margin-bottom:3px}
+.detail-field .detail-value{font-size:14px;color:#0f172a;font-weight:500}
+
+/* Badges */
+.badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600;gap:4px}
+.badge-green{background:#f0fdf4;color:#16a34a}
+.badge-red{background:#fef2f2;color:#dc2626}
+.badge-blue{background:#eff6ff;color:#2563eb}
+.badge-amber{background:#fffbeb;color:#d97706}
+.badge-gray{background:#f1f5f9;color:#64748b}
+
+/* Currency formatting */
+.currency{font-weight:600;color:#0f172a}
+
+/* ===== RESPONSIVE ===== */
+@media(max-width:899px){
+.dash-sidebar{width:85vw;max-width:280px;transform:translateX(-100%)}
 .dash-sidebar.open{transform:translateX(0)}
+.menu-toggle{display:flex}
 .dash-main{margin-left:0;width:100%}
-.topbar{padding:12px 14px;padding-left:62px;flex-wrap:wrap;gap:8px}
+.topbar{padding:12px 14px;padding-left:60px;flex-wrap:wrap;gap:6px}
 .topbar h2{font-size:16px}
-.topbar .right{width:100%;justify-content:flex-end}
-.cnt{padding:12px 14px}
+.cnt{padding:14px}
 .kpi-grid{grid-template-columns:repeat(2,1fr);gap:10px}
 .kpi-card{padding:12px}
-.kpi-card .kv{font-size:20px}
-.kpi-card .ki{width:32px;height:32px;font-size:14px}
-.charts-grid{grid-template-columns:1fr;gap:12px}
-.charts-grid .card-b{padding:12px}
-.card-h{padding:12px 14px}
-.card-h h3{font-size:13px}
-.card-b{padding:12px 14px}
-/* Tables become card lists on mobile */
-.tw{overflow-x:visible}
-table{min-width:auto;font-size:13px}
-th{display:none}
-td{display:block;padding:6px 0;border-bottom:none;white-space:normal;position:relative;padding-left:0}
-td:before{content:attr(data-label);display:block;font-size:10px;color:#94A3B8;font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px}
-tr{display:block;padding:12px;margin-bottom:8px;background:#fff;border:1px solid #F1F5F9;border-radius:10px}
-tr:hover{background:#fff}
-.ops-grid{grid-template-columns:repeat(3,1fr);gap:8px}
-.ops-card{padding:10px 6px}
-.ops-card .ov{font-size:16px}
-.vc-grid{grid-template-columns:1fr}
-.vc-col-h{padding:8px 12px;font-size:11px}
-.vc-card{padding:10px}
-.vc-meta{flex-direction:column;gap:4px}
-.vc-header{flex-direction:column;align-items:flex-start}
-.vc-progress-block{padding:12px 14px}
-.vc-counts{gap:10px;flex-wrap:wrap}
-.grid-2{grid-template-columns:1fr;gap:12px}
-.il{gap:8px}
-.ii{padding:10px 12px}
-.ii .ii-icon{width:28px;height:28px;font-size:12px}
-.ii .ii-name{font-size:12px}
-.tab-bar{padding:2px;gap:1px}
-.tab-btn{padding:8px 12px;font-size:12px;min-height:36px}
-.vc-filter{gap:4px}
-.vc-filter .vf-btn{padding:6px 10px;font-size:11px;min-height:34px}
-select{font-size:16px!important;padding:10px 12px}
-.menu-toggle{width:40px;height:40px;font-size:20px}
+.kpi-card .kpi-value{font-size:22px}
+.detail-grid{grid-template-columns:1fr}
+.sb input{width:160px}
+.sb input:focus{width:200px}
 }
-/* Tablet: 576-899px */
-@media(min-width:576px)and(max-width:899px){
-.dash-sidebar{width:220px}
-.dash-main{margin-left:220px;width:calc(100% - 220px)}
-.cnt{padding:16px 20px}
-.topbar{padding:14px 20px}
-.topbar h2{font-size:16px}
-.kpi-grid{grid-template-columns:repeat(2,1fr);gap:12px}
-.charts-grid{grid-template-columns:1fr}
-.vc-grid{grid-template-columns:repeat(2,1fr)}
-.ops-grid{grid-template-columns:repeat(3,1fr)}
-}
-/* Desktop: 900px+ */
 @media(min-width:900px){
 .sidebar-overlay{display:none!important}
 .menu-toggle{display:none!important}
 .dash-sidebar{transform:translateX(0)!important}
 }
-/* Landscape mobile */
-@media(max-height:480px)and(orientation:landscape){
-.topbar{min-height:44px;padding:8px 14px;padding-left:62px}
-.cnt{padding:8px 14px}
-.kpi-grid{gap:8px;margin-bottom:12px}
-.kpi-card{padding:10px}
-.kpi-card .kv{font-size:18px}
-}
-/* Safe area */
-@supports(padding:max(0px)){
-.dash-sidebar{padding-top:max(24px,env(safe-area-inset-top))}
-.dash-sidebar{padding-bottom:max(0px,env(safe-area-inset-bottom))}
-.cnt{padding-bottom:max(12px,env(safe-area-inset-bottom))}
+@media(max-width:480px){
+.kpi-grid{grid-template-columns:repeat(2,1fr);gap:8px}
+.login-card{padding:28px 20px;border-radius:16px}
+.login-card h2{font-size:18px}
+.form-group input{font-size:16px}
+.login-btn{padding:16px}
 }
 </style>
 </head>
 <body>
 
-<button class="menu-toggle" id="mToggle" onclick="ts()">☰</button>
-<div class="sidebar-overlay" id="sOverlay" onclick="ts()"></div>
+{% if not user %}
+<!-- ====== LOGIN VIEW ====== -->
+<div class="login-body">
+<div class="login-wrap">
+<div class="logo-area">
+<div class="logo">VERV<span>.</span></div>
+<div class="tagline">Operations Dashboard</div>
+<div class="welcome">Sign in to your account</div>
+</div>
+<div class="login-card">
+<div class="error-msg" id="loginError">Invalid credentials. Please try again.</div>
+<form id="loginForm" onsubmit="handleLogin(event)">
+<div class="form-group">
+<label for="username">Username or Email</label>
+<div class="input-wrap">
+<span class="input-icon">👤</span>
+<input type="text" id="username" placeholder="Username or email" autocomplete="username" required autofocus>
+</div>
+</div>
+<div class="form-group">
+<label for="password">Password</label>
+<div class="input-wrap">
+<span class="input-icon">🔒</span>
+<input type="password" id="password" placeholder="Enter your password" autocomplete="current-password" required>
+</div>
+</div>
+<button type="submit" class="login-btn" id="loginBtn">
+<span id="btnText">Sign In</span>
+<div class="loading-spinner" id="btnSpinner"></div>
+</button>
+<div style="text-align:center;margin-top:14px">
+<a href="/reset-password" style="color:#475569;font-size:13px;text-decoration:none">Forgot password?</a>
+</div>
+</form>
+<div class="role-msg">Authorised personnel only</div>
+</div>
+<div class="login-footer">&copy; VERV Operations</div>
+</div>
+</div>
+
+{% else %}
+<!-- ====== AUTHENTICATED SPA ====== -->
+<script>const currentUser = { username: '{{ user.username|e }}', role: '{{ user.role|e }}' };</script>
+
+<button class="menu-toggle" id="menuToggle" onclick="toggleSidebar()">☰</button>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
 
 <aside class="dash-sidebar" id="dashSidebar">
 <div class="brand"><div class="logo">VERV<span>.</span></div><div class="tagline">Operations</div></div>
-<nav class="dash-nav" id="dashNav">
-<div class="nav-s">Overview</div>
-<div class="ni active" onclick="sp('dashboard')"><span>◉</span><span>Dashboard</span></div>
-<div class="nav-s">Properties</div>
-<div class="ni" onclick="sp('properties')"><span>🏠</span><span>All Properties</span><span class="badge" id="pCount">0</span></div>
-<div class="n-sub">
-<div class="ni" onclick="sp('str')"><span>🏨</span><span>Short Stay</span></div>
-<div class="ni" onclick="sp('hmo')"><span>🏢</span><span>HMO</span></div>
+<nav class="dash-nav">
+<div class="nav-section">Navigation</div>
+<div class="nav-item active" data-page="home" onclick="navigate('home')">
+  <span class="nav-icon">🏠</span><span>Home</span>
 </div>
-<div class="nav-s">Operations</div>
-<div class="ni" onclick="sp('maintenance')"><span>🔧</span><span>Maintenance</span><span class="badge" id="mCountSide">0</span></div>
-<div class="nav-s">Development</div>
-<div class="ni" onclick="document.getElementById('devSection').scrollIntoView({behavior:'smooth'})"><span>⚡</span><span>Projects</span></div>
+<div class="nav-item" data-page="properties" onclick="navigate('properties')">
+  <span class="nav-icon">🏢</span><span>Properties</span>
+</div>
+<div class="nav-item" data-page="units" onclick="navigate('units')">
+  <span class="nav-icon">🚪</span><span>Units</span>
+</div>
+<div class="nav-item" data-page="tenancies" onclick="navigate('tenancies')">
+  <span class="nav-icon">📋</span><span>Tenancies</span>
+</div>
+<div class="nav-item" data-page="tenants" onclick="navigate('tenants')">
+  <span class="nav-icon">👥</span><span>Tenants</span>
+</div>
+<div class="nav-item" data-page="applicants" onclick="navigate('applicants')">
+  <span class="nav-icon">📝</span><span>Applicants</span>
+</div>
+<div class="nav-item" data-page="finance" onclick="navigate('finance')">
+  <span class="nav-icon">💰</span><span>Finance</span>
+</div>
+<div class="nav-item" data-page="search" onclick="navigate('search')">
+  <span class="nav-icon">🔍</span><span>Search</span>
+</div>
 </nav>
 <div class="dash-user">
-<div class="av" id="userAvatar">T</div>
-<div class="info"><div class="n" id="userName">Loading...</div><div class="r" id="userRole">admin</div></div>
-<a href="/api/auth/logout" class="lo" title="Sign out">✕</a>
+<div class="avatar" id="userAvatar">{{ user.username[0]|upper }}</div>
+<div class="info">
+<div class="name" id="userName">{{ user.username }}</div>
+<div class="role" id="userRole">{{ user.role }}</div>
+</div>
+<a href="/api/auth/logout" class="logout-btn" title="Sign out">✕</a>
 </div>
 </aside>
 
 <div class="dash-main">
 <div class="topbar">
-<h2 id="pageTitle">Dashboard</h2>
+<h2 id="pageTitle">Home</h2>
 <div class="right">
-<div class="fg"><select id="periodFilter" onchange="rl()"><option value="today">Today</option><option value="week">This Week</option><option value="month" selected>This Month</option><option value="quarter">This Quarter</option></select></div>
-<div class="sb"><span class="si">🔍</span><input type="text" id="searchInput" placeholder="Search..." oninput="doSearch(this.value)" onblur="setTimeout(function(){document.getElementById('searchResults').classList.remove('show')},200)" onfocus="if(this.value.length>=2)document.getElementById('searchResults').classList.add('show')"><div class="sr" id="searchResults"></div></div>
-<div class="nb" onclick="toggleNotifPanel()" id="notifBell">🔔<span class="nb-b" id="notifBadge" style="display:none">0</span>
-<div class="notif-dropdown" id="notifPanel">
-<div class="notif-h"><strong>Notifications</strong><a onclick="markAllRead()">Mark all read</a></div>
-<div id="notifList"><div class="notif-empty">No notifications</div></div>
+<div class="sb">
+<span class="si">🔍</span>
+<input type="text" id="globalSearch" placeholder="Quick search..." onkeydown="if(event.key==='Enter' && this.value.trim()){navigate('search');doSearch(this.value.trim());}">
 </div>
 </div>
-<span class="tm" id="lastUpdated">—</span>
+</div>
+<div class="cnt" id="contentArea">
+<div class="loading"><div class="spinner"></div> Loading...</div>
 </div>
 </div>
-<div class="cnt" id="dashContent"></div>
-</div>
+{% endif %}
 
 <script>
-// Sidebar toggle
-function ts() {
-document.getElementById('sOverlay').classList.toggle('show');
-document.getElementById('dashSidebar').classList.toggle('open');
-}
-document.querySelectorAll('.ni').forEach(function(item) {
-item.addEventListener('click', function() {
-if(window.innerWidth < 900) ts();
-});
-});
+{% if user %}
+// ═══════════════════════════════════════════════════════════════
+// AUTHENTICATED SPA
+// ═══════════════════════════════════════════════════════════════
 
-// Close sidebar on overlay tap
-document.getElementById('sOverlay').addEventListener('click', ts);
+var currentPage = 'home';
+var propertyPageState = { page: 1, search: '' };
 
-(function(){
-var d = new Date();
-var opts = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-var el = document.getElementById('lastUpdated');
-if(el) el.textContent = d.toLocaleDateString('en-GB', opts);
-})();
-// Add AbortController for stale HTTP request cancellation
-function getSignal() {
-  var controller = new AbortController();
-  return { signal: controller.signal, controller: controller };
+function toggleSidebar() {
+  document.getElementById('sidebarOverlay').classList.toggle('show');
+  document.getElementById('dashSidebar').classList.toggle('open');
 }
 
-function sp(page) {
-document.querySelectorAll('.ni').forEach(function(n){ n.classList.remove('active'); });
-var titles = {dashboard:'Dashboard',properties:'All Properties',str:'Short Stay',hmo:'HMO',maintenance:'Maintenance'};
-document.getElementById('pageTitle').textContent = titles[page] || 'Dashboard';
-document.querySelectorAll('.ni').forEach(function(n){
-if(n.textContent.trim().includes(titles[page])) n.classList.add('active');
-});
-}
-
-function st(name) {
-document.querySelectorAll('.tab-btn').forEach(function(t){ t.classList.remove('active'); });
-document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
-document.querySelectorAll('.tab-btn').forEach(function(t){
-if(t.textContent.trim().toLowerCase().includes(name)) t.classList.add('active');
-});
-var el = document.getElementById('panel-'+name);
-if(el) {
-el.classList.add('active');
-if(name==='properties') loadProperties();
-if(name==='str') loadSTR();
-if(name==='hmo') loadHMO();
-if(name==='maintenance') loadMaintenance();
-}
-}
-
-async function api(path, method, body, signal) {
-var opts = {};
-if(method === 'POST' || method === 'PUT' || method === 'DELETE') {
-opts.method = method;
-opts.headers = {'Content-Type':'application/json'};
-if(body) opts.body = JSON.stringify(body);
-}
-if(signal) opts.signal = signal;
-var r = await fetch(path, opts);
-if(!r.ok) throw new Error('HTTP '+r.status);
-return r.json();
-}
-
-function rl() { loadKPIs(); loadProperties(); loadSTR(); loadHMO(); loadMaintenance(); }
-
-// ========== Render Dashboard ==========
-(function renderDashboard() {
-var dc = document.getElementById('dashContent');
-dc.innerHTML = 
-'<div class="kpi-grid" id="kpiGrid">' +
-'<div class="kpi-card"><div class="kh"><div class="kl">STR Properties</div><div class="ki b">&#127975;</div></div><div class="kv" id="kpiStr">—</div><div class="kt neutral" id="kpiStrT">● Active</div></div>' +
-'<div class="kpi-card"><div class="kh"><div class="kl">HMO Properties</div><div class="ki p">&#127962;</div></div><div class="kv" id="kpiHmo">—</div><div class="kt neutral" id="kpiHmoT">● Leased</div></div>' +
-'<div class="kpi-card"><div class="kh"><div class="kl">Today\'s Bookings</div><div class="ki o">&#128197;</div></div><div class="kv" id="kpiBook">—</div><div class="kt" id="kpiBookT">● Arrivals / Departures</div></div>' +
-'<div class="kpi-card"><div class="kh"><div class="kl">Maintenance Jobs</div><div class="ki g">&#128295;</div></div><div class="kv" id="kpiMaint">—</div><div class="kt neutral" id="kpiMaintT">● Open</div></div>' +
-'</div>' +
-
-'<div class="charts-grid">' +
-'<div class="card"><div class="card-h"><h3>Revenue Overview</h3></div><div class="card-b" style="min-height:180px"><canvas id="revChart" height="180"></canvas></div></div>' +
-'<div class="card"><div class="card-h"><h3>Portfolio Split</h3></div><div class="card-b" style="min-height:180px"><canvas id="portChart" height="180"></canvas>' +
-'<div style="display:flex;justify-content:center;gap:14px;margin-top:8px;font-size:11px;flex-wrap:wrap"><span><span style="color:#3B82F6">●</span> STR <strong id="psStr">0</strong></span><span><span style="color:#8B5CF6">●</span> HMO <strong id="psHmo">0</strong></span><span><span style="color:#F97316">●</span> Hybrid <strong id="psHyb">0</strong></span></div></div></div>' +
-'</div>' +
-
-'<div class="card"><div class="card-h"><h3>Operational Overview</h3></div><div class="card-b">' +
-'<div class="ops-grid">' +
-'<div class="ops-card"><div class="oi">&#128197;</div><div class="ov" id="oBook">—</div><div class="ol">Bookings</div></div>' +
-'<div class="ops-card"><div class="oi">&#128682;</div><div class="ov" id="oArr">—</div><div class="ol">Arrivals</div></div>' +
-'<div class="ops-card"><div class="oi">&#128694;</div><div class="ov" id="oDep">—</div><div class="ol">Departures</div></div>' +
-'<div class="ops-card"><div class="oi">&#128295;</div><div class="ov" id="oMaint">—</div><div class="ol">Maintenance</div></div>' +
-'<div class="ops-card"><div class="oi">&#127968;</div><div class="ov" id="oProps">—</div><div class="ol">Properties</div></div>' +
-'</div></div></div>' +
-
-'<div id="devSection" class="card"><div class="card-h"><h3>⚡ verv.co.uk — Development Pipeline</h3></div><div class="card-b" id="vervCoukSection"><div class="loading"><div class="spinner"></div> Loading pipeline...</div></div></div>' +
-
-'<div class="card"><div class="card-h"><h3>System Integrations</h3><span class="ca" onclick="loadIntegrations()" title="Refresh status">↻</span></div><div class="card-b">' +
-'<div class="il" id="integrationList">' +
-'<div class="ii"><div class="ii-icon hw">H</div><div class="ii-info"><div class="ii-name">Hostaway</div><div class="ii-status">Loading...</div><div class="ii-time"></div></div><span class="badge bgr"><span class="sd wa"></span>Checking...</span></div>' +
-'<div class="ii"><div class="ii-icon ar">A</div><div class="ii-info"><div class="ii-name">Arthur</div><div class="ii-status">Loading...</div><div class="ii-time"></div></div><span class="badge bgr"><span class="sd wa"></span>Checking...</span></div>' +
-'<div class="ii"><div class="ii-icon ms">M</div><div class="ii-info"><div class="ii-name">Missive</div><div class="ii-status">Loading...</div><div class="ii-time"></div></div><span class="badge bgr"><span class="sd wa"></span>Checking...</span></div>' +
-'<div class="ii"><div class="ii-icon mc">◊</div><div class="ii-info"><div class="ii-name">Monday.com</div><div class="ii-status">Loading...</div><div class="ii-time"></div></div><span class="badge bgr"><span class="sd wa"></span>Checking...</span></div>' +
-'</div></div></div>' +
-
-'<div class="tab-bar" id="mainTabs">' +
-'<button class="tab-btn active" onclick="st(\'properties\')">Properties</button>' +
-'<button class="tab-btn" onclick="st(\'str\')">Short Stay</button>' +
-'<button class="tab-btn" onclick="st(\'hmo\')">HMO</button>' +
-'<button class="tab-btn" onclick="st(\'maintenance\')">Maintenance</button>' +
-'</div>' +
-'<div id="panel-properties" class="panel active"></div>' +
-'<div id="panel-str" class="panel"></div>' +
-'<div id="panel-hmo" class="panel"></div>' +
-'<div id="panel-maintenance" class="panel"></div>';
-
-loadKPIs();
-loadProperties();
-loadVervCoukPipeline();
-loadDailyFocus();
-loadIntegrations();
-loadNotifications();
-})();
-
-// ========== verv.co.uk Pipeline ==========
-async function loadVervCoukPipeline() {
-var el = document.getElementById('vervCoukSection');
-if(!el) return;
-var signal = getSignal();
-try {
-var d = await api('/api/projects/vervcouk', null, null, signal.signal);
-var total = d.overall.total_items || d.items.length;
-var ip = d.items.filter(function(i){return /in progress/i.test(i.status)}).length;
-var wo = d.items.filter(function(i){return /working on it/i.test(i.status)}).length;
-var done = d.items.filter(function(i){return /completed/i.test(i.status)}).length;
-var ns = d.items.filter(function(i){return /not started/i.test(i.status)}).length;
-var totalHours = d.overall.total_dev_hours || 0;
-var people = [];
-d.items.forEach(function(item){
-if(item.people) {
-item.people.split(',').forEach(function(p){
-var name = p.trim();
-if(name && people.indexOf(name) === -1) people.push(name);
-});
-}
-});
-var h = '<div class="vc-progress-block">' +
-'<div class="vc-prog-label"><span><strong>Completion</strong></span><span><strong>' + done + '</strong>/' + total + ' done</span></div>' +
-'<div class="vc-big-prog"><div class="vc-big-fill" style="width:' + (done/total*100||0) + '%"></div></div>' +
-'<div class="vc-counts">' +
-'<span class="vcc"><span class="vcc-d ip"></span> In Progress: <strong>' + ip + '</strong></span>' +
-'<span class="vcc"><span class="vcc-d wo"></span> Working: <strong>' + wo + '</strong></span>' +
-'<span class="vcc"><span class="vcc-d dn"></span> Done: <strong>' + done + '</strong></span>' +
-'<span class="vcc"><span class="vcc-d ns"></span> Not Started: <strong>' + ns + '</strong></span>' +
-'</div></div>';
-h += '<div class="vc-filter"><button class="vf-btn active" data-filter="all" onclick="applyVervFilter(this,\'all\')">All</button>';
-for(var pi=0;pi<people.length;pi++) {
-h += '<button class="vf-btn" data-filter="'+people[pi]+'" onclick="applyVervFilter(this,\''+people[pi]+'\')">'+people[pi]+'</button>';
-}
-h += '</div>';
-h += '<div class="vc-grid" id="vervCoukGrid">';
-var cols = [
-{key:'In Progress', label:'In Progress', cls:'ip'},
-{key:'Working on it', label:'Working On It', cls:'wo'},
-{key:'Completed', label:'Completed', cls:'dn'},
-{key:'Not Started', label:'Not Started', cls:'ns'}
-];
-for(var ci=0;ci<cols.length;ci++) {
-var col = cols[ci];
-var items = d.items.filter(function(i){
-return i.status.toLowerCase() === col.key.toLowerCase();
-});
-h += '<div class="vc-col">';
-h += '<div class="vc-col-h ' + col.cls + '">' + col.label + ' <span class="vcc-count">' + items.length + '</span></div>';
-if(items.length === 0) {
-h += '<div class="vc-empty">No items</div>';
-} else {
-for(var ii=0;ii<items.length;ii++) {
-h += buildVervCard(items[ii]);
-}
-}
-h += '</div>';
-}
-h += '</div>';
-h += '<div class="vc-header" style="border-top:1px solid #F1F5F9;padding-top:12px;margin:0">' +
-'<div class="vc-meta"><span class="vc-meta-item">📊 <strong>' + total + '</strong> workstreams</span><span class="vc-meta-item">⏱ <strong>' + totalHours + '</strong> hours</span><span class="vc-meta-item">📋 <strong>' + d.overall.total_subtasks + '</strong> subtasks</span></div>' +
-'<span class="tm">Faisal Ahmed</span></div>';
-el.innerHTML = h;
-} catch(e) { if(e.name === 'AbortError') return; el.innerHTML = '<div class="err">' + e.message + '</div>'; }
-}
-
-function buildVervCard(item) {
-var h = '<div class="vc-card" data-person="' + (item.people||'') + '" data-item-id="' + item.id + '">';
-h += '<div class="vc-name">';
-if(item.priority) {
-var pcls = (item.priority||'').toLowerCase().includes('high')?'high':(item.priority||'').toLowerCase().includes('medium')?'med':'low';
-h += '<span class="vc-pri ' + pcls + '"></span>';
-}
-h += item.name + '</div>';
-h += '<div class="vc-person">👤 ' + (item.people||'Unassigned') + '</div>';
-h += '<div class="vc-hour">⏱ ' + item.dev_time_hours + 'h</div>';
-if(item.subitems && item.subitems.length > 0) {
-h += '<div class="vc-subitems">';
-var doneSubs = item.subitems.filter(function(s){return /done|completed/i.test(s.status)}).length;
-h += '<div style="font-size:11px;color:#64748B;margin-bottom:3px">' + doneSubs + '/' + item.subitems.length + ' subtasks done</div>';
-for(var si=0;si<item.subitems.length;si++) {
-var sub = item.subitems[si];
-var sc = /done|completed/i.test(sub.status) ? 'bg' : (/in progress|working/i.test(sub.status) ? 'ba' : 'bgr');
-var sname = sub.name.length > 45 ? sub.name.substring(0,42)+'...' : sub.name;
-var sid = 'si-' + item.id + '-' + sub.id;
-h += '<div class="vc-si"><span class="si-name"><span class="si-toggle" onclick="toggleSubDetail(\''+sid+'\')">▶</span>' + sname + '</span><span class="badge ' + sc + '">' + sub.status + '</span></div>';
-h += '<div class="vc-sub-detail" id="'+sid+'">';
-if(sub.assignee) h += '👤 ' + sub.assignee;
-if(sub.priority) h += ' | 🔥 ' + sub.priority;
-h += '</div>';
-}
-h += '</div>';
-}
-/* Comment badge */
-var cmtCount = item.comment_count || (item.comments ? item.comments.length : 0);
-var badgeCls = cmtCount > 0 ? 'vc-cmt-badge has-cmts' : 'vc-cmt-badge';
-var cmtToggleId = 'cmt-' + item.id;
-h += '<div class="' + badgeCls + '" onclick="toggleComments(\'' + cmtToggleId + '\',\'' + item.id + '\')">💬 <span class="b-count">' + cmtCount + '</span></div>';
-/* Comment thread (hidden initially) */
-h += '<div class="vc-cmt-thread" id="' + cmtToggleId + '">';
-if(item.comments && item.comments.length > 0) {
-for(var ci=0;ci<item.comments.length;ci++) {
-h += renderComment(item.comments[ci]);
-}
-}
-h += '<div class="vc-cmt-input-row"><input class="vc-cmt-input" id="' + cmtToggleId + '-inp" placeholder="Add a comment..." onkeydown="if(event.key===\'Enter\')postComment(\''+item.id+'\',\''+cmtToggleId+'\')"><button class="vc-cmt-send" onclick="postComment(\''+item.id+'\',\''+cmtToggleId+'\')">Send</button></div>';
-h += '</div>';
-h += '</div>';
-return h;
-}
-
-function renderComment(c) {
-var isDashboard = c.source === 'dashboard';
-var author = c.author || '';
-var init = author.charAt(0).toUpperCase() || '?';
-var body = c.body || '';
-var time = c.created_at || '';
-var relativeTime = '';
-if(time) {
-try {
-var d = new Date(time);
-var now = new Date();
-var diffS = Math.floor((now - d) / 1000);
-if(diffS < 60) relativeTime = 'just now';
-else if(diffS < 3600) relativeTime = Math.floor(diffS/60) + 'm ago';
-else if(diffS < 86400) relativeTime = Math.floor(diffS/3600) + 'h ago';
-else relativeTime = Math.floor(diffS/86400) + 'd ago';
-} catch(e) { relativeTime = ''; }
-}
-var srcBadge = isDashboard ? '<span class="vc-cmt-src dash">Dashboard</span>' : '<span class="vc-cmt-src monday">Monday</span>';
-var avCls = isDashboard ? 'vc-cmt-av s' : 'vc-cmt-av';
-return '<div class="vc-cmt"><div class="' + avCls + '">' + init + '</div><div class="vc-cmt-body"><div class="vc-cmt-head"><span class="vc-cmt-author">' + author + '</span><span class="vc-cmt-time">' + relativeTime + '</span>' + srcBadge + '</div><div class="vc-cmt-text">' + body + '</div></div></div>';
-}
-
-function toggleComments(id) {
-var el = document.getElementById(id);
-if(el) el.classList.toggle('show');
-}
-
-async function postComment(itemId, threadId) {
-var inp = document.getElementById(threadId + '-inp');
-if(!inp || !inp.value.trim()) return;
-var body = inp.value.trim();
-inp.disabled = true;
-var signal = getSignal();
-try {
-var result = await api('/api/comments/vervcouk/' + itemId, 'POST', {body: body}, signal.signal);
-if(result && result.comment) {
-/* Insert new comment above the input row */
-var thread = document.getElementById(threadId);
-if(thread) {
-var newCmtHtml = renderComment(result.comment);
-var inputRow = thread.querySelector('.vc-cmt-input-row');
-if(inputRow) {
-inputRow.insertAdjacentHTML('beforebegin', newCmtHtml);
-}
-}
-/* Update badge count */
-var card = document.querySelector('[data-item-id="' + itemId + '"]');
-if(card) {
-var badge = card.querySelector('.vc-cmt-badge');
-var countEl = badge ? badge.querySelector('.b-count') : null;
-if(countEl) {
-var cur = parseInt(countEl.textContent) || 0;
-countEl.textContent = cur + 1;
-}
-if(badge) badge.classList.add('has-cmts');
-}
-}
-inp.value = '';
-} catch(e) {
-if(e.name === 'AbortError') return;
-console.error('Comment failed:', e);
-} finally {
-inp.disabled = false;
-}
-}
-
-function toggleSubDetail(id) {
-var el = document.getElementById(id);
-if(el) el.classList.toggle('show');
-}
-
-function applyVervFilter(btn, filter) {
-document.querySelectorAll('.vc-filter .vf-btn').forEach(function(b){ b.classList.remove('active'); });
-btn.classList.add('active');
-var cards = document.getElementById('vervCoukGrid').querySelectorAll('.vc-card');
-for(var i=0;i<cards.length;i++) {
-var c = cards[i];
-if(filter === 'all' || c.getAttribute('data-person').indexOf(filter) !== -1) {
-c.style.display = '';
-} else {
-c.style.display = 'none';
-}
-}
-}
-
-// ========== Data functions ==========
-async function loadDailyFocus() {
-  var signal = getSignal();
-  try {
-    var d = await api('/api/dashboard/data', null, null, signal.signal);
-    console.log('Daily focus data loaded');
-  } catch(e) {
-    if(e.name === 'AbortError') return;
-    console.error('loadDailyFocus:', e);
+function closeSidebar() {
+  if(window.innerWidth < 900) {
+    document.getElementById('sidebarOverlay').classList.remove('show');
+    document.getElementById('dashSidebar').classList.remove('open');
   }
 }
 
-async function loadIntegrations() {
-  var container = document.getElementById('integrationList');
-  if(!container) return;
-  var signal = getSignal();
+document.querySelectorAll('.nav-item').forEach(function(el) {
+  el.addEventListener('click', closeSidebar);
+});
+
+function navigate(page) {
+  currentPage = page;
+  // Update sidebar active state
+  document.querySelectorAll('.nav-item').forEach(function(n) {
+    n.classList.remove('active');
+    if(n.getAttribute('data-page') === page) n.classList.add('active');
+  });
+  // Update title
+  var titles = {
+    home: 'Home',
+    properties: 'Properties',
+    units: 'Units',
+    tenancies: 'Tenancies',
+    tenants: 'Tenants',
+    applicants: 'Applicants',
+    finance: 'Finance',
+    search: 'Search'
+  };
+  document.getElementById('pageTitle').textContent = titles[page] || 'Dashboard';
+  // Render page
+  var area = document.getElementById('contentArea');
+  if(page === 'home') renderDashboard(area);
+  else if(page === 'properties') renderPropertiesList(area);
+  else if(page === 'units') renderUnitsList(area);
+  else if(page === 'tenancies') renderTenanciesList(area);
+  else if(page === 'tenants') renderTenantsList(area);
+  else if(page === 'applicants') renderApplicantsList(area);
+  else if(page === 'finance') renderFinancePage(area);
+  else if(page === 'search') renderSearchPage(area);
+}
+
+async function apiFetch(path, opts) {
+  var options = opts || {};
+  options.headers = options.headers || {};
+  options.headers['Content-Type'] = 'application/json';
   try {
-    // Don't reassign full HTML — just update each card's status
-    var d = await api('/api/connections/status', null, null, signal.signal);
-    if(d.connections) {
-      var cards = container.querySelectorAll('.ii');
-      var mapping = {'hostaway':0,'arthur':1,'missive':2,'monday.com':3};
-      for(var i=0;i<cards.length;i++) {
-        var nameEl = cards[i].querySelector('.ii-name');
-        var statusEl = cards[i].querySelector('.ii-status');
-        var timeEl = cards[i].querySelector('.ii-time');
-        var badge = cards[i].querySelector('.badge');
-        if(!nameEl) continue;
-        var name = (nameEl.textContent || '').toLowerCase();
-        var idx = mapping[name];
-        if(idx === undefined) continue;
-        var conn = d.connections[idx];
-        if(!conn) continue;
-        var isOk = conn.status === 'ok' || conn.status === 'connected';
-        var isErr = conn.status === 'error';
-        if(badge) {
-          var sdBadge = badge.querySelector('.sd');
-          badge.className = 'badge ' + (isOk ? 'bg' : (isErr ? 'br' : 'ba'));
-          if(sdBadge) {
-            sdBadge.className = 'sd ' + (isOk ? 'on' : (isErr ? 'er' : 'wa'));
-          }
-          badge.innerHTML = (sdBadge ? sdBadge.outerHTML : '') + (isOk ? 'Live' : (isErr ? 'Error' : 'Checking'));
+    var r = await fetch(path, options);
+    var data = await r.json();
+    return data;
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+}
+
+function renderPlaceholder(area, title, message) {
+  area.innerHTML = '<div class="card"><div class="card-header"><h3>' + title + '</h3></div><div class="card-body"><div class="empty">' + message + '</div></div></div>';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DASHBOARD HOME
+// ═══════════════════════════════════════════════════════════════
+
+function renderDashboard(area) {
+  area.innerHTML = '<div class="loading"><div class="spinner"></div> Loading dashboard data...</div>';
+  apiFetch('/api/arthur-os/dashboard').then(function(resp) {
+    if(!resp.success) {
+      area.innerHTML = '<div class="error-box">Failed to load dashboard: ' + (resp.error || 'Unknown error') + '</div>';
+      return;
+    }
+    var d = resp.data;
+    var cards = [
+      { label: 'Properties', value: d.total_properties, icon: '🏢', cls: 'blue' },
+      { label: 'Units', value: d.total_units, icon: '🚪', cls: 'blue' },
+      { label: 'Occupied', value: d.occupied_units, icon: '👤', cls: 'green' },
+      { label: 'Vacant', value: d.vacant_units, icon: '🟢', cls: 'amber' },
+      { label: 'Tenancies', value: d.total_tenancies, icon: '📋', cls: 'purple' },
+      { label: 'Tenants', value: d.total_tenants, icon: '👥', cls: 'teal' },
+      { label: 'Monthly Rent', value: '£' + formatCurrency(d.monthly_rent_roll), icon: '💰', cls: 'green' },
+      { label: 'Arrears', value: '£' + formatCurrency(d.total_arrears), icon: '⚠️', cls: 'red' },
+      { label: 'Pending Applicants', value: d.pending_applicants, icon: '📝', cls: 'amber' },
+      { label: 'Move-ins (this month)', value: d.tenants_moving_in_this_month, icon: '📥', cls: 'green' },
+      { label: 'Move-outs (this month)', value: d.tenants_moving_out_this_month, icon: '📤', cls: 'amber' }
+    ];
+    var html = '<div class="kpi-grid">';
+    for(var i=0;i<cards.length;i++) {
+      var c = cards[i];
+      html += '<div class="kpi-card">' +
+        '<div class="kpi-header">' +
+          '<div class="kpi-label">' + c.label + '</div>' +
+          '<div class="kpi-icon ' + c.cls + '">' + c.icon + '</div>' +
+        '</div>' +
+        '<div class="kpi-value">' + c.value + '</div>' +
+      '</div>';
+    }
+    html += '</div>';
+    area.innerHTML = html;
+  });
+}
+
+function formatCurrency(val) {
+  if(val === null || val === undefined) return '0.00';
+  var num = parseFloat(val);
+  if(isNaN(num)) return '0.00';
+  return num.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatDate(dateStr) {
+  if(!dateStr) return '-';
+  try {
+    var d = new Date(dateStr);
+    if(isNaN(d.getTime())) return dateStr;
+    var day = String(d.getDate()).padStart(2,'0');
+    var month = String(d.getMonth()+1).padStart(2,'0');
+    var year = d.getFullYear();
+    return day + '/' + month + '/' + year;
+  } catch(e) { return dateStr; }
+}
+
+function escHtml(str) {
+  if(str === null || str === undefined) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PROPERTIES LIST
+// ═══════════════════════════════════════════════════════════════
+
+function renderPropertiesList(area) {
+  var sp = propertyPageState;
+  area.innerHTML =
+    '<div class="card">' +
+    '<div class="card-header"><h3>Properties</h3></div>' +
+    '<div class="card-body">' +
+    '<div class="list-search"><span class="si">🔍</span><input type="text" id="propSearch" placeholder="Search by name or reference..." value="' + escHtml(sp.search) + '" onkeyup="propertySearchKeyup(event)"></div>' +
+    '<div class="table-wrap" id="propTableWrap"><div class="loading"><div class="spinner"></div> Loading...</div></div>' +
+    '<div id="propPagination"></div>' +
+    '</div></div>';
+
+  loadPropertiesPage(sp.page, sp.search);
+}
+
+function propertySearchKeyup(e) {
+  if(e.key === 'Enter') {
+    propertyPageState.search = e.target.value;
+    propertyPageState.page = 1;
+    loadPropertiesPage(1, propertyPageState.search);
+  }
+}
+
+function loadPropertiesPage(page, search) {
+  var params = 'page=' + page + '&per_page=20';
+  if(search) params += '&search=' + encodeURIComponent(search);
+
+  apiFetch('/api/arthur-os/properties?' + params).then(function(resp) {
+    var wrap = document.getElementById('propTableWrap');
+    var pag = document.getElementById('propPagination');
+    if(!wrap) return;
+
+    if(!resp.success) {
+      wrap.innerHTML = '<div class="error-box">Failed to load properties: ' + (resp.error || 'Unknown error') + '</div>';
+      if(pag) pag.innerHTML = '';
+      return;
+    }
+
+    var props = resp.data;
+    var total = resp.total || 0;
+    var perPage = resp.per_page || 20;
+    var totalPages = Math.max(1, Math.ceil(total / perPage));
+
+    if(props.length === 0) {
+      wrap.innerHTML = '<div class="empty">No properties found</div>';
+      if(pag) pag.innerHTML = '';
+      return;
+    }
+
+    var html = '<table><thead><tr>' +
+      '<th>Ref</th><th>Name</th><th>Address</th><th>City</th><th>Units</th><th>Owner</th>' +
+      '</tr></thead><tbody>';
+    for(var i=0;i<props.length;i++) {
+      var p = props[i];
+      var owner = escHtml(p.property_owner_name || '-');
+      var address = escHtml(p.address_line_1 || '-');
+      var units = p.total_units !== null && p.total_units !== undefined ? p.total_units : '-';
+      html += '<tr class="clickable" onclick="showPropertyDetail(' + p.id + ')">' +
+        '<td class="font-mono">' + escHtml(p.ref || '-') + '</td>' +
+        '<td class="font-medium">' + escHtml(p.name || 'Unnamed') + '</td>' +
+        '<td>' + address + '</td>' +
+        '<td>' + escHtml(p.city || '-') + '</td>' +
+        '<td>' + units + '</td>' +
+        '<td>' + owner + '</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+
+    // Pagination
+    if(pag) {
+      if(totalPages <= 1) {
+        pag.innerHTML = '<div class="pagination"><span class="page-info">' + total + ' total</span></div>';
+      } else {
+        var ph = '<div class="pagination">';
+        ph += '<button ' + (page <= 1 ? 'disabled' : '') + ' onclick="propertyGoPage(' + (page-1) + ')">‹ Prev</button>';
+        var startP = Math.max(1, page-2);
+        var endP = Math.min(totalPages, page+2);
+        if(startP > 1) { ph += '<button onclick="propertyGoPage(1)">1</button>'; if(startP > 2) ph += '<span class="page-info">…</span>'; }
+        for(var pi=startP; pi<=endP; pi++) {
+          ph += '<button class="' + (pi===page?'active':'') + '" onclick="propertyGoPage(' + pi + ')">' + pi + '</button>';
         }
-        if(statusEl) {
-          statusEl.textContent = isOk ? 'Connected' : (isErr ? (conn.error || 'Error') : 'Unavailable');
-        }
-        if(timeEl && conn.last_sync) {
-          timeEl.textContent = 'Last checked: ' + conn.last_sync;
-        }
+        if(endP < totalPages) { if(endP < totalPages-1) ph += '<span class="page-info">…</span>'; ph += '<button onclick="propertyGoPage(' + totalPages + ')">' + totalPages + '</button>'; }
+        ph += '<button ' + (page >= totalPages ? 'disabled' : '') + ' onclick="propertyGoPage(' + (page+1) + ')">Next ›</button>';
+        ph += '<span class="page-info">' + total + ' total</span>';
+        ph += '</div>';
+        pag.innerHTML = ph;
       }
     }
-  } catch(e) {
-    if(e.name === 'AbortError') return;
-    console.error('loadIntegrations:', e);
-    container.innerHTML = '<div class="err">Failed to load integration status</div>';
+  });
+}
+
+function propertyGoPage(page) {
+  propertyPageState.page = page;
+  var area = document.getElementById('contentArea');
+  if(area) {
+    var wrap = document.getElementById('propTableWrap');
+    if(wrap) wrap.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
+    loadPropertiesPage(page, propertyPageState.search);
   }
 }
 
-// ========== Global Search ==========
-var searchTimeout = null;
-async function doSearch(q) {
-  clearTimeout(searchTimeout);
-  var resultsEl = document.getElementById('searchResults');
-  if(!resultsEl) return;
-  if(!q || q.length < 2) {
-    resultsEl.classList.remove('show');
-    resultsEl.innerHTML = '';
+// ═══════════════════════════════════════════════════════════════
+// PROPERTY DETAIL
+// ═══════════════════════════════════════════════════════════════
+
+function showPropertyDetail(propId) {
+  var area = document.getElementById('contentArea');
+  area.innerHTML = '<div class="loading"><div class="spinner"></div> Loading property...</div>';
+
+  apiFetch('/api/arthur-os/properties/' + propId).then(function(resp) {
+    if(!resp.success) {
+      area.innerHTML = '<button class="back-btn" onclick="navigate(\'properties\')">← Back to Properties</button>' +
+        '<div class="error-box">Failed to load property: ' + (resp.error || 'Unknown error') + '</div>';
+      return;
+    }
+    var p = resp.data;
+
+    var html = '<button class="back-btn" onclick="navigate(\'properties\')">← Back to Properties</button>';
+
+    // Property info card
+    html += '<div class="card"><div class="card-header"><h3>' + escHtml(p.name || 'Property #'+p.id) + ' <span class="text-muted" style="font-weight:400;font-size:12px">' + escHtml(p.ref||'') + '</span></h3></div><div class="card-body">';
+    html += '<div class="detail-grid">';
+    html += detailField('Address', escHtml(p.address_line_1 || '-') + (p.address_line_2 ? ', ' + escHtml(p.address_line_2) : ''));
+    html += detailField('City', escHtml(p.city || '-'));
+    html += detailField('Postcode', escHtml(p.postcode || '-'));
+    html += detailField('Property Type', escHtml(p.property_type || '-'));
+    html += detailField('Owner', escHtml(p.property_owner_name || '-'));
+    html += detailField('Council Tax Band', escHtml(p.council_tax_band || '-'));
+    html += detailField('Total Units', p.total_units !== null && p.total_units !== undefined ? p.total_units : '-');
+    html += detailField('Bedrooms', p.bedrooms !== null && p.bedrooms !== undefined ? p.bedrooms : '-');
+    html += detailField('Bathrooms', p.bathrooms !== null && p.bathrooms !== undefined ? p.bathrooms : '-');
+    html += detailField('Max Occupancy', p.max_occupancy !== null && p.max_occupancy !== undefined ? p.max_occupancy : '-');
+    html += '</div></div></div>';
+
+    // Units table for this property
+    if(p.units && p.units.length > 0) {
+      html += '<div class="card"><div class="card-header"><h3>Units (' + p.units.length + ')</h3></div><div class="card-body"><div class="table-wrap"><table><thead><tr>' +
+        '<th>Ref</th><th>Type</th><th>Status</th><th>Rent</th><th>Vacant</th>' +
+        '</tr></thead><tbody>';
+      for(var i=0;i<p.units.length;i++) {
+        var u = p.units[i];
+        var vacant = u.unit_vacant ? 'Yes' : 'No';
+        var vacantCls = u.unit_vacant ? 'badge-amber' : 'badge-green';
+        var statusCls = (u.unit_status||'').toLowerCase() === 'available' ? 'badge-green' : 'badge-blue';
+        var rent = u.market_rent ? '£' + formatCurrency(u.market_rent) + '/' + (u.market_rent_frequency||'pcm') : '-';
+        html += '<tr>' +
+          '<td class="font-mono">' + escHtml(u.unit_ref||'-') + '</td>' +
+          '<td>' + escHtml(u.unit_type||'-') + '</td>' +
+          '<td><span class="badge ' + statusCls + '">' + escHtml(u.unit_status||'Unknown') + '</span></td>' +
+          '<td class="currency">' + rent + '</td>' +
+          '<td><span class="badge ' + vacantCls + '">' + vacant + '</span></td>' +
+          '</tr>';
+      }
+      html += '</tbody></table></div></div></div>';
+    } else {
+      html += '<div class="card"><div class="card-header"><h3>Units</h3></div><div class="card-body"><div class="empty">No units for this property</div></div></div>';
+    }
+
+    area.innerHTML = html;
+  });
+}
+
+function detailField(label, value) {
+  return '<div class="detail-field"><div class="detail-label">' + label + '</div><div class="detail-value">' + value + '</div></div>';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SEARCH PAGE
+// ═══════════════════════════════════════════════════════════════
+
+function renderSearchPage(area) {
+  var q = document.getElementById('globalSearch').value.trim();
+  area.innerHTML =
+    '<div class="card"><div class="card-header"><h3>🔍 Search</h3></div><div class="card-body">' +
+    '<div class="list-search"><span class="si">🔍</span><input type="text" id="searchQuery" placeholder="Search properties, units, tenancies, tenants..." value="' + escHtml(q) + '" onkeydown="if(event.key===\\'Enter\\')performSearch()" autofocus></div>' +
+    '<div id="searchResultsArea"><div class="empty">Enter a search term to find results</div></div>' +
+    '</div></div>';
+  if(q) performSearch();
+}
+
+function performSearch() {
+  var q = document.getElementById('searchQuery').value.trim();
+  if(!q) {
+    document.getElementById('searchResultsArea').innerHTML = '<div class="empty">Enter a search term to find results</div>';
     return;
   }
-  searchTimeout = setTimeout(async function() {
-    resultsEl.innerHTML = '<div class="sr-empty">Searching...</div>';
-    resultsEl.classList.add('show');
-    try {
-      var d = await api('/api/search?q=' + encodeURIComponent(q), null, null, null);
-      if(!d.results || d.results.length === 0) {
-        resultsEl.innerHTML = '<div class="sr-empty">No results found</div>';
-        return;
-      }
-      var html = '';
-      for(var i=0;i<d.results.length;i++) {
-        var r = d.results[i];
-        html += '<div class="sr-item" onclick="handleSearchResult(\'' + r.type.replace(/'/g,"\\'") + '\',' + r.id + ')">' +
-          '<div class="stt">' + r.title + '</div>' +
-          '<div class="ss">' + r.subtitle + '</div>' +
-          '<div class="st">' + r.type + ' · ' + r.source + '</div>' +
-        '</div>';
-      }
-      resultsEl.innerHTML = html;
-    } catch(e) {
-      resultsEl.innerHTML = '<div class="sr-empty">Search failed</div>';
+  document.getElementById('searchResultsArea').innerHTML = '<div class="loading"><div class="spinner"></div> Searching...</div>';
+
+  apiFetch('/api/arthur-os/search?q=' + encodeURIComponent(q)).then(function(resp) {
+    var area = document.getElementById('searchResultsArea');
+    if(!resp.success) {
+      area.innerHTML = '<div class="error-box">Search failed: ' + (resp.error || 'Unknown error') + '</div>';
+      return;
     }
-  }, 300);
+    var results = resp.data;
+    var count = results.total_count || 0;
+
+    var html = '<p style="font-size:13px;color:#64748b;margin-bottom:12px">' + count + ' result' + (count!==1?'s':'') + ' for "' + escHtml(q) + '"</p>';
+
+    function addSection(title, items, typeLabel) {
+      if(!items || items.length === 0) return;
+      html += '<div style="margin-bottom:16px"><h4 style="font-size:13px;color:#0f172a;font-weight:600;margin-bottom:6px">' + title + ' (' + items.length + ')</h4>';
+      html += '<div class="table-wrap"><table><thead><tr><th>Name/Ref</th><th>Details</th></tr></thead><tbody>';
+      for(var i=0;i<items.length;i++) {
+        var item = items[i];
+        var name = '';
+        var details = '';
+        if(typeLabel === 'property') {
+          name = escHtml(item.name || item.ref || '');
+          details = escHtml(item.address_line_1||'') + ', ' + escHtml(item.city||'');
+        } else if(typeLabel === 'unit') {
+          name = escHtml(item.unit_ref||'');
+          details = escHtml(item.full_address||'') + ' — ' + escHtml(item.unit_type||'');
+        } else if(typeLabel === 'tenancy') {
+          name = escHtml(item.ref||'');
+          details = escHtml(item.main_tenant_name||'') + ' — £' + formatCurrency(item.rent_amount);
+        } else if(typeLabel === 'tenant') {
+          name = escHtml((item.first_name||'') + ' ' + (item.last_name||''));
+          details = escHtml(item.email||'') + (item.status ? ' — ' + escHtml(item.status) : '');
+        } else if(typeLabel === 'applicant') {
+          name = escHtml((item.first_name||'') + ' ' + (item.last_name||''));
+          details = escHtml(item.email||'') + (item.status ? ' — ' + escHtml(item.status) : '');
+        }
+        html += '<tr><td class="font-medium">' + name + '</td><td class="text-muted">' + details + '</td></tr>';
+      }
+      html += '</tbody></table></div></div>';
+    }
+
+    addSection('Properties', results.properties, 'property');
+    addSection('Units', results.units, 'unit');
+    addSection('Tenancies', results.tenancies, 'tenancy');
+    addSection('Tenants', results.tenants, 'tenant');
+    addSection('Applicants', results.applicants, 'applicant');
+
+    if(!html.includes('<h4')) {
+      html += '<div class="empty">No results found</div>';
+    }
+    area.innerHTML = html;
+  });
 }
 
-function handleSearchResult(type, id) {
-  document.getElementById('searchResults').classList.remove('show');
-  document.getElementById('searchInput').value = '';
-  // Navigate to relevant tab
-  if(type.indexOf('STR') !== -1) st('str');
-  else if(type.indexOf('HMO') !== -1) st('hmo');
-  else if(type.indexOf('Maintenance') !== -1 || type.indexOf('Job') !== -1) st('maintenance');
-  else st('properties');
+function doSearch(q) {
+  document.getElementById('globalSearch').value = q;
+  navigate('search');
+  performSearch();
 }
 
-// ========== Notifications ==========
-async function loadNotifications() {
+// ═══════════════════════════════════════════════════════════════
+// UNITS PAGE
+// ═══════════════════════════════════════════════════════════════
+
+var unitsPageState = { page: 1, search: '', status: '' };
+
+function renderUnitsList(area) {
+  var sp = unitsPageState;
+  area.innerHTML =
+    '<div class="card">' +
+    '<div class="card-header"><h3>Units</h3></div>' +
+    '<div class="card-body">' +
+    '<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">' +
+    '<div class="list-search" style="flex:1;min-width:200px;margin-bottom:0"><span class="si">🔍</span><input type="text" id="unitSearch" placeholder="Search by ref or name..." value="' + escHtml(sp.search) + '" onkeyup="unitSearchKeyup(event)"></div>' +
+    '<select id="unitStatusFilter" style="padding:8px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:Inter,sans-serif;outline:none;background:#fff;color:#475569" onchange="unitFilterChange()">' +
+    '<option value="">All Status</option>' +
+    '<option value="Let" ' + (sp.status==='Let'?'selected':'') + '>Let</option>' +
+    '<option value="Available" ' + (sp.status==='Available'?'selected':'') + '>Available</option>' +
+    '<option value="Under Offer" ' + (sp.status==='Under Offer'?'selected':'') + '>Under Offer</option>' +
+    '</select>' +
+    '</div>' +
+    '<div class="table-wrap" id="unitTableWrap"><div class="loading"><div class="spinner"></div> Loading...</div></div>' +
+    '<div id="unitPagination"></div>' +
+    '</div></div>';
+  loadUnitsPage(sp.page, sp.search, sp.status);
+}
+
+function unitSearchKeyup(e) {
+  if(e.key === 'Enter') {
+    unitsPageState.search = e.target.value;
+    unitsPageState.page = 1;
+    loadUnitsPage(1, unitsPageState.search, unitsPageState.status);
+  }
+}
+
+function unitFilterChange() {
+  unitsPageState.status = document.getElementById('unitStatusFilter').value;
+  unitsPageState.page = 1;
+  loadUnitsPage(1, unitsPageState.search, unitsPageState.status);
+}
+
+function loadUnitsPage(page, search, status) {
+  var params = 'page=' + page + '&per_page=20';
+  if(search) params += '&search=' + encodeURIComponent(search);
+  if(status) params += '&status=' + encodeURIComponent(status);
+  apiFetch('/api/arthur-os/units?' + params).then(function(resp) {
+    var wrap = document.getElementById('unitTableWrap');
+    var pag = document.getElementById('unitPagination');
+    if(!wrap) return;
+    if(!resp.success) {
+      wrap.innerHTML = '<div class="error-box">Failed: ' + (resp.error||'') + '</div>';
+      if(pag) pag.innerHTML = '';
+      return;
+    }
+    var units = resp.data, total = resp.total || 0, perPage = resp.per_page || 20;
+    var totalPages = Math.max(1, Math.ceil(total / perPage));
+    if(units.length === 0) {
+      wrap.innerHTML = '<div class="empty">No units found</div>';
+      if(pag) pag.innerHTML = '';
+      return;
+    }
+    var html = '<table><thead><tr><th>Ref</th><th>Property</th><th>Status</th><th>Rent</th><th>Vacant</th><th>Days Vacant</th></tr></thead><tbody>';
+    for(var i=0;i<units.length;i++) {
+      var u = units[i];
+      var statusBadge = '';
+      var statusLower = (u.unit_status||'').toLowerCase();
+      if(statusLower === 'let') statusBadge = 'badge-green';
+      else if(statusLower === 'available') statusBadge = 'badge-gray';
+      else statusBadge = 'badge-amber';
+      var vacantBadge = u.unit_vacant ? 'badge-amber' : 'badge-green';
+      var vacantText = u.unit_vacant ? 'Yes' : 'No';
+      var rent = u.market_rent ? '£' + formatCurrency(u.market_rent) + '/' + (u.market_rent_frequency||'pcm') : '-';
+      html += '<tr class="clickable" onclick="showUnitDetail(' + u.id + ')">' +
+        '<td class="font-mono">' + escHtml(u.unit_ref||'-') + '</td>' +
+        '<td class="font-medium">' + escHtml(u.owner_name||'-') + '</td>' +
+        '<td><span class="badge ' + statusBadge + '">' + escHtml(u.unit_status||'Unknown') + '</span></td>' +
+        '<td class="currency">' + rent + '</td>' +
+        '<td><span class="badge ' + vacantBadge + '">' + vacantText + '</span></td>' +
+        '<td>' + (u.days_vacant !== null && u.days_vacant !== undefined ? u.days_vacant : '-') + '</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+    if(pag) {
+      if(totalPages <= 1) {
+        pag.innerHTML = '<div class="pagination"><span class="page-info">' + total + ' total</span></div>';
+      } else {
+        var ph = '<div class="pagination">';
+        ph += '<button ' + (page <= 1 ? 'disabled' : '') + ' onclick="unitGoPage(' + (page-1) + ')">‹ Prev</button>';
+        var startP = Math.max(1, page-2), endP = Math.min(totalPages, page+2);
+        if(startP > 1) { ph += '<button onclick="unitGoPage(1)">1</button>'; if(startP > 2) ph += '<span class="page-info">…</span>'; }
+        for(var pi=startP; pi<=endP; pi++) ph += '<button class="' + (pi===page?'active':'') + '" onclick="unitGoPage(' + pi + ')">' + pi + '</button>';
+        if(endP < totalPages) { if(endP < totalPages-1) ph += '<span class="page-info">…</span>'; ph += '<button onclick="unitGoPage(' + totalPages + ')">' + totalPages + '</button>'; }
+        ph += '<button ' + (page >= totalPages ? 'disabled' : '') + ' onclick="unitGoPage(' + (page+1) + ')">Next ›</button>';
+        ph += '<span class="page-info">' + total + ' total</span></div>';
+        pag.innerHTML = ph;
+      }
+    }
+  });
+}
+
+function unitGoPage(page) {
+  unitsPageState.page = page;
+  var wrap = document.getElementById('unitTableWrap');
+  if(wrap) wrap.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
+  loadUnitsPage(page, unitsPageState.search, unitsPageState.status);
+}
+
+// ── Unit Detail ──
+
+function showUnitDetail(unitId) {
+  var area = document.getElementById('contentArea');
+  area.innerHTML = '<div class="loading"><div class="spinner"></div> Loading unit...</div>';
+  apiFetch('/api/arthur-os/units/' + unitId).then(function(resp) {
+    if(!resp.success) {
+      area.innerHTML = '<button class="back-btn" onclick="navigate(\\'units\\')">← Back to Units</button><div class="error-box">' + (resp.error||'Error') + '</div>';
+      return;
+    }
+    var u = resp.data;
+    var html = '<button class="back-btn" onclick="navigate(\\'units\\')">← Back to Units</button>';
+    // Unit info card
+    html += '<div class="card"><div class="card-header"><h3>Unit: ' + escHtml(u.unit_ref||'#') + '</h3></div><div class="card-body"><div class="detail-grid">';
+    html += detailField('Reference', escHtml(u.unit_ref||'-'));
+    html += detailField('Type', escHtml(u.unit_type||'-'));
+    html += detailField('Status', '<span class="badge ' + ((u.unit_status||'').toLowerCase()==='let'?'badge-green':'badge-gray') + '">' + escHtml(u.unit_status||'Unknown') + '</span>');
+    html += detailField('Rent', u.market_rent ? '£' + formatCurrency(u.market_rent) + '/' + (u.market_rent_frequency||'pcm') : '-');
+    html += detailField('Deposit', u.deposit_amount ? '£' + formatCurrency(u.deposit_amount) : '-');
+    html += detailField('Furnished', escHtml(u.furnished||'-'));
+    html += detailField('Size', escHtml(u.short_description||'-'));
+    html += detailField('Days Vacant', u.days_vacant !== null && u.days_vacant !== undefined ? u.days_vacant : '-');
+    html += '</div></div></div>';
+    // Current tenancy
+    if(u.current_tenancy) {
+      var t = u.current_tenancy;
+      html += '<div class="card"><div class="card-header"><h3>Current Tenancy</h3></div><div class="card-body"><div class="detail-grid">';
+      html += detailField('Ref', escHtml(t.ref||'-'));
+      html += detailField('Status', '<span class="badge badge-green">' + escHtml(t.status||'') + '</span>');
+      html += detailField('Rent', t.rent_amount ? '£' + formatCurrency(t.rent_amount) + '/' + (t.rent_frequency||'pcm') : '-');
+      html += detailField('Start', formatDate(t.start_date));
+      html += detailField('End', formatDate(t.end_date));
+      html += detailField('Main Tenant', escHtml(t.main_tenant_name||'-'));
+      html += '</div></div></div>';
+    }
+    // Current tenants
+    if(u.current_tenants && u.current_tenants.length > 0) {
+      html += '<div class="card"><div class="card-header"><h3>Tenants (' + u.current_tenants.length + ')</h3></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Main</th></tr></thead><tbody>';
+      for(var i=0;i<u.current_tenants.length;i++) {
+        var tn = u.current_tenants[i];
+        html += '<tr><td class="font-medium">' + escHtml((tn.first_name||'') + ' ' + (tn.last_name||'')) + '</td><td>' + escHtml(tn.email||'-') + '</td><td>' + (tn.main_tenant ? '✓' : '') + '</td></tr>';
+      }
+      html += '</tbody></table></div></div></div>';
+    }
+    area.innerHTML = html;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TENANCIES PAGE
+// ═══════════════════════════════════════════════════════════════
+
+var tenanciesPageState = { page: 1, search: '', status: '' };
+
+function renderTenanciesList(area) {
+  var sp = tenanciesPageState;
+  area.innerHTML =
+    '<div class="card">' +
+    '<div class="card-header"><h3>Tenancies</h3></div>' +
+    '<div class="card-body">' +
+    '<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">' +
+    '<div class="list-search" style="flex:1;min-width:200px;margin-bottom:0"><span class="si">🔍</span><input type="text" id="tenancySearch" placeholder="Search by ref, tenant, property..." value="' + escHtml(sp.search) + '" onkeyup="tenancySearchKeyup(event)"></div>' +
+    '<select id="tenancyStatusFilter" style="padding:8px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:Inter,sans-serif;outline:none;background:#fff;color:#475569" onchange="tenancyFilterChange()">' +
+    '<option value="">All</option>' +
+    '<option value="Active" ' + (sp.status==='Active'?'selected':'') + '>Active</option>' +
+    '<option value="Periodic" ' + (sp.status==='Periodic'?'selected':'') + '>Periodic</option>' +
+    '</select>' +
+    '</div>' +
+    '<div class="table-wrap" id="tenancyTableWrap"><div class="loading"><div class="spinner"></div> Loading...</div></div>' +
+    '<div id="tenancyPagination"></div>' +
+    '</div></div>';
+  loadTenanciesPage(sp.page, sp.search, sp.status);
+}
+
+function tenancySearchKeyup(e) {
+  if(e.key === 'Enter') {
+    tenanciesPageState.search = e.target.value;
+    tenanciesPageState.page = 1;
+    loadTenanciesPage(1, tenanciesPageState.search, tenanciesPageState.status);
+  }
+}
+
+function tenancyFilterChange() {
+  tenanciesPageState.status = document.getElementById('tenancyStatusFilter').value;
+  tenanciesPageState.page = 1;
+  loadTenanciesPage(1, tenanciesPageState.search, tenanciesPageState.status);
+}
+
+function loadTenanciesPage(page, search, status) {
+  var params = 'page=' + page + '&per_page=20';
+  if(search) params += '&search=' + encodeURIComponent(search);
+  if(status) params += '&status=' + encodeURIComponent(status);
+  apiFetch('/api/arthur-os/tenancies?' + params).then(function(resp) {
+    var wrap = document.getElementById('tenancyTableWrap');
+    var pag = document.getElementById('tenancyPagination');
+    if(!wrap) return;
+    if(!resp.success) {
+      wrap.innerHTML = '<div class="error-box">Failed: ' + (resp.error||'') + '</div>';
+      if(pag) pag.innerHTML = '';
+      return;
+    }
+    var items = resp.data, total = resp.total || 0, perPage = resp.per_page || 20;
+    var totalPages = Math.max(1, Math.ceil(total / perPage));
+    if(items.length === 0) {
+      wrap.innerHTML = '<div class="empty">No tenancies found</div>';
+      if(pag) pag.innerHTML = '';
+      return;
+    }
+    var html = '<table><thead><tr><th>Ref</th><th>Property</th><th>Main Tenant</th><th>Rent (£/mo)</th><th>Status</th><th>Start</th><th>End</th></tr></thead><tbody>';
+    for(var i=0;i<items.length;i++) {
+      var t = items[i];
+      var sBadge = (t.status||'').toLowerCase() === 'active' ? 'badge-green' : (t.status||'').toLowerCase() === 'periodic' ? 'badge-blue' : 'badge-amber';
+      html += '<tr class="clickable" onclick="showTenancyDetail(' + t.id + ')">' +
+        '<td class="font-mono">' + escHtml(t.ref||'-') + '</td>' +
+        '<td>' + escHtml(t.full_address||'-') + '</td>' +
+        '<td class="font-medium">' + escHtml(t.main_tenant_name||'-') + '</td>' +
+        '<td class="currency">' + (t.rent_amount ? '£' + formatCurrency(t.rent_amount) : '-') + '</td>' +
+        '<td><span class="badge ' + sBadge + '">' + escHtml(t.status||'') + '</span></td>' +
+        '<td>' + formatDate(t.start_date) + '</td>' +
+        '<td>' + formatDate(t.end_date) + '</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+    if(pag) {
+      if(totalPages <= 1) {
+        pag.innerHTML = '<div class="pagination"><span class="page-info">' + total + ' total</span></div>';
+      } else {
+        var ph = '<div class="pagination">';
+        ph += '<button ' + (page <= 1 ? 'disabled' : '') + ' onclick="tenancyGoPage(' + (page-1) + ')">‹ Prev</button>';
+        var startP = Math.max(1, page-2), endP = Math.min(totalPages, page+2);
+        if(startP > 1) { ph += '<button onclick="tenancyGoPage(1)">1</button>'; if(startP > 2) ph += '<span class="page-info">…</span>'; }
+        for(var pi=startP; pi<=endP; pi++) ph += '<button class="' + (pi===page?'active':'') + '" onclick="tenancyGoPage(' + pi + ')">' + pi + '</button>';
+        if(endP < totalPages) { if(endP < totalPages-1) ph += '<span class="page-info">…</span>'; ph += '<button onclick="tenancyGoPage(' + totalPages + ')">' + totalPages + '</button>'; }
+        ph += '<button ' + (page >= totalPages ? 'disabled' : '') + ' onclick="tenancyGoPage(' + (page+1) + ')">Next ›</button>';
+        ph += '<span class="page-info">' + total + ' total</span></div>';
+        pag.innerHTML = ph;
+      }
+    }
+  });
+}
+
+function tenancyGoPage(page) {
+  tenanciesPageState.page = page;
+  var wrap = document.getElementById('tenancyTableWrap');
+  if(wrap) wrap.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
+  loadTenanciesPage(page, tenanciesPageState.search, tenanciesPageState.status);
+}
+
+// ── Tenancy Detail ──
+
+function showTenancyDetail(tenId) {
+  var area = document.getElementById('contentArea');
+  area.innerHTML = '<div class="loading"><div class="spinner"></div> Loading tenancy...</div>';
+  apiFetch('/api/arthur-os/tenancies/' + tenId).then(function(resp) {
+    if(!resp.success) {
+      area.innerHTML = '<button class="back-btn" onclick="navigate(\\'tenancies\\')">← Back</button><div class="error-box">' + (resp.error||'Error') + '</div>';
+      return;
+    }
+    var t = resp.data;
+    var html = '<button class="back-btn" onclick="navigate(\\'tenancies\\')">← Back to Tenancies</button>';
+    // Tenancy info card
+    html += '<div class="card"><div class="card-header"><h3>Tenancy: ' + escHtml(t.ref||'#'+t.id) + '</h3></div><div class="card-body"><div class="detail-grid">';
+    html += detailField('Reference', escHtml(t.ref||'-'));
+    html += detailField('Type', escHtml(t.tenancy_type||'-'));
+    html += detailField('Contract', escHtml(t.contract_type||'-'));
+    html += detailField('Start Date', formatDate(t.start_date));
+    html += detailField('End Date', formatDate(t.end_date));
+    html += detailField('Move In', formatDate(t.move_in_date));
+    html += detailField('Move Out', formatDate(t.move_out_date));
+    html += detailField('Status', '<span class="badge ' + ((t.status||'').toLowerCase()==='active'?'badge-green':'badge-blue') + '">' + escHtml(t.status||'') + '</span>');
+    html += '</div></div></div>';
+    // Rent & Deposit card
+    html += '<div class="card"><div class="card-header"><h3>Rent & Deposit</h3></div><div class="card-body"><div class="detail-grid">';
+    html += detailField('Rent Amount', t.rent_amount ? '£' + formatCurrency(t.rent_amount) : '-');
+    html += detailField('Rent Frequency', escHtml(t.rent_frequency||'pcm'));
+    html += detailField('Deposit Amount', t.deposit_registered_amount ? '£' + formatCurrency(t.deposit_registered_amount) : '-');
+    html += detailField('Deposit Scheme', escHtml(t.deposit_scheme||'-'));
+    html += detailField('Deposit Registered', t.deposit_registered ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-red">No</span>');
+    html += detailField('Deposit Held By', escHtml(t.deposit_held_by||'-'));
+    html += '<div class="detail-field"><div class="detail-label">Section 21</div><div class="detail-value">' + (t.section_21_served ? '<span class="badge badge-red">Served</span>' : '<span class="badge badge-green">Not Served</span>') + '</div></div>';
+    html += '</div></div></div>';
+    // Tenants card
+    if(t.tenants && t.tenants.length > 0) {
+      html += '<div class="card"><div class="card-header"><h3>Tenants</h3></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Mobile</th><th>Main</th></tr></thead><tbody>';
+      for(var i=0;i<t.tenants.length;i++) {
+        var tn = t.tenants[i];
+        html += '<tr class="clickable" onclick="showTenantDetail(' + tn.id + ')"><td class="font-medium">' + escHtml((tn.first_name||'') + ' ' + (tn.last_name||'')) + '</td><td>' + escHtml(tn.email||'-') + '</td><td>' + escHtml(tn.mobile||'-') + '</td><td>' + (tn.main_tenant ? '✓' : '') + '</td></tr>';
+      }
+      html += '</tbody></table></div></div></div>';
+    }
+    // Property link
+    if(t.property) {
+      html += '<div class="card"><div class="card-header"><h3>Property</h3></div><div class="card-body"><div class="detail-grid">';
+      html += detailField('Name', escHtml(t.property.name||'-'));
+      html += detailField('Address', escHtml((t.property.address_line_1||'') + ', ' + (t.property.city||'')));
+      html += '</div></div></div>';
+    }
+    // Transactions
+    if(t.transactions && t.transactions.length > 0) {
+      html += '<div class="card"><div class="card-header"><h3>Transactions (' + t.transactions.length + ')</h3></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Paid</th><th>Outstanding</th><th>Status</th></tr></thead><tbody>';
+      for(var i=0;i<t.transactions.length;i++) {
+        var tx = t.transactions[i];
+        var txBadge = tx.is_overdue ? 'badge-red' : (tx.is_outstanding ? 'badge-amber' : 'badge-green');
+        var txLabel = tx.is_overdue ? 'Overdue' : (tx.is_outstanding ? 'Outstanding' : 'Paid');
+        html += '<tr><td>' + formatDate(tx.date) + '</td><td>' + escHtml(tx.description||'-') + '</td><td class="currency">£' + formatCurrency(tx.amount) + '</td><td class="currency">£' + formatCurrency(tx.amount_paid) + '</td><td class="currency">£' + formatCurrency(tx.amount_outstanding) + '</td><td><span class="badge ' + txBadge + '">' + txLabel + '</span></td></tr>';
+      }
+      html += '</tbody></table></div></div></div>';
+    }
+    area.innerHTML = html;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TENANTS PAGE
+// ═══════════════════════════════════════════════════════════════
+
+var tenantsPageState = { page: 1, search: '' };
+
+function renderTenantsList(area) {
+  var sp = tenantsPageState;
+  area.innerHTML =
+    '<div class="card">' +
+    '<div class="card-header"><h3>Tenants</h3></div>' +
+    '<div class="card-body">' +
+    '<div class="list-search" style="margin-bottom:14px"><span class="si">🔍</span><input type="text" id="tenantSearch" placeholder="Search by name or email..." value="' + escHtml(sp.search) + '" onkeyup="tenantSearchKeyup(event)"></div>' +
+    '<div class="table-wrap" id="tenantTableWrap"><div class="loading"><div class="spinner"></div> Loading...</div></div>' +
+    '<div id="tenantPagination"></div>' +
+    '</div></div>';
+  loadTenantsPage(sp.page, sp.search);
+}
+
+function tenantSearchKeyup(e) {
+  if(e.key === 'Enter') {
+    tenantsPageState.search = e.target.value;
+    tenantsPageState.page = 1;
+    loadTenantsPage(1, tenantsPageState.search);
+  }
+}
+
+function loadTenantsPage(page, search) {
+  var params = 'page=' + page + '&per_page=20';
+  if(search) params += '&search=' + encodeURIComponent(search);
+  apiFetch('/api/arthur-os/tenants?' + params).then(function(resp) {
+    var wrap = document.getElementById('tenantTableWrap');
+    var pag = document.getElementById('tenantPagination');
+    if(!wrap) return;
+    if(!resp.success) {
+      wrap.innerHTML = '<div class="error-box">Failed: ' + (resp.error||'') + '</div>';
+      if(pag) pag.innerHTML = '';
+      return;
+    }
+    var items = resp.data, total = resp.total || 0, perPage = resp.per_page || 20;
+    var totalPages = Math.max(1, Math.ceil(total / perPage));
+    if(items.length === 0) {
+      wrap.innerHTML = '<div class="empty">No tenants found</div>';
+      if(pag) pag.innerHTML = '';
+      return;
+    }
+    var html = '<table><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Property</th><th>Move-in</th><th>Status</th></tr></thead><tbody>';
+    for(var i=0;i<items.length;i++) {
+      var tn = items[i];
+      var name = escHtml((tn.first_name||'') + ' ' + (tn.last_name||'')).trim() || '-';
+      var sBadge = tn.main_tenant ? 'badge-blue' : 'badge-gray';
+      html += '<tr class="clickable" onclick="showTenantDetail(' + tn.id + ')">' +
+        '<td class="font-medium">' + name + '</td>' +
+        '<td>' + escHtml(tn.email||'-') + '</td>' +
+        '<td>' + escHtml(tn.mobile||'-') + '</td>' +
+        '<td>' + escHtml(tn.full_address||'-') + '</td>' +
+        '<td>' + formatDate(tn.move_in_date) + '</td>' +
+        '<td><span class="badge ' + sBadge + '">' + (tn.main_tenant ? 'Main' : 'Occupant') + '</span></td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+    if(pag) {
+      if(totalPages <= 1) {
+        pag.innerHTML = '<div class="pagination"><span class="page-info">' + total + ' total</span></div>';
+      } else {
+        var ph = '<div class="pagination">';
+        ph += '<button ' + (page <= 1 ? 'disabled' : '') + ' onclick="tenantGoPage(' + (page-1) + ')">‹ Prev</button>';
+        var startP = Math.max(1, page-2), endP = Math.min(totalPages, page+2);
+        if(startP > 1) { ph += '<button onclick="tenantGoPage(1)">1</button>'; if(startP > 2) ph += '<span class="page-info">…</span>'; }
+        for(var pi=startP; pi<=endP; pi++) ph += '<button class="' + (pi===page?'active':'') + '" onclick="tenantGoPage(' + pi + ')">' + pi + '</button>';
+        if(endP < totalPages) { if(endP < totalPages-1) ph += '<span class="page-info">…</span>'; ph += '<button onclick="tenantGoPage(' + totalPages + ')">' + totalPages + '</button>'; }
+        ph += '<button ' + (page >= totalPages ? 'disabled' : '') + ' onclick="tenantGoPage(' + (page+1) + ')">Next ›</button>';
+        ph += '<span class="page-info">' + total + ' total</span></div>';
+        pag.innerHTML = ph;
+      }
+    }
+  });
+}
+
+function tenantGoPage(page) {
+  tenantsPageState.page = page;
+  var wrap = document.getElementById('tenantTableWrap');
+  if(wrap) wrap.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
+  loadTenantsPage(page, tenantsPageState.search);
+}
+
+// ── Tenant Detail ──
+
+function showTenantDetail(tenantId) {
+  var area = document.getElementById('contentArea');
+  area.innerHTML = '<div class="loading"><div class="spinner"></div> Loading tenant...</div>';
+  apiFetch('/api/arthur-os/tenants/' + tenantId).then(function(resp) {
+    if(!resp.success) {
+      area.innerHTML = '<button class="back-btn" onclick="navigate(\\'tenants\\')">← Back</button><div class="error-box">' + (resp.error||'Error') + '</div>';
+      return;
+    }
+    var tn = resp.data;
+    var html = '<button class="back-btn" onclick="navigate(\\'tenants\\')">← Back to Tenants</button>';
+    // Personal info
+    html += '<div class="card"><div class="card-header"><h3>' + escHtml((tn.title||'') + ' ' + (tn.first_name||'') + ' ' + (tn.last_name||'')).trim() + '</h3></div><div class="card-body"><div class="detail-grid">';
+    html += detailField('Title', escHtml(tn.title||'-'));
+    html += detailField('Full Name', escHtml((tn.first_name||'') + ' ' + (tn.last_name||'')).trim()||'-');
+    html += detailField('Date of Birth', formatDate(tn.date_of_birth));
+    html += detailField('Gender', escHtml(tn.gender||'-'));
+    html += detailField('Email', escHtml(tn.email||'-'));
+    html += detailField('Phone', escHtml(tn.phone_home||'-'));
+    html += detailField('Mobile', escHtml(tn.mobile||'-'));
+    html += detailField('Status', tn.main_tenant ? '<span class="badge badge-blue">Main Tenant</span>' : '<span class="badge badge-gray">Occupant</span>');
+    html += '</div></div></div>';
+    // Identity
+    html += '<div class="card"><div class="card-header"><h3>Identity</h3></div><div class="card-body"><div class="detail-grid">';
+    html += detailField('Passport', escHtml(tn.passport_number||'-'));
+    html += detailField('Visa Type', escHtml(tn.visa_type||'-'));
+    html += detailField('Visa Expiry', tn.visa_years ? escHtml(tn.visa_years) : '-');
+    html += detailField('NI Number', escHtml(tn.ni_number||'-'));
+    html += detailField('Country of Origin', escHtml(tn.country_of_origin||'-'));
+    html += detailField('Citizen', escHtml(tn.citizen||'-'));
+    html += '</div></div></div>';
+    // Guarantor
+    if(tn.has_guarantor) {
+      html += '<div class="card"><div class="card-header"><h3>Guarantor</h3></div><div class="card-body"><div class="detail-grid">';
+      html += detailField('Name', escHtml((tn.guarantor_first_name||'') + ' ' + (tn.guarantor_last_name||'')).trim()||'-');
+      html += detailField('DOB', formatDate(tn.guarantor_date_of_birth));
+      html += detailField('Address', escHtml((tn.guarantor_address||'') + (tn.guarantor_city ? ', ' + tn.guarantor_city : '') + (tn.guarantor_postcode ? ', ' + tn.guarantor_postcode : '')));
+      html += detailField('Phone', escHtml(tn.guarantor_phone||'-'));
+      html += detailField('Mobile', escHtml(tn.guarantor_mobile||'-'));
+      html += detailField('Email', escHtml(tn.guarantor_email||'-'));
+      html += detailField('Relation', escHtml(tn.guarantor_relation||'-'));
+      html += '</div></div></div>';
+    }
+    // Next of Kin
+    if(tn.kin_first_name || tn.kin_last_name) {
+      html += '<div class="card"><div class="card-header"><h3>Next of Kin</h3></div><div class="card-body"><div class="detail-grid">';
+      html += detailField('Name', escHtml((tn.kin_first_name||'') + ' ' + (tn.kin_last_name||'')).trim()||'-');
+      html += detailField('Phone', escHtml(tn.kin_mobile||'-'));
+      html += '</div></div></div>';
+    }
+    // Employment
+    if(tn.employment_company) {
+      html += '<div class="card"><div class="card-header"><h3>Employment</h3></div><div class="card-body"><div class="detail-grid">';
+      html += detailField('Company', escHtml(tn.employment_company||'-'));
+      html += detailField('Address', escHtml(tn.employment_address||'-'));
+      html += detailField('Salary', tn.employment_salary ? '£' + formatCurrency(tn.employment_salary) + '/yr' : '-');
+      html += detailField('Length', escHtml(tn.employment_length||'-'));
+      html += '</div></div></div>';
+    }
+    // Tenancy link
+    if(tn.tenancy) {
+      html += '<div class="card"><div class="card-header"><h3>Tenancy</h3></div><div class="card-body"><div class="detail-grid">';
+      html += detailField('Ref', escHtml(tn.tenancy.ref||'-'));
+      html += detailField('Status', '<span class="badge badge-green">' + escHtml(tn.tenancy.status||'') + '</span>');
+      html += detailField('Rent', tn.tenancy.rent_amount ? '£' + formatCurrency(tn.tenancy.rent_amount) + '/' + (tn.tenancy.rent_frequency||'pcm') : '-');
+      html += detailField('Start', formatDate(tn.tenancy.start_date));
+      html += detailField('End', formatDate(tn.tenancy.end_date));
+      html += '</div></div></div>';
+    }
+    area.innerHTML = html;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// APPLICANTS PAGE
+// ═══════════════════════════════════════════════════════════════
+
+var applicantsPageState = { page: 1, search: '', status: '' };
+
+function renderApplicantsList(area) {
+  var sp = applicantsPageState;
+  area.innerHTML =
+    '<div class="card">' +
+    '<div class="card-header"><h3>Applicants (Referencing Pipeline)</h3></div>' +
+    '<div class="card-body">' +
+    '<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">' +
+    '<div class="list-search" style="flex:1;min-width:200px;margin-bottom:0"><span class="si">🔍</span><input type="text" id="applicantSearch" placeholder="Search by name or email..." value="' + escHtml(sp.search) + '" onkeyup="applicantSearchKeyup(event)"></div>' +
+    '<select id="applicantStatusFilter" style="padding:8px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:Inter,sans-serif;outline:none;background:#fff;color:#475569" onchange="applicantFilterChange()">' +
+    '<option value="">All</option>' +
+    '<option value="Active" ' + (sp.status==='Active'?'selected':'') + '>Active</option>' +
+    '<option value="Approved" ' + (sp.status==='Approved'?'selected':'') + '>Approved</option>' +
+    '<option value="Declined" ' + (sp.status==='Declined'?'selected':'') + '>Declined</option>' +
+    '<option value="Inactive" ' + (sp.status==='Inactive'?'selected':'') + '>Inactive</option>' +
+    '</select>' +
+    '</div>' +
+    '<div class="table-wrap" id="applicantTableWrap"><div class="loading"><div class="spinner"></div> Loading...</div></div>' +
+    '<div id="applicantPagination"></div>' +
+    '</div></div>';
+  loadApplicantsPage(sp.page, sp.search, sp.status);
+}
+
+function applicantSearchKeyup(e) {
+  if(e.key === 'Enter') {
+    applicantsPageState.search = e.target.value;
+    applicantsPageState.page = 1;
+    loadApplicantsPage(1, applicantsPageState.search, applicantsPageState.status);
+  }
+}
+
+function applicantFilterChange() {
+  applicantsPageState.status = document.getElementById('applicantStatusFilter').value;
+  applicantsPageState.page = 1;
+  loadApplicantsPage(1, applicantsPageState.search, applicantsPageState.status);
+}
+
+function loadApplicantsPage(page, search, status) {
+  var params = 'page=' + page + '&per_page=20';
+  if(search) params += '&search=' + encodeURIComponent(search);
+  if(status) params += '&status=' + encodeURIComponent(status);
+  apiFetch('/api/arthur-os/applicants?' + params).then(function(resp) {
+    var wrap = document.getElementById('applicantTableWrap');
+    var pag = document.getElementById('applicantPagination');
+    if(!wrap) return;
+    if(!resp.success) {
+      wrap.innerHTML = '<div class="error-box">Failed: ' + (resp.error||'') + '</div>';
+      if(pag) pag.innerHTML = '';
+      return;
+    }
+    var items = resp.data, total = resp.total || 0, perPage = resp.per_page || 20;
+    var totalPages = Math.max(1, Math.ceil(total / perPage));
+    if(items.length === 0) {
+      wrap.innerHTML = '<div class="empty">No applicants found</div>';
+      if(pag) pag.innerHTML = '';
+      return;
+    }
+    var html = '<table><thead><tr><th>Name</th><th>Status</th><th>Email</th><th>Phone</th><th>Source</th><th>Date Added</th></tr></thead><tbody>';
+    for(var i=0;i<items.length;i++) {
+      var a = items[i];
+      var sBadge = 'badge-gray';
+      var sLower = (a.status||'').toLowerCase();
+      if(sLower === 'active') sBadge = 'badge-green';
+      else if(sLower === 'approved') sBadge = 'badge-blue';
+      else if(sLower === 'declined') sBadge = 'badge-red';
+      var name = escHtml((a.first_name||'') + ' ' + (a.last_name||'')).trim() || '-';
+      html += '<tr class="clickable" onclick="showApplicantDetail(' + a.id + ')">' +
+        '<td class="font-medium">' + name + '</td>' +
+        '<td><span class="badge ' + sBadge + '">' + escHtml(a.status||'') + '</span></td>' +
+        '<td>' + escHtml(a.email||'-') + '</td>' +
+        '<td>' + escHtml(a.mobile||'-') + '</td>' +
+        '<td>' + escHtml(a.source||'-') + '</td>' +
+        '<td>' + formatDate(a.created) + '</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+    if(pag) {
+      if(totalPages <= 1) {
+        pag.innerHTML = '<div class="pagination"><span class="page-info">' + total + ' total</span></div>';
+      } else {
+        var ph = '<div class="pagination">';
+        ph += '<button ' + (page <= 1 ? 'disabled' : '') + ' onclick="applicantGoPage(' + (page-1) + ')">‹ Prev</button>';
+        var startP = Math.max(1, page-2), endP = Math.min(totalPages, page+2);
+        if(startP > 1) { ph += '<button onclick="applicantGoPage(1)">1</button>'; if(startP > 2) ph += '<span class="page-info">…</span>'; }
+        for(var pi=startP; pi<=endP; pi++) ph += '<button class="' + (pi===page?'active':'') + '" onclick="applicantGoPage(' + pi + ')">' + pi + '</button>';
+        if(endP < totalPages) { if(endP < totalPages-1) ph += '<span class="page-info">…</span>'; ph += '<button onclick="applicantGoPage(' + totalPages + ')">' + totalPages + '</button>'; }
+        ph += '<button ' + (page >= totalPages ? 'disabled' : '') + ' onclick="applicantGoPage(' + (page+1) + ')">Next ›</button>';
+        ph += '<span class="page-info">' + total + ' total</span></div>';
+        pag.innerHTML = ph;
+      }
+    }
+  });
+}
+
+function applicantGoPage(page) {
+  applicantsPageState.page = page;
+  var wrap = document.getElementById('applicantTableWrap');
+  if(wrap) wrap.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
+  loadApplicantsPage(page, applicantsPageState.search, applicantsPageState.status);
+}
+
+// ── Applicant Detail ──
+
+function showApplicantDetail(appId) {
+  var area = document.getElementById('contentArea');
+  area.innerHTML = '<div class="loading"><div class="spinner"></div> Loading applicant...</div>';
+  apiFetch('/api/arthur-os/applicants/' + appId).then(function(resp) {
+    if(!resp.success) {
+      area.innerHTML = '<button class="back-btn" onclick="navigate(\\'applicants\\')">← Back</button><div class="error-box">' + (resp.error||'Error') + '</div>';
+      return;
+    }
+    var a = resp.data;
+    var html = '<button class="back-btn" onclick="navigate(\\'applicants\\')">← Back to Applicants</button>';
+    // Personal info
+    html += '<div class="card"><div class="card-header"><h3>' + escHtml((a.first_name||'') + ' ' + (a.last_name||'')).trim() + '</h3></div><div class="card-body"><div class="detail-grid">';
+    html += detailField('Full Name', escHtml((a.first_name||'') + ' ' + (a.last_name||'')).trim()||'-');
+    html += detailField('Status', '<span class="badge ' + ((a.status||'').toLowerCase()==='active'?'badge-green':(a.status||'').toLowerCase()==='approved'?'badge-blue':(a.status||'').toLowerCase()==='declined'?'badge-red':'badge-gray') + '">' + escHtml(a.status||'') + '</span>');
+    html += detailField('Email', escHtml(a.email||'-'));
+    html += detailField('Mobile', escHtml(a.mobile||'-'));
+    html += detailField('Phone', escHtml(a.phone||'-'));
+    html += detailField('Source', escHtml(a.source||'-'));
+    html += detailField('Date Added', formatDate(a.created));
+    html += '</div></div></div>';
+    // Identity
+    html += '<div class="card"><div class="card-header"><h3>Identity</h3></div><div class="card-body"><div class="detail-grid">';
+    html += detailField('Date of Birth', formatDate(a.date_of_birth));
+    html += detailField('Gender', escHtml(a.gender||'-'));
+    html += detailField('Passport', escHtml(a.passport_number||'-'));
+    html += detailField('Visa Type', escHtml(a.visa_type||'-'));
+    html += detailField('NI Number', escHtml(a.ni_number||'-'));
+    html += detailField('Country of Origin', escHtml(a.country_of_origin||'-'));
+    html += '</div></div></div>';
+    // Guarantor
+    if(a.has_guarantor) {
+      html += '<div class="card"><div class="card-header"><h3>Guarantor</h3></div><div class="card-body"><div class="detail-grid">';
+      html += detailField('Name', escHtml((a.guarantor_first_name||'') + ' ' + (a.guarantor_last_name||'')).trim()||'-');
+      html += detailField('DOB', formatDate(a.guarantor_date_of_birth));
+      html += detailField('Address', escHtml((a.guarantor_address||'') + (a.guarantor_city ? ', ' + a.guarantor_city : '') + (a.guarantor_postcode ? ', ' + a.guarantor_postcode : '')));
+      html += detailField('Phone', escHtml(a.guarantor_phone||'-'));
+      html += detailField('Mobile', escHtml(a.guarantor_mobile||'-'));
+      html += detailField('Email', escHtml(a.guarantor_email||'-'));
+      html += detailField('Relation', escHtml(a.guarantor_relation||'-'));
+      html += '</div></div></div>';
+    }
+    // Employment
+    if(a.employment_company) {
+      html += '<div class="card"><div class="card-header"><h3>Employment</h3></div><div class="card-body"><div class="detail-grid">';
+      html += detailField('Company', escHtml(a.employment_company||'-'));
+      html += detailField('Address', escHtml(a.employment_address||'-'));
+      html += detailField('Salary', a.employment_salary ? '£' + formatCurrency(a.employment_salary) + '/yr' : '-');
+      html += detailField('Length', escHtml(a.employment_length||'-'));
+      html += '</div></div></div>';
+    }
+    // Next of Kin
+    if(a.kin_first_name || a.kin_last_name) {
+      html += '<div class="card"><div class="card-header"><h3>Next of Kin</h3></div><div class="card-body"><div class="detail-grid">';
+      html += detailField('Name', escHtml((a.kin_first_name||'') + ' ' + (a.kin_last_name||'')).trim()||'-');
+      html += detailField('Mobile', escHtml(a.kin_mobile||'-'));
+      html += '</div></div></div>';
+    }
+    // Matched units
+    if(a.matched_units && a.matched_units.length > 0) {
+      html += '<div class="card"><div class="card-header"><h3>Matched Units (' + a.matched_units.length + ')</h3></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Unit ID</th></tr></thead><tbody>';
+      for(var i=0;i<a.matched_units.length;i++) {
+        html += '<tr><td>' + escHtml(a.matched_units[i]) + '</td></tr>';
+      }
+      html += '</tbody></table></div></div></div>';
+    }
+    // Viewing info
+    html += '<div class="card"><div class="card-header"><h3>Viewings</h3></div><div class="card-body"><div class="detail-grid">';
+    html += detailField('Viewing Count', a.viewing_count !== null && a.viewing_count !== undefined ? a.viewing_count : '0');
+    html += detailField('Last Viewing', formatDate(a.last_viewing_date));
+    html += '</div></div></div>';
+    area.innerHTML = html;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FINANCE PAGE
+// ═══════════════════════════════════════════════════════════════
+
+var financeActiveTab = 'overview';
+var financeTxState = { page: 1, is_overdue: '', is_outstanding: '', property_id: '' };
+
+function renderFinancePage(area) {
+  var html = '<div style="display:flex;gap:6px;margin-bottom:16px">' +
+    '<button class="back-btn" style="' + (financeActiveTab==='overview'?'background:#2563eb;color:#fff':'') + '" onclick="switchFinanceTab(\\'overview\\')">📊 Overview</button>' +
+    '<button class="back-btn" style="' + (financeActiveTab==='transactions'?'background:#2563eb;color:#fff':'') + '" onclick="switchFinanceTab(\\'transactions\\')">💳 Transactions</button>' +
+    '<button class="back-btn" style="' + (financeActiveTab==='deposits'?'background:#2563eb;color:#fff':'') + '" onclick="switchFinanceTab(\\'deposits\\')">🏦 Deposits</button>' +
+    '</div><div id="financeContent">';
+  html += '</div>';
+  area.innerHTML = html;
+  renderFinanceTab();
+}
+
+function switchFinanceTab(tab) {
+  financeActiveTab = tab;
+  renderFinancePage(document.getElementById('contentArea'));
+}
+
+function renderFinanceTab() {
+  var cont = document.getElementById('financeContent');
+  if(!cont) return;
+  if(financeActiveTab === 'overview') renderFinanceOverview(cont);
+  else if(financeActiveTab === 'transactions') renderFinanceTransactions(cont);
+  else if(financeActiveTab === 'deposits') renderFinanceDeposits(cont);
+}
+
+function renderFinanceOverview(cont) {
+  cont.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
+  apiFetch('/api/arthur-os/finance/overview').then(function(resp) {
+    if(!resp.success) {
+      cont.innerHTML = '<div class="error-box">Failed: ' + (resp.error||'') + '</div>';
+      return;
+    }
+    var d = resp.data;
+    var cards = [
+      { label: 'Monthly Rent Roll', value: '£' + formatCurrency(d.monthly_rent_roll), icon: '💰', cls: 'green' },
+      { label: 'Total Arrears', value: '£' + formatCurrency(d.total_arrears), icon: '⚠️', cls: 'red' },
+      { label: 'Overdue Count', value: d.overdue_count, icon: '🔴', cls: 'red' },
+      { label: 'Total Collected', value: '£' + formatCurrency(d.total_collected), icon: '✅', cls: 'green' },
+      { label: 'Registered Deposits', value: d.deposits.registered_count, icon: '🏦', cls: 'blue' },
+      { label: 'Unregistered Deposits', value: d.deposits.unregistered_count, icon: '⚠️', cls: 'amber' },
+      { label: 'Total Transactions', value: d.total_transactions, icon: '📊', cls: 'purple' },
+      { label: 'Overdue Total', value: '£' + formatCurrency(d.overdue_total), icon: '🔴', cls: 'red' },
+    ];
+    var html = '<div class="kpi-grid">';
+    for(var i=0;i<cards.length;i++) {
+      var c = cards[i];
+      html += '<div class="kpi-card"><div class="kpi-header"><div class="kpi-label">' + c.label + '</div><div class="kpi-icon ' + c.cls + '">' + c.icon + '</div></div><div class="kpi-value">' + c.value + '</div></div>';
+    }
+    html += '</div>';
+    cont.innerHTML = html;
+  });
+}
+
+function renderFinanceTransactions(cont) {
+  cont.innerHTML =
+    '<div class="card"><div class="card-header"><h3>Transactions</h3></div><div class="card-body">' +
+    '<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center">' +
+    '<label style="font-size:12px;color:#64748b"><input type="checkbox" id="txOverdue" onchange="txFilterChange()" ' + (financeTxState.is_overdue==='1'?'checked':'') + '> Overdue</label>' +
+    '<label style="font-size:12px;color:#64748b"><input type="checkbox" id="txOutstanding" onchange="txFilterChange()" ' + (financeTxState.is_outstanding==='1'?'checked':'') + '> Outstanding</label>' +
+    '</div>' +
+    '<div class="table-wrap" id="txTableWrap"><div class="loading"><div class="spinner"></div> Loading...</div></div>' +
+    '<div id="txPagination"></div>' +
+    '</div></div>';
+  loadTransactionsPage(1);
+}
+
+function txFilterChange() {
+  financeTxState.is_overdue = document.getElementById('txOverdue').checked ? '1' : '';
+  financeTxState.is_outstanding = document.getElementById('txOutstanding').checked ? '1' : '';
+  financeTxState.page = 1;
+  loadTransactionsPage(1);
+}
+
+function loadTransactionsPage(page) {
+  financeTxState.page = page;
+  var params = 'page=' + page + '&per_page=20';
+  if(financeTxState.is_overdue) params += '&is_overdue=1';
+  if(financeTxState.is_outstanding) params += '&is_outstanding=1';
+  if(financeTxState.property_id) params += '&property_id=' + encodeURIComponent(financeTxState.property_id);
+  apiFetch('/api/arthur-os/finance/transactions?' + params).then(function(resp) {
+    var wrap = document.getElementById('txTableWrap');
+    var pag = document.getElementById('txPagination');
+    if(!wrap) return;
+    if(!resp.success) {
+      wrap.innerHTML = '<div class="error-box">Failed: ' + (resp.error||'') + '</div>';
+      if(pag) pag.innerHTML = '';
+      return;
+    }
+    var items = resp.data, total = resp.total || 0, perPage = resp.per_page || 20;
+    var totalPages = Math.max(1, Math.ceil(total / perPage));
+    if(items.length === 0) {
+      wrap.innerHTML = '<div class="empty">No transactions found</div>';
+      if(pag) pag.innerHTML = '';
+      return;
+    }
+    var html = '<table><thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Amount</th><th>Paid</th><th>Outstanding</th><th>Status</th><th>Property</th></tr></thead><tbody>';
+    for(var i=0;i<items.length;i++) {
+      var tx = items[i];
+      var txBadge = tx.is_overdue ? 'badge-red' : (tx.is_outstanding ? 'badge-amber' : 'badge-green');
+      var txLabel = tx.is_overdue ? 'Overdue' : (tx.is_outstanding ? 'Outstanding' : 'Paid');
+      html += '<tr><td>' + formatDate(tx.date) + '</td><td>' + escHtml(tx.description||'-') + '</td><td>' + escHtml(tx.transaction_type||'-') + '</td>' +
+        '<td class="currency">£' + formatCurrency(tx.amount) + '</td><td class="currency">£' + formatCurrency(tx.amount_paid) + '</td>' +
+        '<td class="currency">£' + formatCurrency(tx.amount_outstanding) + '</td>' +
+        '<td><span class="badge ' + txBadge + '">' + txLabel + '</span></td>' +
+        '<td>' + escHtml(tx.ref||'-') + '</td></tr>';
+    }
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+    if(pag) {
+      if(totalPages <= 1) {
+        pag.innerHTML = '<div class="pagination"><span class="page-info">' + total + ' total</span></div>';
+      } else {
+        var ph = '<div class="pagination">';
+        ph += '<button ' + (page <= 1 ? 'disabled' : '') + ' onclick="txGoPage(' + (page-1) + ')">‹ Prev</button>';
+        var startP = Math.max(1, page-2), endP = Math.min(totalPages, page+2);
+        if(startP > 1) { ph += '<button onclick="txGoPage(1)">1</button>'; if(startP > 2) ph += '<span class="page-info">…</span>'; }
+        for(var pi=startP; pi<=endP; pi++) ph += '<button class="' + (pi===page?'active':'') + '" onclick="txGoPage(' + pi + ')">' + pi + '</button>';
+        if(endP < totalPages) { if(endP < totalPages-1) ph += '<span class="page-info">…</span>'; ph += '<button onclick="txGoPage(' + totalPages + ')">' + totalPages + '</button>'; }
+        ph += '<button ' + (page >= totalPages ? 'disabled' : '') + ' onclick="txGoPage(' + (page+1) + ')">Next ›</button>';
+        ph += '<span class="page-info">' + total + ' total</span></div>';
+        pag.innerHTML = ph;
+      }
+    }
+  });
+}
+
+function txGoPage(page) {
+  financeTxState.page = page;
+  var wrap = document.getElementById('txTableWrap');
+  if(wrap) wrap.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
+  loadTransactionsPage(page);
+}
+
+function renderFinanceDeposits(cont) {
+  cont.innerHTML = '<div class="loading"><div class="spinner"></div> Loading deposits...</div>';
+  apiFetch('/api/arthur-os/finance/deposits').then(function(resp) {
+    if(!resp.success) {
+      cont.innerHTML = '<div class="error-box">Failed: ' + (resp.error||'') + '</div>';
+      return;
+    }
+    var d = resp.data;
+    var html = '<div class="kpi-grid">' +
+      '<div class="kpi-card"><div class="kpi-header"><div class="kpi-label">Registered Deposits</div><div class="kpi-icon blue">🏦</div></div><div class="kpi-value">' + d.registered_count + '</div></div>' +
+      '<div class="kpi-card"><div class="kpi-header"><div class="kpi-label">Unregistered Deposits</div><div class="kpi-icon amber">⚠️</div></div><div class="kpi-value">' + d.unregistered_count + '</div></div>' +
+      '<div class="kpi-card"><div class="kpi-header"><div class="kpi-label">Registered Total</div><div class="kpi-icon green">💰</div></div><div class="kpi-value">£' + formatCurrency(d.registered_total) + '</div></div>' +
+      '</div>';
+    html += '<div class="card"><div class="card-header"><h3>Registered Deposits (' + d.registered_count + ')</h3></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Ref</th><th>Property</th><th>Tenant</th><th>Scheme</th><th>Amount</th></tr></thead><tbody>';
+    for(var i=0;i<d.registered.length;i++) {
+      var r = d.registered[i];
+      html += '<tr><td class="font-mono">' + escHtml(r.ref||'-') + '</td><td>' + escHtml(r.full_address||'') + '</td><td>' + escHtml(r.main_tenant_name||'') + '</td><td>' + escHtml(r.deposit_scheme||'-') + '</td><td class="currency">£' + formatCurrency(r.deposit_registered_amount) + '</td></tr>';
+    }
+    html += '</tbody></table></div></div></div>';
+    html += '<div class="card"><div class="card-header"><h3>Unregistered Deposits (' + d.unregistered_count + ')</h3></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Ref</th><th>Property</th><th>Tenant</th><th>Amount</th></tr></thead><tbody>';
+    for(var i=0;i<d.unregistered.length;i++) {
+      var u = d.unregistered[i];
+      html += '<tr><td class="font-mono">' + escHtml(u.ref||'-') + '</td><td>' + escHtml(u.full_address||'') + '</td><td>' + escHtml(u.main_tenant_name||'') + '</td><td class="currency">£' + formatCurrency(u.deposit_registered_amount) + '</td></tr>';
+    }
+    html += '</tbody></table></div></div></div>';
+    cont.innerHTML = html;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INIT — load default page
+// ═══════════════════════════════════════════════════════════════
+
+navigate('home');
+
+{% else %}
+// ═══════════════════════════════════════════════════════════════
+// LOGIN HANDLER
+// ═══════════════════════════════════════════════════════════════
+
+async function handleLogin(e) {
+  e.preventDefault();
+  var username = document.getElementById('username').value.trim();
+  var password = document.getElementById('password').value;
+  var btn = document.getElementById('loginBtn');
+  var btnText = document.getElementById('btnText');
+  var spinner = document.getElementById('btnSpinner');
+  var errorMsg = document.getElementById('loginError');
+  var userInput = document.getElementById('username');
+  var passInput = document.getElementById('password');
+
+  if(!username || !password) {
+    errorMsg.textContent = 'Please enter both username and password.';
+    errorMsg.classList.add('show');
+    return;
+  }
+
+  btn.disabled = true;
+  btnText.style.display = 'none';
+  spinner.classList.add('show');
+  errorMsg.classList.remove('show');
+  userInput.classList.remove('error');
+  passInput.classList.remove('error');
+
   try {
-    var d = await api('/api/notifications', null, null, null);
-    var badge = document.getElementById('notifBadge');
-    if(d.unread_count > 0) {
-      badge.style.display = '';
-      badge.textContent = d.unread_count > 99 ? '99+' : d.unread_count;
+    var res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username: username, password: password})
+    });
+
+    if(res.ok) {
+      window.location.href = '/dashboard';
+    } else if(res.status === 401) {
+      errorMsg.textContent = 'Invalid username or password.';
+      errorMsg.classList.add('show');
+      userInput.classList.add('error');
+      passInput.classList.add('error');
     } else {
-      badge.style.display = 'none';
-    }
-    var list = document.getElementById('notifList');
-    if(!list) return;
-    if(d.notifications && d.notifications.length > 0) {
-      var html = '';
-      for(var i=0;i<Math.min(d.notifications.length,20);i++) {
-        var n = d.notifications[i];
-        var cls = n.read ? '' : 'unread';
-        html += '<div class="notif-item ' + cls + '" onclick="markNotifRead(\'' + n.id + '\')">' +
-          '<div class="nt">' + n.title + '</div>' +
-          '<div class="nm">' + n.message + '</div>' +
-          '<div class="ntm">' + new Date(n.created_at).toLocaleString('en-GB') + '</div>' +
-        '</div>';
-      }
-      list.innerHTML = html;
-    } else {
-      list.innerHTML = '<div class="notif-empty">No notifications</div>';
+      var data = await res.json();
+      errorMsg.textContent = data.error || 'Server error. Please try again.';
+      errorMsg.classList.add('show');
     }
   } catch(e) {
-    console.error('loadNotifications:', e);
+    errorMsg.textContent = 'Connection error. Please try again.';
+    errorMsg.classList.add('show');
+  } finally {
+    btn.disabled = false;
+    btnText.style.display = 'inline';
+    spinner.classList.remove('show');
   }
 }
 
-function toggleNotifPanel() {
-  var panel = document.getElementById('notifPanel');
-  if(panel) {
-    panel.classList.toggle('show');
-    if(panel.classList.contains('show')) loadNotifications();
+// Enter key support
+document.addEventListener('keydown', function(e) {
+  if(e.key === 'Enter') {
+    var form = document.getElementById('loginForm');
+    if(form) form.requestSubmit();
   }
-}
-
-async function markNotifRead(id) {
-  try {
-    await api('/api/notifications/read/' + id, 'POST', {}, null);
-    loadNotifications();
-    loadNotifications(); // Refresh badge
-  } catch(e) { console.error(e); }
-}
-
-async function markAllRead() {
-  try {
-    await api('/api/notifications/read-all', 'POST', {}, null);
-    loadNotifications();
-  } catch(e) { console.error(e); }
-}
-
-// ========== Chart helpers ==========
-var revenueChart = null;
-var portfolioChart = null;
-
-function renderRevenueChart(labels, values) {
-  var c1 = document.getElementById('revChart');
-  if(!c1) return;
-  if(revenueChart) { revenueChart.destroy(); revenueChart = null; }
-  var bgColor = values.map(function(v){ return v > 0 ? '#3B82F6' : '#E2E8F0'; });
-  revenueChart = new Chart(c1.getContext('2d'), {
-    type:'bar',
-    data:{
-      labels: labels,
-      datasets:[{label:'Revenue', data:values, backgroundColor:bgColor, borderRadius:6, barThickness:32}]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{display:false}, tooltip:{callbacks:{label:function(ctx){return '£'+ctx.parsed.y.toLocaleString();}}}},
-      scales:{
-        y:{beginAtZero:true, grid:{color:'#F1F5F9'}, ticks:{color:'#94A3B8', font:{size:11}, callback:function(v){return '£'+v;}}},
-        x:{grid:{display:false}, ticks:{color:'#94A3B8', font:{size:11}}}
-      }
-    }
-  });
-}
-
-function renderPortfolioChart(strC, hmoC, hybC) {
-  var c2 = document.getElementById('portChart');
-  if(!c2) return;
-  if(portfolioChart) { portfolioChart.destroy(); portfolioChart = null; }
-  portfolioChart = new Chart(c2.getContext('2d'), {
-    type:'doughnut',
-    data:{
-      labels:['STR ('+strC+')','HMO ('+hmoC+')','Hybrid'],
-      datasets:[{data:[strC, hmoC, Math.max(0, hybC)], backgroundColor:['#3B82F6','#8B5CF6','#F97316'], borderWidth:0}]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{position:'bottom', labels:{padding:14, usePointStyle:true, font:{size:12}}}},
-      cutout:'70%'
-    }
-  });
-}
-
-async function loadKPIs() {
-var signal = getSignal();
-try {
-var data = await api('/api/dashboard/data', null, null, signal.signal);
-// Update KPI cards
-var strC = data.portfolio.str || 0;
-var hmoC = data.portfolio.hmo || 0;
-var tot = data.portfolio.total || 0;
-document.getElementById('kpiStr').textContent = strC;
-document.getElementById('kpiHmo').textContent = hmoC;
-var arr = data.today.check_ins || 0, dep = data.today.check_outs || 0;
-document.getElementById('kpiBook').textContent = arr + dep;
-document.getElementById('kpiBookT').textContent = '\u2191 '+arr+' arr / '+dep+' dep';
-document.getElementById('kpiBookT').className = 'kt ' + (arr > 0 ? 'up' : 'neutral');
-var openMaint = data.kpi.open_maintenance || 0;
-document.getElementById('kpiMaint').textContent = openMaint;
-document.getElementById('mCountSide').textContent = openMaint;
-document.getElementById('pCount').textContent = tot;
-
-// Operational cards
-document.getElementById('oBook').textContent = arr + dep;
-document.getElementById('oArr').textContent = arr;
-document.getElementById('oDep').textContent = dep;
-document.getElementById('oMaint').textContent = openMaint;
-document.getElementById('oProps').textContent = tot;
-document.getElementById('psStr').textContent = strC;
-document.getElementById('psHmo').textContent = hmoC;
-document.getElementById('psHyb').textContent = Math.max(0,tot-strC-hmoC);
-
-// Revenue chart — live data from the API
-var revLabels = data.revenue_chart.labels || ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-var revValues = data.revenue_chart.values || [0,0,0,0,0,0,0];
-renderRevenueChart(revLabels, revValues);
-renderPortfolioChart(strC, hmoC, Math.max(0,tot-strC-hmoC));
-
-// Update last updated
-if(data.last_updated) {
-  document.getElementById('lastUpdated').textContent = new Date(data.last_updated).toLocaleString('en-GB');
-}
-} catch(e) { if(e.name === 'AbortError') return; console.error('loadKPIs:', e); }
-}
-
-async function loadProperties() {
-var el = document.getElementById('panel-properties');
-if(!el) return;
-el.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
-var signal = getSignal();
-try {
-var d = await api('/api/properties', null, null, signal.signal);
-var h = '<div class="card"><div class="card-h"><h3>Properties ('+d.total+')</h3></div><div class="card-b"><div class="tw"><table><thead><tr><th>Name</th><th>Type</th><th>Brand</th><th>Status</th><th>Address</th></tr></thead><tbody>';
-for(var i=0;i<d.properties.length;i++) {
-var p = d.properties[i];
-var tc = p.type==='Hybrid'?'td':(p.type==='STR'?'ts':'th');
-var sc = p.status==='active'?'bg':'bgr';
-h += '<tr><td class="fw" data-label="Property">'+p.name+'</td><td data-label="Type"><span class="tag '+tc+'">'+p.type+'</span></td><td data-label="Brand">'+(p.brand||'-')+'</td><td data-label="Status"><span class="badge '+sc+'">'+p.status+'</span></td><td class="tm" data-label="Address">'+(p.address||'-')+'</td></tr>';
-}
-h += '</tbody></table></div></div></div>';
-el.innerHTML = h;
-} catch(e) { if(e.name === 'AbortError') return; el.innerHTML = '<div class="err">'+e.message+'</div>'; }
-}
-
-async function loadSTR() {
-var el = document.getElementById('panel-str');
-if(!el) return;
-el.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
-var signal = getSignal();
-try {
-var list = await api('/api/str/listings', null, null, signal.signal);
-var s = await api('/api/summary', null, null, signal.signal);
-var h = '<div class="card"><div class="card-h"><h3>STR Listings ('+list.count+')</h3></div><div class="card-b"><div class="tw"><table><thead><tr><th>Name</th><th>Bedrooms</th><th>Guests</th><th>Status</th></tr></thead><tbody>';
-for(var i=0;i<list.listings.length;i++) {
-var l = list.listings[i];
-h += '<tr><td class="fw" data-label="Name">'+l.name+'</td><td class="tm" data-label="Bedrooms">'+(l.bedrooms||'-')+'</td><td class="tm" data-label="Guests">'+(l.max_guests||'-')+'</td><td data-label="Status"><span class="badge bg">Active</span></td></tr>';
-}
-h += '</tbody></table></div></div></div>';
-h += '<div class="card"><div class="card-h"><h3>Today</h3></div><div class="card-b"><div class="grid-2"><div><div class="ops-card"><div class="oi">🚪</div><div class="ov">'+(s.str?.arrivals||0)+'</div><div class="ol">Arrivals</div></div></div><div><div class="ops-card"><div class="oi">🚶</div><div class="ov">'+(s.str?.departures||0)+'</div><div class="ol">Departures</div></div></div></div></div></div>';
-el.innerHTML = h;
-} catch(e) { if(e.name === 'AbortError') return; el.innerHTML = '<div class="err">'+e.message+'</div>'; }
-}
-
-async function loadHMO() {
-var el = document.getElementById('panel-hmo');
-if(!el) return;
-el.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
-var signal = getSignal();
-try {
-var tResp = await api('/api/hmo/tenants', null, null, signal.signal);
-var pResp = await api('/api/hmo/properties', null, null, signal.signal);
-var h = '<div class="grid-2"><div class="card"><div class="card-h"><h3>Tenants ('+tResp.count+')</h3></div><div class="card-b">';
-if(tResp.tenants.length) {
-h += '<div class="tw"><table><thead><tr><th>Tenant</th><th>Property</th><th>Rent</th><th>Status</th></tr></thead><tbody>';
-for(var i=0;i<tResp.tenants.length;i++) {
-var t = tResp.tenants[i];
-var sc = t.status==='periodic'?'bp':'bg';
-var r = t.rent_amount?'£'+t.rent_amount+(t.rent_frequency?'/'+t.rent_frequency:''):'-';
-h += '<tr><td class="fw" data-label="Tenant">'+(t.tenant_name||'N/A')+'</td><td data-label="Property">'+(t.property||t.unit_id)+'</td><td class="fw" data-label="Rent">'+r+'</td><td data-label="Status"><span class="badge '+sc+'">'+t.status+'</span></td></tr>';
-}
-h += '</tbody></table></div>';
-} else h += '<div class="empty">No active tenancies</div>';
-h += '</div></div><div class="card"><div class="card-h"><h3>Properties ('+pResp.count+')</h3></div><div class="card-b">';
-if(pResp.properties?.length) {
-h += '<div class="tw"><table><thead><tr><th>Name</th><th>Status</th><th>Ref</th></tr></thead><tbody>';
-for(var i=0;i<pResp.properties.length&&i<50;i++) {
-var p = pResp.properties[i];
-var sc = p.status==='active'||p.status==='Live'?'bg':'bgr';
-h += '<tr><td class="fw" data-label="Name">'+(p.name||'')+'</td><td data-label="Status"><span class="badge '+sc+'">'+(p.status||'')+'</span></td><td class="tm" data-label="Ref">'+(p.unit_ref||'')+'</td></tr>';
-}
-h += '</tbody></table></div>';
-} else h += '<div class="empty">No HMO properties</div>';
-h += '</div></div></div>';
-el.innerHTML = h;
-} catch(e) { if(e.name === 'AbortError') return; el.innerHTML = '<div class="err">'+e.message+'</div>'; }
-}
-
-async function loadMaintenance() {
-var el = document.getElementById('panel-maintenance');
-if(!el) return;
-el.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
-var signal = getSignal();
-try {
-var d = await api('/api/maintenance', null, null, signal.signal);
-var h = '<div class="card"><div class="card-h"><h3>Maintenance ('+d.count+')</h3></div><div class="card-b">';
-if(d.maintenance.length) {
-h += '<div class="tw"><table><thead><tr><th>Issue</th><th>Priority</th><th>Status</th><th>Date</th></tr></thead><tbody>';
-for(var i=0;i<d.maintenance.length;i++) {
-var m = d.maintenance[i];
-var p = (m.priority||'').toLowerCase();
-var pc = p.includes('urgent')||p.includes('high')?'br':(p.includes('medium')?'ba':'bb');
-var sc = m.status==='IN PROGRESS'?'ba':m.status==='DONE'||m.status==='COMPLETED'?'bg':'bgr';
-h += '<tr><td class="fw" data-label="Issue">'+m.title+'</td><td data-label="Priority"><span class="badge '+pc+'">'+(m.priority||'-')+'</span></td><td data-label="Status"><span class="badge '+sc+'">'+m.status+'</span></td><td class="tm" data-label="Date">'+(m.date_raised||'-')+'</td></tr>';
-}
-h += '</tbody></table></div>';
-} else h += '<div class="empty">No jobs</div>';
-h += '</div></div>';
-el.innerHTML = h;
-} catch(e) { if(e.name === 'AbortError') return; el.innerHTML = '<div class="err">'+e.message+'</div>'; }
-}
-
-// Fetch user info from server session
-(async function() {
-    try {
-        var r = await fetch('/api/auth/user');
-        if(r.ok) {
-            var d = await r.json();
-            if(d.username) {
-                document.getElementById('userName').textContent = d.username;
-                document.getElementById('userAvatar').textContent = d.username.charAt(0).toUpperCase();
-            }
-        }
-    } catch(e) {}
-    loadNotifications(); // Load notifications after user is confirmed
-})();
-
-// Auto-refresh with visibility check — only refresh when tab is visible
-var refreshInterval = setInterval(function() {
-  if(!document.hidden) {
-    loadKPIs();
-    loadDailyFocus();
-    loadIntegrations();
-    loadNotifications();
-  }
-}, 60000);
-
+});
+{% endif %}
 </script>
 </body>
 </html>
