@@ -766,8 +766,8 @@ def sync_transactions(force=False):
 
     items = arthur_get_all_pages(
         "transactions",
-        params={"status": "overdue,outstanding"},
-        max_pages=10  # Only sync last 200 transactions for performance
+        params={"status": "overdue,outstanding,paid,cancelled,refunded,void"},
+        max_pages=None  # Sync ALL transaction pages
     )
     if not items:
         print("  No transactions returned from API")

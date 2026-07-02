@@ -176,8 +176,8 @@ def api_get_fast(url, headers, timeout=3):
 def login_page():
     user = session.get("user")
     if user:
-        return render_template("dashboard.html", user=user)
-    return render_template("dashboard.html")
+        return render_template("banksia_os.html", user=user)
+    return render_template("banksia_os.html", user={"username": "Guest", "role": "viewer"})
 
 # ── Auth API ──
 @app.route("/api/auth/login", methods=["POST"])
@@ -313,6 +313,12 @@ def banksia_os_page(subpath=""):
 @require_auth
 def banksia_os_dashboard(subpath=""):
     return render_template("banksia_os.html", user=request.current_user)
+
+# ── Document Upload Portal route ──
+@app.route("/upload-docs")
+@require_auth
+def doc_upload_portal():
+    return render_template("doc_upload.html", user=request.current_user)
 
 # ── Snapshot Management (super admin only) ──
 SNAPSHOT_SCRIPT = os.path.join(os.path.dirname(__file__), "snapshot.py")

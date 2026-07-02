@@ -8,7 +8,7 @@ import json, os, sys
 from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
 from functools import wraps
 
 from verv_os_db import get_db, count, dict_from_row, raw_query
@@ -82,6 +82,34 @@ def build_search_clause(fields, search_term):
     like_val = f"%{search_term}%"
     params = [like_val] * len(fields)
     return f"({' OR '.join(clauses)})", params
+
+
+def api_update_resource(table, item_id):
+    """Generic PATCH handler — updates any field on any table by item ID."""
+    data = request.get_json()
+    if not data:
+        return json_error("No data provided")
+    # Build SET clause from provided fields
+    set_parts = []
+    params = []
+    valid_tables = {"properties", "units", "tenancies", "tenants", "applicants", "property_owners", "message_threads"}
+    if table not in valid_tables:
+        return json_error(f"Invalid table: {table}", 400)
+    for key, val in data.items():
+        set_parts.append(f"{key} = ?")
+        params.append(val)
+    if not set_parts:
+        return json_error("No fields to update")
+    params.append(item_id)
+    db = get_dict_db()
+    try:
+        db.execute(f"UPDATE {table} SET {', '.join(set_parts)} WHERE id = ?", params)
+        db.commit()
+        return json_success({"updated": True, "id": item_id, "fields": list(data.keys())})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
 
 
 # ═══════════════════════════════════════════════
@@ -218,8 +246,10 @@ def api_dashboard():
 # 2. PROPERTIES
 # ═══════════════════════════════════════════════
 
-@banksia_os_bp.route("/properties")
+@banksia_os_bp.route("/properties", methods=["GET", "POST"])
 def api_properties():
+    if request.method == "POST":
+        return api_create_property()
     page = int_param(request.args.get("page"))
     per_page = int_param(request.args.get("per_page"), 20)
     search = request.args.get("search", "").strip()
@@ -243,8 +273,41 @@ def api_properties():
     return json_success(rows, total, page, per_page)
 
 
-@banksia_os_bp.route("/properties/<int:prop_id>")
+def api_create_property():
+    """POST handler for creating a new property with onboarding details."""
+    data = request.get_json()
+    if not data:
+        return json_error("No data provided")
+    required = ["ref", "name"]
+    for r in required:
+        if not data.get(r):
+            return json_error(f"'{r}' is required")
+
+    db = get_dict_db()
+    try:
+        cols = ["ref", "name", "address_line_1", "address_line_2", "city", "county", "postcode", "country",
+                "property_type", "total_units", "bedrooms", "bathrooms", "council_tax_band",
+                "council_account_no", "property_owner_name", "features", "notes"]
+        ins_cols = [c for c in cols if c in data]
+        ins_vals = [data[c] for c in ins_cols]
+        placeholders = ",".join(["?"] * len(ins_cols))
+        cursor = db.execute(
+            f"INSERT INTO properties ({','.join(ins_cols)}) VALUES ({placeholders})",
+            ins_vals
+        )
+        db.commit()
+        new_id = cursor.lastrowid
+        return json_success({"id": new_id, "message": "Property created"}), 201
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/properties/<int:prop_id>", methods=["GET", "PATCH"])
 def api_property(prop_id):
+    if request.method == "PATCH":
+        return api_update_resource("properties", prop_id)
     db = get_dict_db()
     try:
         prop = db.execute("SELECT * FROM properties WHERE id = ?", (prop_id,)).fetchone()
@@ -310,8 +373,10 @@ def api_property_images(prop_id):
 # 3. UNITS
 # ═══════════════════════════════════════════════
 
-@banksia_os_bp.route("/units")
+@banksia_os_bp.route("/units", methods=["GET", "POST"])
 def api_units():
+    if request.method == "POST":
+        return api_create_unit()
     page = int_param(request.args.get("page"))
     per_page = int_param(request.args.get("per_page"), 20)
     status_filter = request.args.get("status", "").strip()
@@ -354,8 +419,40 @@ def api_units():
     return json_success(rows, total, page, per_page)
 
 
-@banksia_os_bp.route("/units/<int:unit_id>")
+def api_create_unit():
+    """POST handler for creating a new unit with room/fixture details."""
+    data = request.get_json()
+    if not data:
+        return json_error("No data provided")
+    if not data.get("property_id"):
+        return json_error("'property_id' is required")
+
+    db = get_dict_db()
+    try:
+        cols = ["property_id", "unit_ref", "unit_type", "unit_status", "unit_vacant",
+                "full_address", "market_rent", "market_rent_frequency", "deposit_amount",
+                "short_description", "furnished", "bedrooms", "bathrooms", "max_occupancy",
+                "council_tax_band", "features", "owner_name", "notes"]
+        ins_cols = [c for c in cols if c in data]
+        ins_vals = [data[c] for c in ins_cols]
+        placeholders = ",".join(["?"] * len(ins_cols))
+        cursor = db.execute(
+            f"INSERT INTO units ({','.join(ins_cols)}) VALUES ({placeholders})",
+            ins_vals
+        )
+        db.commit()
+        new_id = cursor.lastrowid
+        return json_success({"id": new_id, "message": "Unit created"}), 201
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/units/<int:unit_id>", methods=["GET", "PATCH"])
 def api_unit(unit_id):
+    if request.method == "PATCH":
+        return api_update_resource("units", unit_id)
     db = get_dict_db()
     try:
         unit = db.execute("SELECT * FROM units WHERE id = ?", (unit_id,)).fetchone()
@@ -434,8 +531,10 @@ def api_tenancies():
     return json_success(rows, total, page, per_page)
 
 
-@banksia_os_bp.route("/tenancies/<int:ten_id>")
+@banksia_os_bp.route("/tenancies/<int:ten_id>", methods=["GET", "PATCH"])
 def api_tenancy(ten_id):
+    if request.method == "PATCH":
+        return api_update_resource("tenancies", ten_id)
     db = get_dict_db()
     try:
         ten = db.execute("SELECT * FROM tenancies WHERE id = ?", (ten_id,)).fetchone()
@@ -616,8 +715,10 @@ def api_tenants():
     return json_success(rows, total, page, per_page)
 
 
-@banksia_os_bp.route("/tenants/<int:tenant_id>")
+@banksia_os_bp.route("/tenants/<int:tenant_id>", methods=["GET", "PATCH"])
 def api_tenant(tenant_id):
+    if request.method == "PATCH":
+        return api_update_resource("tenants", tenant_id)
     db = get_dict_db()
     try:
         tenant = db.execute("SELECT * FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
@@ -697,8 +798,10 @@ def api_applicants():
     return json_success(rows, total, page, per_page)
 
 
-@banksia_os_bp.route("/applicants/<int:app_id>")
+@banksia_os_bp.route("/applicants/<int:app_id>", methods=["GET", "PATCH"])
 def api_applicant(app_id):
+    if request.method == "PATCH":
+        return api_update_resource("applicants", app_id)
     db = get_dict_db()
     try:
         app = db.execute("SELECT * FROM applicants WHERE id = ?", (app_id,)).fetchone()
@@ -771,11 +874,17 @@ def api_finance_overview():
 
         return json_success({
             "monthly_rent_roll": round(monthly_rent_roll, 2),
+            "monthly_rent_income": round(monthly_rent_roll, 2),
+            "monthly_income": round(monthly_rent_roll, 2),
+            "total_expected_monthly": round(monthly_rent_roll, 2),
+            "total_collected_monthly": round(total_collected, 2),
             "total_arrears": round(total_arrears, 2),
             "overdue_count": overdue["cnt"],
             "overdue_total": round(overdue["total"], 2),
             "total_collected": round(total_collected, 2),
             "total_transactions": total_transactions,
+            "total_deposits_held": round(registered_deposits["total"], 2),
+            "total_deposits": round(registered_deposits["total"], 2),
             "deposits": {
                 "registered_count": registered_deposits["cnt"],
                 "registered_total": round(registered_deposits["total"], 2),
@@ -890,14 +999,177 @@ def api_deposits():
             "ORDER BY tenancies.full_address ASC"
         ).fetchall()
 
+        # Merge into flat list for frontend compatibility
+        all_deposits = []
+        for r in registered:
+            all_deposits.append({
+                "id": r["id"],
+                "tenant_name": r.get("main_tenant_name") or "—",
+                "property_name": r.get("full_address") or "—",
+                "amount": r.get("deposit_registered_amount") or 0,
+                "scheme": r.get("deposit_scheme") or "—",
+                "registered": True,
+                "ref": r.get("ref") or "",
+            })
+        for u in unregistered:
+            all_deposits.append({
+                "id": u["id"],
+                "tenant_name": u.get("main_tenant_name") or "—",
+                "property_name": u.get("full_address") or "—",
+                "amount": u.get("deposit_registered_amount") or 0,
+                "scheme": u.get("deposit_scheme") or "—",
+                "registered": False,
+                "ref": u.get("ref") or "",
+            })
+        return json_success(all_deposits)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# RENT CHARGES — Per-month editable schedule
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/finance/rent-charges/<int:tenancy_id>", methods=["GET"])
+def api_get_rent_charges(tenancy_id):
+    """Get all monthly rent charges for a tenancy."""
+    db = get_dict_db()
+    try:
+        charges = db.execute(
+            "SELECT id, month, rent_amount, paid_amount, status, notes, created, modified "
+            "FROM rent_charges WHERE tenancy_id = ? ORDER BY month ASC",
+            (tenancy_id,)
+        ).fetchall()
+        return json_success(charges)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/finance/rent-charges/generate/<int:tenancy_id>", methods=["POST"])
+def api_generate_rent_charges(tenancy_id):
+    """Generate monthly rent charges for a tenancy based on its start/end dates and rent_amount.
+    Existing charges are preserved; only missing months are added."""
+    db = get_dict_db()
+    try:
+        tenancy = db.execute("SELECT id, start_date, end_date, rent_amount, rent_frequency FROM tenancies WHERE id = ?",
+                             (tenancy_id,)).fetchone()
+        if not tenancy:
+            return json_error("Tenancy not found", 404)
+
+        start = tenancy["start_date"]
+        end = tenancy["end_date"] or (datetime.now(timezone.utc).replace(day=1) + timedelta(days=365)).isoformat()[:10]
+        rent = float(tenancy["rent_amount"] or 0)
+        freq = (tenancy["rent_frequency"] or "pcm").lower()
+
+        # Generate from start to end (or 24 months max)
+        try:
+            cur = datetime.strptime(start[:7], "%Y-%m") if start else datetime.now(timezone.utc).replace(day=1)
+        except:
+            cur = datetime.now(timezone.utc).replace(day=1)
+        try:
+            end_dt = datetime.strptime(end[:7], "%Y-%m")
+        except:
+            end_dt = cur + timedelta(days=365)
+
+        max_months = 24
+        count = 0
+        while cur <= end_dt and count < max_months:
+            month_str = cur.strftime("%Y-%m")
+            existing = db.execute("SELECT id FROM rent_charges WHERE tenancy_id = ? AND month = ?",
+                                  (tenancy_id, month_str)).fetchone()
+            if not existing:
+                db.execute(
+                    "INSERT INTO rent_charges (tenancy_id, month, rent_amount, status, created) "
+                    "VALUES (?, ?, ?, 'due', ?)",
+                    (tenancy_id, month_str, rent, datetime.now(timezone.utc).isoformat())
+                )
+            count += 1
+            # Advance by frequency
+            if freq in ("pw", "week", "weekly"):
+                cur += timedelta(weeks=4)
+            else:
+                if cur.month == 12:
+                    cur = cur.replace(year=cur.year + 1, month=1)
+                else:
+                    cur = cur.replace(month=cur.month + 1)
+
+        db.commit()
+        total_charges = db.execute("SELECT COUNT(*) AS c FROM rent_charges WHERE tenancy_id = ?",
+                                   (tenancy_id,)).fetchone()["c"]
+        return json_success({"generated": count, "total_charges": total_charges, "tenancy_id": tenancy_id})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/finance/rent-charges/<int:charge_id>", methods=["PATCH"])
+def api_update_rent_charge(charge_id):
+    """Update a specific month's rent charge (amount, paid_amount, status, notes)."""
+    data = request.get_json()
+    if not data:
+        return json_error("No data provided")
+    db = get_dict_db()
+    try:
+        charge = db.execute("SELECT id, tenancy_id FROM rent_charges WHERE id = ?", (charge_id,)).fetchone()
+        if not charge:
+            return json_error("Charge not found", 404)
+        set_parts = ["modified = ?"]
+        params = [datetime.now(timezone.utc).isoformat()]
+        for key in ("rent_amount", "paid_amount", "status", "notes"):
+            if key in data:
+                set_parts.append(f"{key} = ?")
+                params.append(data[key])
+        params.append(charge_id)
+        db.execute(f"UPDATE rent_charges SET {', '.join(set_parts)} WHERE id = ?", params)
+        db.commit()
+
+        # Recalculate tenancy financial summary
+        tenancy_id = charge["tenancy_id"]
+        totals = db.execute(
+            "SELECT COALESCE(SUM(rent_amount),0) AS total_expected, "
+            "COALESCE(SUM(paid_amount),0) AS total_paid "
+            "FROM rent_charges WHERE tenancy_id = ?",
+            (tenancy_id,)
+        ).fetchone()
         return json_success({
-            "registered": registered,
-            "registered_count": len(registered),
-            "unregistered": unregistered,
-            "unregistered_count": len(unregistered),
-            "registered_total": round(
-                sum(r.get("deposit_registered_amount") or 0 for r in registered), 2
-            ),
+            "updated": True,
+            "charge_id": charge_id,
+            "total_expected": round(totals["total_expected"], 2),
+            "total_paid": round(totals["total_paid"], 2),
+            "balance": round(totals["total_expected"] - totals["total_paid"], 2)
+        })
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/finance/recalculate", methods=["POST"])
+def api_recalculate_finances():
+    """Recalculate all financial KPI summary data from rent_charges."""
+    db = get_dict_db()
+    try:
+        tenancy_counts = db.execute("SELECT COUNT(DISTINCT tenancy_id) AS c FROM rent_charges").fetchone()["c"]
+        total_expected = db.execute("SELECT COALESCE(SUM(rent_amount),0) AS t FROM rent_charges").fetchone()["t"]
+        total_paid = db.execute("SELECT COALESCE(SUM(paid_amount),0) AS t FROM rent_charges").fetchone()["t"]
+        overdue = db.execute("SELECT COALESCE(SUM(rent_amount - paid_amount),0) AS t FROM rent_charges WHERE status IN ('due','overdue')").fetchone()["t"]
+        monthly = db.execute(
+            "SELECT COALESCE(SUM(rc.rent_amount),0) AS t FROM rent_charges rc "
+            "JOIN tenancies t ON rc.tenancy_id = t.id "
+            "WHERE rc.month = strftime('%Y-%m', 'now') AND t.status IN ('Active','Periodic','active','periodic')"
+        ).fetchone()["t"]
+        return json_success({
+            "tenancies_with_charges": tenancy_counts,
+            "total_expected": round(total_expected, 2),
+            "total_paid": round(total_paid, 2),
+            "total_outstanding": round(total_expected - total_paid, 2),
+            "current_month_rent": round(monthly, 2),
+            "overdue_estimated": round(overdue, 2)
         })
     except Exception as e:
         return json_error(str(e), 500)
@@ -1283,6 +1555,311 @@ def api_download_generated(doc_id):
         return json_error("File not found", 404)
     from flask import send_file
     return send_file(path, as_attachment=True, download_name=info["filename"])
+
+
+# ═══════════════════════════════════════════════
+# UPLOADED DOCUMENTS STORAGE
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/documents/upload", methods=["POST"])
+def api_upload_document():
+    """Upload a document file and associate it with a tenancy/property/tenant."""
+    if "file" not in request.files:
+        return json_error("No file provided")
+    file = request.files["file"]
+    if file.filename == "":
+        return json_error("Empty filename")
+
+    docs_dir = os.path.join(os.path.dirname(__file__), "documents", "uploads")
+    os.makedirs(docs_dir, exist_ok=True)
+
+    category = request.form.get("category", "general")
+    related_to = request.form.get("related_to", "")
+    related_id = request.form.get("related_id", "")
+    notes = request.form.get("notes", "")
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    safe_name = f"{ts}_{file.filename}"
+    save_path = os.path.join(docs_dir, safe_name)
+    file.save(save_path)
+
+    db = get_dict_db()
+    try:
+        # ── Auto-match: parse filename to find tenant/tenancy ──
+        matched_to = None
+        auto_match = request.form.get("auto_match", "false") == "true"
+        if auto_match:
+            fn = file.filename.lower()
+            # Try to extract tenancy ref pattern (TE followed by digits)
+            import re
+            ref_match = re.search(r'[Tt][Ee]\d+', fn)
+            if ref_match:
+                ref = ref_match.group().upper()
+                tenancy = db.execute(
+                    "SELECT id, ref, main_tenant_name, full_address FROM tenancies WHERE ref LIKE ? LIMIT 1",
+                    (f"%{ref}%",)
+                ).fetchone()
+                if tenancy:
+                    related_to = "tenancy"
+                    related_id = str(tenancy["id"])
+                    matched_to = f"Tenancy {ref} ({tenancy.get('main_tenant_name','')[:30]})"
+            if not matched_to:
+                # Try tenant name match
+                name_parts = fn.replace("_", " ").replace("-", " ").split()
+                for name in name_parts:
+                    if len(name) > 3:
+                        tenant = db.execute(
+                            "SELECT id, first_name, last_name FROM tenants WHERE first_name LIKE ? OR last_name LIKE ? LIMIT 1",
+                            (f"%{name}%", f"%{name}%")
+                        ).fetchone()
+                        if tenant:
+                            related_to = "tenant"
+                            related_id = str(tenant["id"])
+                            matched_to = f"Tenant {tenant['first_name']} {tenant['last_name']}"
+                            break
+            if not matched_to:
+                # Try tenancy ID in filename
+                id_match = re.search(r'\b(\d{3,5})\b', fn)
+                if id_match:
+                    tid = id_match.group(1)
+                    tenancy = db.execute(
+                        "SELECT id, ref, main_tenant_name FROM tenancies WHERE id LIKE ? OR ref LIKE ? LIMIT 1",
+                        (f"%{tid}%", f"%{tid}%")
+                    ).fetchone()
+                    if tenancy:
+                        related_to = "tenancy"
+                        related_id = str(tenancy["id"])
+                        matched_to = f"Tenancy {tenancy.get('ref','')}"
+
+        db.execute(
+            "INSERT INTO documents (filename, file_path, file_type, category, related_to, related_id, notes, created) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (file.filename, save_path, os.path.splitext(file.filename)[1].lower().lstrip("."),
+             category, related_to, related_id, notes, datetime.now(timezone.utc).isoformat())
+        )
+        db.commit()
+        result = {"id": db.lastrowid, "filename": file.filename}
+        if matched_to:
+            result["matched_to"] = matched_to
+        return json_success(result)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/documents/uploaded", methods=["GET"])
+def api_list_uploaded():
+    db = get_dict_db()
+    try:
+        docs = db.execute(
+            "SELECT id, filename, file_type, category, related_to, related_id, notes, created "
+            "FROM documents ORDER BY created DESC"
+        ).fetchall()
+        return json_success(docs)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/documents/uploaded/<int:doc_id>/download")
+def api_download_uploaded(doc_id):
+    db = get_dict_db()
+    try:
+        doc = db.execute("SELECT id, filename, file_path FROM documents WHERE id = ?", (doc_id,)).fetchone()
+        if not doc:
+            return json_error("Document not found", 404)
+        if not os.path.exists(doc["file_path"]):
+            return json_error("File not found on disk", 404)
+        from flask import send_file
+        return send_file(doc["file_path"], as_attachment=True, download_name=doc["filename"])
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/documents/uploaded/<int:doc_id>", methods=["DELETE"])
+def api_delete_uploaded(doc_id):
+    db = get_dict_db()
+    try:
+        doc = db.execute("SELECT id, file_path FROM documents WHERE id = ?", (doc_id,)).fetchone()
+        if not doc:
+            return json_error("Document not found", 404)
+        if os.path.exists(doc["file_path"]):
+            os.remove(doc["file_path"])
+        db.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+        db.commit()
+        return json_success({"deleted": True})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# COMMENTS & NOTIFICATIONS (Monday.com-style updates)
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/comments/<entity_type>/<int:entity_id>", methods=["GET"])
+def api_get_comments(entity_type, entity_id):
+    valid = {"tenancy","tenancies","property","properties","tenant","tenants",
+             "applicant","applicants","unit","units","transaction","transactions"}
+    if entity_type not in valid:
+        return json_error("Invalid entity type", 400)
+    if entity_type == "tenancy": entity_type = "tenancies"
+    elif entity_type == "property": entity_type = "properties"
+    elif entity_type == "applicant": entity_type = "applicants"
+    elif entity_type == "transaction": entity_type = "transactions"
+    db = get_dict_db()
+    try:
+        comments = db.execute(
+            "SELECT id, author, body, mentions, created FROM comments "
+            "WHERE entity_type = ? AND entity_id = ? ORDER BY created ASC",
+            (entity_type, entity_id)
+        ).fetchall()
+        return json_success(comments)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/comments/<entity_type>/<int:entity_id>", methods=["POST"])
+def api_add_comment(entity_type, entity_id):
+    data = request.get_json()
+    if not data or not data.get("body","").strip():
+        return json_error("Comment body is required")
+    body = data["body"].strip()
+    author = data.get("author","Unknown")
+    etype = entity_type
+    if etype == "tenancy": etype = "tenancies"
+    elif etype == "property": etype = "properties"
+    elif etype == "applicant": etype = "applicants"
+    elif etype == "transaction": etype = "transactions"
+    valid = {"tenancies","properties","tenants","applicants","units","transactions"}
+    if etype not in valid:
+        return json_error("Invalid entity type", 400)
+    import re
+    mentioned = re.findall(r'@(\w+)', body)
+    db = get_dict_db()
+    try:
+        c = db.execute(
+            "INSERT INTO comments (entity_type, entity_id, author, body, mentions, created) VALUES (?,?,?,?,?,?)",
+            (etype, entity_id, author, body, json.dumps(mentioned), datetime.now(timezone.utc).isoformat())
+        )
+        cid = c.lastrowid
+        for u in mentioned:
+            db.execute(
+                "INSERT INTO notifications (username, message, link, read, created) VALUES (?,?,?,0,?)",
+                (u, f"{author} @mentioned you on {etype[:-1]} #{entity_id}",
+                 f"/banksia-os?entity={etype}&id={entity_id}",
+                 datetime.now(timezone.utc).isoformat())
+            )
+        db.commit()
+        return json_success({"id":cid,"author":author,"body":body,"mentions":mentioned,
+                            "created":datetime.now(timezone.utc).isoformat()})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/comments/recent")
+def api_recent_comments():
+    """Return the most recent N comments across all entities."""
+    limit = int_param(request.args.get("limit"), 5)
+    db = get_dict_db()
+    try:
+        comments = db.execute(
+            "SELECT id, author, body, entity_type, entity_id, created FROM comments "
+            "ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return json_success(comments)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/properties/compliance")
+def api_properties_compliance():
+    """Return compliance issues across all properties (missing certificates, etc)."""
+    db = get_dict_db()
+    try:
+        issues = []
+        props = db.execute("SELECT id, ref, name FROM properties ORDER BY name").fetchall()
+        for p in props:
+            # Check for missing council tax band
+            if not p.get("council_tax_band"):
+                issues.append({"property_id": p["id"], "property_name": p["ref"] or p["name"],
+                               "issue": "Council Tax Band not set", "status": "missing"})
+            # Check for missing EPC check based on tenancies
+            tenancies = db.execute(
+                "SELECT COUNT(*) AS cnt FROM tenancies WHERE property_id=? AND status IN ('Current','current','Periodic','periodic')",
+                (p["id"],)
+            ).fetchone()
+            if tenancies and tenancies["cnt"] > 0:
+                issues.append({"property_id": p["id"], "property_name": p["ref"] or p["name"],
+                               "issue": f"{tenancies['cnt']} active tenancies — compliance review needed",
+                               "status": "pending"})
+        return json_success(issues)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/notifications", methods=["GET"])
+def api_get_notifications():
+    db = get_dict_db()
+    try:
+        u = getattr(request,'current_user',None) or session.get("user",{})
+        uname = u.get("username","") if isinstance(u,dict) else getattr(u,"username","")
+        if request.args.get("unread_only","") == "true":
+            cnt = db.execute("SELECT COUNT(*) AS c FROM notifications WHERE username=? AND read=0",(uname,)).fetchone()["c"]
+            return json_success({"unread_count":cnt})
+        items = db.execute(
+            "SELECT id,message,link,read,created FROM notifications WHERE username=? ORDER BY created DESC LIMIT 50",
+            (uname,)
+        ).fetchall()
+        uc = db.execute("SELECT COUNT(*) AS c FROM notifications WHERE username=? AND read=0",(uname,)).fetchone()["c"]
+        return json_success({"items":items,"unread_count":uc})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/notifications/mark-read", methods=["POST"])
+def api_mark_read():
+    db = get_dict_db()
+    try:
+        u = getattr(request,'current_user',None) or session.get("user",{})
+        uname = u.get("username","") if isinstance(u,dict) else getattr(u,"username","")
+        data = request.get_json() or {}
+        nid = data.get("id")
+        if nid:
+            db.execute("UPDATE notifications SET read=1 WHERE id=? AND username=?",(nid,uname))
+        else:
+            db.execute("UPDATE notifications SET read=1 WHERE username=? AND read=0",(uname,))
+        db.commit()
+        return json_success({"ok":True})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/users/autocomplete", methods=["GET"])
+def api_users_autocomplete():
+    import json as jm
+    uf = os.path.join(os.path.dirname(__file__),"users.json")
+    if os.path.exists(uf):
+        with open(uf) as f: users = jm.load(f)
+        names = list(users.keys())
+    else:
+        names = []
+    return json_success(names)
 
 
 # ═══════════════════════════════════════════════
@@ -1858,6 +2435,365 @@ def api_section_21(ten_id):
         return json_success({"section_21_served": True, "served_date": served_date})
     except Exception as e:
         db.rollback()
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 12. TAGS SYSTEM
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/tags")
+def api_tags():
+    db = get_dict_db()
+    try:
+        tags = db.execute("SELECT * FROM tags ORDER BY name").fetchall()
+        return json_success(tags)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+@banksia_os_bp.route("/tags", methods=["POST"])
+def api_create_tag():
+    data = request.get_json()
+    if not data or not data.get("name"):
+        return json_error("Tag name required")
+    db = get_dict_db()
+    try:
+        db.execute("INSERT INTO tags (name, color, category) VALUES (?,?,?)",
+                   (data["name"], data.get("color","#80d8ff"), data.get("category","general")))
+        db.commit()
+        return json_success({"message":"Tag created"}), 201
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+@banksia_os_bp.route("/tags/<int:tag_id>", methods=["PATCH","DELETE"])
+def api_tag(tag_id):
+    if request.method == "DELETE":
+        db = get_dict_db()
+        try:
+            db.execute("DELETE FROM tags WHERE id=?", (tag_id,))
+            db.commit()
+            return json_success({"deleted":True})
+        except Exception as e:
+            return json_error(str(e), 500)
+        finally:
+            db.close()
+    return api_update_resource("tags", tag_id)
+
+
+# ═══════════════════════════════════════════════
+# 13. PROPERTY OWNERS
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/property-owners")
+def api_property_owners():
+    page = int_param(request.args.get("page"))
+    per_page = int_param(request.args.get("per_page"), 20)
+    search = request.args.get("search","").strip()
+    db = get_dict_db()
+    try:
+        if search:
+            where = "WHERE name LIKE ? OR company_name LIKE ? OR main_contact_name LIKE ?"
+            like = f"%{search}%"
+            total = db.execute(f"SELECT COUNT(*) AS cnt FROM property_owners {where}", (like,like,like)).fetchone()["cnt"]
+            rows = db.execute(f"SELECT * FROM property_owners {where} ORDER BY name LIMIT ? OFFSET ?",
+                              (like,like,like,per_page,(page-1)*per_page)).fetchall()
+        else:
+            total = db.execute("SELECT COUNT(*) AS cnt FROM property_owners").fetchone()["cnt"]
+            rows = db.execute("SELECT * FROM property_owners ORDER BY name LIMIT ? OFFSET ?",
+                              (per_page,(page-1)*per_page)).fetchall()
+        return json_success(rows, total, page, per_page)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+@banksia_os_bp.route("/property-owners", methods=["POST"])
+def api_create_property_owner():
+    data = request.get_json()
+    if not data or not data.get("name"):
+        return json_error("Owner name required")
+    db = get_dict_db()
+    try:
+        cols = ["name","company_name","office_no","main_contact_name","contact_phone",
+                "contact_email","address_line_1","city","postcode","status","tags","notes"]
+        ins = {k:data.get(k,"") for k in cols}
+        ins["modified"] = datetime.now(timezone.utc).isoformat()
+        placeholders = ",".join(["?"]*len(ins))
+        cursor = db.execute(f"INSERT INTO property_owners ({','.join(ins.keys())}) VALUES ({placeholders})",
+                            list(ins.values()))
+        db.commit()
+        return json_success({"id": cursor.lastrowid, "message":"Owner created"}), 201
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+@banksia_os_bp.route("/property-owners/<int:owner_id>", methods=["GET","PATCH"])
+def api_property_owner(owner_id):
+    if request.method == "PATCH":
+        return api_update_resource("property_owners", owner_id)
+    db = get_dict_db()
+    try:
+        owner = db.execute("SELECT * FROM property_owners WHERE id=?", (owner_id,)).fetchone()
+        if not owner: return json_error("Not found", 404)
+        # Count linked properties
+        count = db.execute("SELECT COUNT(*) AS cnt FROM properties WHERE property_owner_id=? OR property_owner_name=?", 
+                           (str(owner_id), owner.get("name",""))).fetchone()["cnt"]
+        owner["property_count"] = count
+        return json_success(owner)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 14. MESSAGING SYSTEM (Threaded)
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/threads")
+def api_threads():
+    status = request.args.get("status","").strip()
+    db = get_dict_db()
+    try:
+        where = "1=1"
+        params = []
+        if status:
+            where = "status=?"
+            params.append(status)
+        threads = db.execute(
+            f"SELECT * FROM message_threads WHERE {where} ORDER BY modified DESC LIMIT 50", params
+        ).fetchall()
+        # Get last message for each thread
+        for t in threads:
+            last = db.execute("SELECT author, body, created FROM messages WHERE thread_id=? ORDER BY id DESC LIMIT 1",
+                              (t["id"],)).fetchone()
+            t["last_message"] = last
+            msg_count = db.execute("SELECT COUNT(*) AS cnt FROM messages WHERE thread_id=?", (t["id"],)).fetchone()["cnt"]
+            t["message_count"] = msg_count
+        return json_success(threads)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+@banksia_os_bp.route("/threads", methods=["POST"])
+def api_create_thread():
+    data = request.get_json()
+    if not data:
+        return json_error("No data")
+    db = get_dict_db()
+    try:
+        cols = ["title","entity_type","entity_id","tenancy_id","property_id",
+                "status","priority","task_type","raised_by","assigned_to","participants"]
+        ins = {k:data.get(k,"") for k in cols}
+        ins["modified"] = datetime.now(timezone.utc).isoformat()
+        pl = ",".join(["?"]*len(ins))
+        cursor = db.execute(f"INSERT INTO message_threads ({','.join(ins.keys())}) VALUES ({pl})", list(ins.values()))
+        db.commit()
+        tid = cursor.lastrowid
+        # If there's a body, create first message
+        if data.get("body"):
+            db.execute("INSERT INTO messages (thread_id, author, body) VALUES (?,?,?)",
+                       (tid, data.get("author","System"), data["body"]))
+            db.commit()
+        return json_success({"id": tid, "message":"Thread created"}), 201
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+@banksia_os_bp.route("/threads/<int:thread_id>")
+def api_thread(thread_id):
+    db = get_dict_db()
+    try:
+        thread = db.execute("SELECT * FROM message_threads WHERE id=?", (thread_id,)).fetchone()
+        if not thread: return json_error("Not found", 404)
+        messages = db.execute(
+            "SELECT * FROM messages WHERE thread_id=? ORDER BY id ASC", (thread_id,)
+        ).fetchall()
+        thread["messages"] = messages
+        return json_success(thread)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+@banksia_os_bp.route("/threads/<int:thread_id>/status", methods=["PATCH"])
+def api_update_thread_status(thread_id):
+    data = request.get_json()
+    if not data or not data.get("status"):
+        return json_error("Status required")
+    db = get_dict_db()
+    try:
+        db.execute("UPDATE message_threads SET status=?, modified=? WHERE id=?",
+                   (data["status"], datetime.now(timezone.utc).isoformat(), thread_id))
+        db.commit()
+        return json_success({"updated":True})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+@banksia_os_bp.route("/messages", methods=["POST"])
+def api_post_message():
+    data = request.get_json()
+    if not data or not data.get("thread_id") or not data.get("body"):
+        return json_error("thread_id and body required")
+    db = get_dict_db()
+    try:
+        db.execute("INSERT INTO messages (thread_id, author, author_role, body) VALUES (?,?,?,?)",
+                   (data["thread_id"], data.get("author","User"), data.get("author_role","team"), data["body"]))
+        db.execute("UPDATE message_threads SET modified=? WHERE id=?",
+                   (datetime.now(timezone.utc).isoformat(), data["thread_id"]))
+        db.commit()
+        return json_success({"message":"Sent"}), 201
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 15. INVOICES
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/invoices")
+def api_invoices():
+    status = request.args.get("status","").strip()
+    db = get_dict_db()
+    try:
+        where = "1=1"; params=[]
+        if status:
+            where = "status=?"; params=[status]
+        invoices = db.execute(f"SELECT * FROM invoices WHERE {where} ORDER BY due_date DESC", params).fetchall()
+        return json_success(invoices)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+@banksia_os_bp.route("/invoices/summary")
+def api_invoice_summary():
+    db = get_dict_db()
+    try:
+        unpaid = db.execute("SELECT COALESCE(SUM(amount-amount_paid),0) AS total FROM invoices WHERE status!='paid'").fetchone()
+        overdue = db.execute("SELECT COALESCE(SUM(amount-amount_paid),0) AS total FROM invoices WHERE due_date<date('now') AND status!='paid'").fetchone()
+        due_today = db.execute("SELECT COALESCE(SUM(amount-amount_paid),0) AS total FROM invoices WHERE due_date=date('now') AND status!='paid'").fetchone()
+        return json_success({
+            "unpaid_total": round(unpaid["total"], 2),
+            "overdue_total": round(overdue["total"], 2),
+            "due_today": round(due_today["total"], 2)
+        })
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+@banksia_os_bp.route("/invoices", methods=["POST"])
+def api_create_invoice():
+    data = request.get_json()
+    if not data:
+        return json_error("No data")
+    db = get_dict_db()
+    try:
+        db.execute("INSERT INTO invoices (tenancy_id, tenant_id, invoice_ref, description, amount, due_date, status, type) VALUES (?,?,?,?,?,?,?,?)",
+                   (data.get("tenancy_id"), data.get("tenant_id"), data.get("invoice_ref"),
+                    data.get("description"), data.get("amount",0), data.get("due_date"),
+                    data.get("status","pending"), data.get("type","rent")))
+        db.commit()
+        return json_success({"message":"Invoice created"}), 201
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 16. COMPANY SETTINGS
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/company-settings")
+def api_company_settings():
+    db = get_dict_db()
+    try:
+        rows = db.execute("SELECT key, value FROM company_settings").fetchall()
+        return json_success({r["key"]: r["value"] for r in rows})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+@banksia_os_bp.route("/company-settings", methods=["POST"])
+def api_update_company_settings():
+    data = request.get_json()
+    if not data:
+        return json_error("No data")
+    db = get_dict_db()
+    try:
+        for key, value in data.items():
+            db.execute("INSERT INTO company_settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                       (key, value))
+        db.commit()
+        return json_success({"message":"Settings saved"})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 17. ENHANCED PROPERTIES — filtered/tagged
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/properties/enhanced")
+def api_properties_enhanced():
+    page = int_param(request.args.get("page"))
+    per_page = int_param(request.args.get("per_page"), 20)
+    search = request.args.get("search","").strip()
+    condition = request.args.get("condition","").strip()  # HMO/Residential
+    tag_filter = request.args.get("tag","").strip()
+
+    where_parts = ["1=1"]
+    params = []
+    if search:
+        like = f"%{search}%"
+        where_parts.append("(ref LIKE ? OR address_line_1 LIKE ? OR city LIKE ? OR postcode LIKE ?)")
+        params.extend([like]*4)
+    if condition:
+        where_parts.append("property_type=?")
+        params.append(condition)
+    if tag_filter:
+        where_parts.append("tags LIKE ?")
+        params.append(f"%{tag_filter}%")
+
+    where = " AND ".join(where_parts)
+    db = get_dict_db()
+    try:
+        total = db.execute(f"SELECT COUNT(*) AS cnt FROM properties WHERE {where}", params).fetchone()["cnt"]
+        props = db.execute(
+            f"SELECT * FROM properties WHERE {where} ORDER BY name ASC LIMIT ? OFFSET ?",
+            params + [per_page, (page-1)*per_page]
+        ).fetchall()
+        # Enrich with unit counts and owner info
+        for p in props:
+            total_u = db.execute("SELECT COUNT(*) AS cnt FROM units WHERE property_id=?", (p["id"],)).fetchone()["cnt"]
+            avail_u = db.execute("SELECT COUNT(*) AS cnt FROM units WHERE property_id=? AND unit_vacant=1", (p["id"],)).fetchone()["cnt"]
+            p["total_unit_count"] = total_u
+            p["available_units"] = avail_u
+            # Parse tags from comma-separated text
+            if p.get("tags"):
+                p["tags_list"] = [t.strip() for t in p["tags"].split(",") if t.strip()]
+            else:
+                p["tags_list"] = []
+        return json_success(props, total, page, per_page)
+    except Exception as e:
         return json_error(str(e), 500)
     finally:
         db.close()

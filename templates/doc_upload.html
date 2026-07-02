@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Banksia OS — Document Upload Portal</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,sans-serif;background:#000;color:#fff;min-height:100vh}
+.header{background:#111;border-bottom:1px solid #222;padding:20px 32px;display:flex;align-items:center;justify-content:space-between}
+.header h1{font-size:20px;font-weight:800}
+.header h1 span{color:#888}
+.header .sub{font-size:12px;color:#666;margin-top:2px}
+.content{max-width:900px;margin:0 auto;padding:40px 24px}
+
+.upload-zone{border:2px dashed #333;border-radius:12px;padding:60px 40px;text-align:center;cursor:pointer;transition:all .2s;background:#0a0a0a;margin-bottom:24px}
+.upload-zone:hover,.upload-zone.dragover{border-color:#fff;background:#111}
+.upload-zone .icon{font-size:48px;margin-bottom:16px;opacity:.5}
+.upload-zone h2{font-size:18px;font-weight:600;color:#fff;margin-bottom:8px}
+.upload-zone p{font-size:13px;color:#666}
+.upload-zone .btn{display:inline-block;background:#fff;color:#000;padding:10px 24px;border-radius:8px;font-size:13px;font-weight:600;border:none;cursor:pointer;margin-top:16px}
+.upload-zone .btn:hover{background:#e0e0e0}
+
+.queue{background:#111;border:1px solid #222;border-radius:10px;padding:20px;margin-bottom:24px;display:none}
+.queue.active{display:block}
+.queue h3{font-size:14px;font-weight:600;color:#fff;margin-bottom:12px}
+.queue .file-item{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid #222;font-size:13px;color:#ccc}
+.queue .file-item:last-child{border:none}
+.queue .file-item .name{flex:1}
+.queue .file-item .size{color:#666;font-size:12px}
+.queue .file-item .status{font-size:11px;padding:2px 8px;border-radius:4px}
+.queue .file-item .status.pending{color:#ffab00;background:rgba(255,171,0,.1)}
+.queue .file-item .status.uploading{color:#80d8ff;background:rgba(128,216,255,.1)}
+.queue .file-item .status.done{color:#00c853;background:rgba(0,200,83,.1)}
+.queue .file-item .status.error{color:#ff1744;background:rgba(255,23,68,.1)}
+.queue .progress-bar{height:4px;background:#222;border-radius:2px;margin-top:12px;overflow:hidden}
+.queue .progress-bar .fill{height:100%;background:#fff;border-radius:2px;transition:width .3s;width:0%}
+.queue .btn-upload-all{background:#fff;color:#000;border:none;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin-top:16px;width:100%}
+.queue .btn-upload-all:hover{background:#e0e0e0}
+.queue .btn-upload-all:disabled{opacity:.4;cursor:not-allowed}
+
+.info{background:#111;border:1px solid #222;border-radius:10px;padding:20px;margin-bottom:24px}
+.info h3{font-size:13px;font-weight:600;color:#fff;margin-bottom:12px}
+.info p{font-size:12px;color:#666;line-height:1.6}
+.info code{background:#000;padding:2px 6px;border-radius:3px;color:#ccc;font-size:11px}
+
+.status-msg{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:500;z-index:999;opacity:0;transform:translateY(10px);transition:all .25s;background:#00c853;color:#000}
+.status-msg.show{opacity:1;transform:translateY(0)}
+.status-msg.error{background:#ff1744;color:#fff}
+
+.match-preview{background:#0a0a0a;border:1px solid #333;border-radius:8px;padding:16px;margin-top:16px;display:none}
+.match-preview.active{display:block}
+.match-preview h4{font-size:12px;color:#666;margin-bottom:8px}
+.match-preview .match-row{display:flex;justify-content:space-between;font-size:12px;padding:4px 0;color:#888}
+</style>
+</head>
+<body>
+<div class="header">
+  <div><h1>Banksia <span>OS</span></h1><div class="sub">Document Upload Portal</div></div>
+  <div><a href="/banksia-os" style="color:#888;font-size:13px;text-decoration:none">← Back to Dashboard</a></div>
+</div>
+<div class="content">
+  <div class="upload-zone" id="dropzone">
+    <div class="icon">📄</div>
+    <h2>Drop documents here</h2>
+    <p>PDF, DOCX, JPG, PNG — up to 50MB each</p>
+    <button class="btn" onclick="document.getElementById('file-input').click()">Browse Files</button>
+    <input type="file" id="file-input" multiple accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.xls,.xlsx" style="display:none">
+  </div>
+
+  <div class="queue" id="queue">
+    <h3>Files to upload</h3>
+    <div id="file-list"></div>
+    <div class="progress-bar"><div class="fill" id="progress-fill"></div></div>
+    <div class="match-preview" id="match-preview">
+      <h4>Auto-matching preview (based on filenames)</h4>
+      <div id="match-results"></div>
+    </div>
+    <button class="btn-upload-all" id="btn-upload" onclick="startUpload()">Upload All Files</button>
+  </div>
+
+  <div class="info">
+    <h3>📋 How auto-allocation works</h3>
+    <p>Banksia OS will automatically match each document to the right tenancy or tenant by scanning the filename for:</p>
+    <p style="margin-top:8px">
+      • <strong>Tenancy references</strong> — e.g. <code>TE1578_agreement.pdf</code>, <code>Tenancy_918_AST.pdf</code><br>
+      • <strong>Tenant names</strong> — e.g. <code>Safoora_Kumbalakkuzhi_referencing.pdf</code><br>
+      • <strong>Property addresses</strong> — e.g. <code>32_Rectory_Square_EICR.pdf</code><br>
+      • <strong>Arthur-style exports</strong> — any filename pattern
+    </p>
+    <p style="margin-top:8px;color:#888">Unmatched files will be flagged for manual assignment from the dashboard.</p>
+  </div>
+</div>
+<div class="status-msg" id="status-msg"></div>
+
+<script>
+const API = '/api/banksia-os';
+let filesToUpload = [];
+
+// ── Drag & Drop ──
+const dz = document.getElementById('dropzone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+dz.addEventListener('drop', e => {
+  e.preventDefault();
+  dz.classList.remove('dragover');
+  addFiles(Array.from(e.dataTransfer.files));
+});
+document.getElementById('file-input').addEventListener('change', e => {
+  addFiles(Array.from(e.target.files));
+  e.target.value = '';
+});
+
+function addFiles(files) {
+  filesToUpload = filesToUpload.concat(files);
+  renderQueue();
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + 'B';
+  if (bytes < 1048576) return (bytes/1024).toFixed(1) + 'KB';
+  return (bytes/1048576).toFixed(1) + 'MB';
+}
+
+function renderQueue() {
+  const q = document.getElementById('queue');
+  const list = document.getElementById('file-list');
+  if (filesToUpload.length === 0) { q.classList.remove('active'); return; }
+  q.classList.add('active');
+  
+  let html = '';
+  const matched = [];
+  
+  filesToUpload.forEach((f, i) => {
+    html += `<div class="file-item">
+      <span class="name">${escHtml(f.name)}</span>
+      <span class="size">${formatSize(f.size)}</span>
+      <span class="status pending" id="status-${i}">Pending</span>
+    </div>`;
+  });
+  
+  list.innerHTML = html;
+  document.getElementById('btn-upload').disabled = false;
+  document.getElementById('progress-fill').style.width = '0%';
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function showStatus(msg, type='success') {
+  const t = document.getElementById('status-msg');
+  t.textContent = msg;
+  t.className = 'status-msg show' + (type === 'error' ? ' error' : '');
+  setTimeout(() => t.classList.remove('show'), 4000);
+}
+
+async function startUpload() {
+  const btn = document.getElementById('btn-upload');
+  btn.disabled = true;
+  btn.textContent = 'Uploading...';
+  
+  let success = 0;
+  let failed = 0;
+  
+  for (let i = 0; i < filesToUpload.length; i++) {
+    const file = filesToUpload[i];
+    const statusEl = document.getElementById(`status-${i}`);
+    statusEl.className = 'status uploading';
+    statusEl.textContent = 'Uploading...';
+    
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('category', 'general');
+    fd.append('related_to', '');
+    fd.append('related_id', '');
+    fd.append('notes', 'Bulk upload from Arthur export');
+    fd.append('auto_match', 'true');
+    
+    try {
+      const res = await fetch(API + '/documents/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (data.success) {
+        statusEl.className = 'status done';
+        statusEl.textContent = data.matched_to ? '✓ Matched: ' + data.matched_to : '✓ Uploaded';
+        success++;
+      } else {
+        throw new Error(data.error || 'Failed');
+      }
+    } catch(e) {
+      statusEl.className = 'status error';
+      statusEl.textContent = '✗ ' + (e.message || 'Error');
+      failed++;
+    }
+    
+    const pct = Math.round(((i + 1) / filesToUpload.length) * 100);
+    document.getElementById('progress-fill').style.width = pct + '%';
+  }
+  
+  btn.textContent = 'Done';
+  showStatus(`${success} uploaded, ${failed} failed`);
+  
+  if (failed === 0) {
+    setTimeout(() => {
+      filesToUpload = [];
+      renderQueue();
+      btn.textContent = 'Upload All Files';
+      btn.disabled = false;
+    }, 2000);
+  } else {
+    btn.textContent = 'Upload Remaining';
+    btn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>
