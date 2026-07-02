@@ -312,7 +312,12 @@ def banksia_os_page(subpath=""):
 @app.route("/banksia-os/<path:subpath>")
 @require_auth
 def banksia_os_dashboard(subpath=""):
-    return render_template("banksia_os.html", user=request.current_user)
+    # Parse the subpath: /properties/123 → page=properties, resource_id=123
+    parts = subpath.strip("/").split("/") if subpath else []
+    page = parts[0] if parts else ""
+    resource_id = parts[1] if len(parts) > 1 else ""
+    return render_template("banksia_os.html", user=request.current_user,
+                           initial_page=page, initial_resource_id=resource_id)
 
 # ── Document Upload Portal route ──
 @app.route("/upload-docs")

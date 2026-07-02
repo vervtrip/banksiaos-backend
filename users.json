@@ -2,7 +2,8 @@
   "Sami": {
     "password": "Newpassword1323!",
     "role": "super_admin",
-    "email": "sami@vervrooms.com"
+    "email": "sami@vervrooms.com",
+    "biography": "CEO at Verv Group"
   },
   "Norbert": {
     "password": "Norbertops123@",

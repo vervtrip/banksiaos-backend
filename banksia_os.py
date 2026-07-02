@@ -315,6 +315,27 @@ def api_property(prop_id):
             return json_error("Property not found", 404)
 
         units = db.execute("SELECT * FROM units WHERE property_id = ? ORDER BY unit_ref ASC", (prop_id,)).fetchall()
+        # Enrich units with active tenancy and tenant info
+        for u in units:
+            tn = db.execute("SELECT * FROM tenancies WHERE unit_id=? AND status IN ('Active','active','Periodic','periodic') ORDER BY id DESC LIMIT 1", (u["id"],)).fetchone()
+            if tn:
+                u["tenant_name"] = tn.get("main_tenant_name") or ""
+                u["tenancy_id"] = tn["id"]
+                u["tenancy_rent"] = tn.get("rent_amount", 0)
+                u["tenancy_status"] = tn.get("status", "")
+                # Count tenants on this tenancy
+                cnt = db.execute("SELECT COUNT(*) AS cnt FROM tenants WHERE tenancy_id=?", (tn["id"],)).fetchone()
+                u["occupant_count"] = cnt["cnt"] if cnt else 0
+                # Get first tenant ID for linking
+                first_t = db.execute("SELECT id FROM tenants WHERE tenancy_id=? LIMIT 1", (tn["id"],)).fetchone()
+                u["tenant_id"] = first_t["id"] if first_t else None
+            else:
+                u["tenant_name"] = ""
+                u["tenancy_id"] = None
+                u["tenancy_rent"] = 0
+                u["tenancy_status"] = ""
+                u["occupant_count"] = 0
+                u["tenant_id"] = None
         prop["units"] = units
         return json_success(prop)
     except Exception as e:
@@ -2660,6 +2681,55 @@ def api_post_message():
         db.close()
 
 
+@banksia_os_bp.route("/messages/<int:msg_id>")
+def api_get_message(msg_id):
+    db = get_dict_db()
+    try:
+        msg = db.execute("SELECT * FROM messages WHERE id=? AND (is_deleted IS NULL OR is_deleted=0)", (msg_id,)).fetchone()
+        if not msg: return json_error("Not found", 404)
+        return json_success(msg)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/messages/<int:msg_id>", methods=["PATCH"])
+def api_edit_message(msg_id):
+    data = request.get_json()
+    if not data or not data.get("body"):
+        return json_error("body required")
+    db = get_dict_db()
+    try:
+        msg = db.execute("SELECT * FROM messages WHERE id=? AND (is_deleted IS NULL OR is_deleted=0)", (msg_id,)).fetchone()
+        if not msg: return json_error("Not found", 404)
+        db.execute("UPDATE messages SET body=?, edited=1, edited_at=? WHERE id=?",
+                   (data["body"], datetime.now(timezone.utc).isoformat(), msg_id))
+        db.execute("UPDATE message_threads SET modified=? WHERE id=?",
+                   (datetime.now(timezone.utc).isoformat(), msg["thread_id"]))
+        db.commit()
+        return json_success({"message":"Updated"})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/messages/<int:msg_id>", methods=["DELETE"])
+def api_delete_message(msg_id):
+    db = get_dict_db()
+    try:
+        msg = db.execute("SELECT * FROM messages WHERE id=? AND (is_deleted IS NULL OR is_deleted=0)", (msg_id,)).fetchone()
+        if not msg: return json_error("Not found", 404)
+        db.execute("UPDATE messages SET body='[deleted]', is_deleted=1, edited=0 WHERE id=?", (msg_id,))
+        db.commit()
+        return json_success({"message":"Deleted"})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
 # ═══════════════════════════════════════════════
 # 15. INVOICES
 # ═══════════════════════════════════════════════
@@ -2798,6 +2868,65 @@ def api_properties_enhanced():
             else:
                 p["tags_list"] = []
         return json_success(props, total, page, per_page)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 18. INVOICE DETAIL / PAY / CANCEL
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/invoices/<int:invoice_id>")
+def api_invoice_detail(invoice_id):
+    db = get_dict_db()
+    try:
+        inv = db.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+        if not inv:
+            return json_error("Not found", 404)
+        if inv.get("tenancy_id"):
+            tn = db.execute("SELECT * FROM tenancies WHERE id=?", (inv["tenancy_id"],)).fetchone()
+            if tn:
+                inv["tenant_name"] = tn.get("main_tenant_name") or tn.get("tenant_name")
+                prop = db.execute("SELECT * FROM properties WHERE id=?", (tn.get("property_id"),)).fetchone()
+                if prop:
+                    inv["property_name"] = prop.get("name") or prop.get("ref") or prop.get("address_line_1")
+        return json_success(inv)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/invoices/<int:invoice_id>/pay", methods=["POST"])
+def api_pay_invoice(invoice_id):
+    db = get_dict_db()
+    try:
+        inv = db.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+        if not inv:
+            return json_error("Not found", 404)
+        from datetime import datetime, timezone
+        db.execute("UPDATE invoices SET status='paid', paid_date=? WHERE id=?",
+                   (datetime.now(timezone.utc).isoformat(), invoice_id))
+        db.commit()
+        return json_success({"message": "Invoice marked as paid"})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/invoices/<int:invoice_id>", methods=["DELETE"])
+def api_cancel_invoice(invoice_id):
+    db = get_dict_db()
+    try:
+        inv = db.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+        if not inv:
+            return json_error("Not found", 404)
+        db.execute("UPDATE invoices SET status='cancelled' WHERE id=?", (invoice_id,))
+        db.commit()
+        return json_success({"message": "Invoice cancelled"})
     except Exception as e:
         return json_error(str(e), 500)
     finally:

@@ -9,229 +9,226 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',-apple-system,sans-serif;background:#f1f5f9;color:#1e293b;min-height:100vh;display:flex;overflow-x:hidden;-webkit-font-smoothing:antialiased}
-a{color:#334155;text-decoration:none}
+body{font-family:'Inter',-apple-system,sans-serif;background:#000;color:#fff;min-height:100vh;display:flex;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+a{color:#fff;text-decoration:none}
 
-/* SIDEBAR */
-.sidebar{width:240px;background:#1e293b;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;transform:translateX(0);transition:transform .2s ease;border-right:1px solid rgba(255,255,255,.06)}
-.sidebar .brand{padding:20px 24px 16px;border-bottom:1px solid rgba(255,255,255,.06)}
+/* SIDEBAR — Uber black */
+.sidebar{width:240px;background:#111;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;transform:translateX(0);transition:transform .2s ease;border-right:1px solid #222}
+.sidebar .brand{padding:20px 24px 16px;border-bottom:1px solid #222}
 .sidebar .brand h1{font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.5px}
-.sidebar .brand .tagline{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:3px;margin-top:4px}
+.sidebar .brand .tagline{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:3px;margin-top:4px}
 .sidebar .nav{padding:8px 0;flex:1;overflow-y:auto}
-.sidebar .nav-item{display:flex;align-items:center;gap:12px;padding:11px 24px;color:#94a3b8;font-size:13px;font-weight:500;cursor:pointer;transition:all .12s;border-left:3px solid transparent}
-.sidebar .nav-item:hover{color:#fff;background:rgba(255,255,255,.06)}
-.sidebar .nav-item.active{color:#fff;background:rgba(255,255,255,.1);border-left-color:#fff}
+.sidebar .nav-item{display:flex;align-items:center;gap:12px;padding:11px 24px;color:#888;font-size:13px;font-weight:500;cursor:pointer;transition:all .12s;border-left:3px solid transparent}
+.sidebar .nav-item:hover{color:#fff;background:rgba(255,255,255,.04)}
+.sidebar .nav-item.active{color:#fff;background:rgba(255,255,255,.08);border-left-color:#fff}
 .sidebar .nav-item .icon{font-size:14px;width:20px;text-align:center;flex-shrink:0;opacity:.7}
 .sidebar .nav-item.active .icon{opacity:1}
-.sidebar .nav-item .badge{background:#fff;color:#1e293b;font-size:10px;padding:2px 7px;border-radius:8px;margin-left:auto;font-weight:600}
-.sidebar .user-section{padding:16px 24px;border-top:1px solid rgba(255,255,255,.06);font-size:12px;color:#64748b}
+.sidebar .nav-item .badge{background:#fff;color:#000;font-size:10px;padding:2px 7px;border-radius:8px;margin-left:auto;font-weight:600}
+.sidebar .user-section{padding:16px 24px;border-top:1px solid #222;font-size:12px;color:#666}
 .sidebar .user-section .name{color:#fff;font-weight:600;font-size:13px}
 
 /* MAIN */
-.main{margin-left:240px;flex:1;min-height:100vh;display:flex;flex-direction:column;background:#f1f5f9}
-.topbar{background:#fff;padding:16px 32px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e2e8f0;position:sticky;top:0;z-index:50;min-height:64px}
+.main{margin-left:240px;flex:1;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#111;padding:16px 32px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #222;position:sticky;top:0;z-index:50;min-height:64px}
 .topbar .left{display:flex;align-items:center;gap:16px}
-.topbar .hamburger{display:none;background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;padding:4px}
-.topbar .hamburger:hover{color:#1e293b}
-.topbar .page-title{font-size:18px;font-weight:700;color:#1e293b;letter-spacing:-0.3px}
-.topbar .page-subtitle{font-size:12px;color:#94a3b8;margin-top:2px}
+.topbar .hamburger{display:none;background:none;border:none;color:#888;font-size:20px;cursor:pointer;padding:4px}
+.topbar .hamburger:hover{color:#fff}
+.topbar .page-title{font-size:18px;font-weight:700;color:#fff;letter-spacing:-0.3px}
+.topbar .page-subtitle{font-size:12px;color:#666;margin-top:2px}
 .topbar .right{display:flex;align-items:center;gap:16px}
 .topbar .user-info{text-align:right}
-.topbar .user-info .name{font-size:13px;font-weight:600;color:#1e293b}
-.topbar .user-info .role{font-size:11px;color:#94a3b8}
-.topbar .date-display{font-size:12px;color:#64748b;padding:6px 12px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc}
+.topbar .user-info .name{font-size:13px;font-weight:600;color:#fff}
+.topbar .user-info .role{font-size:11px;color:#666}
+.topbar .date-display{font-size:12px;color:#666;padding:6px 12px;border:1px solid #222;border-radius:6px}
 .content{padding:32px;flex:1}
 
-/* KPI CARDS */
+/* KPI CARDS — clean black/white */
 .kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:28px}
-.kpi-card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;transition:all .15s;cursor:pointer;position:relative;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.04)}
-.kpi-card:hover{border-color:#cbd5e1;background:#fafafa}
-.kpi-card .label{font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:8px;font-weight:500}
-.kpi-card .value{font-size:28px;font-weight:700;color:#1e293b;letter-spacing:-0.5px;line-height:1.1}
-.kpi-card .sub{font-size:12px;color:#64748b;margin-top:6px}
-.kpi-card .value.green{color:#16a34a}
-.kpi-card .value.red{color:#dc2626}
-.kpi-card .value.amber{color:#d97706}
-.kpi-card .value.blue{color:#2563eb}
-.kpi-accent{position:absolute;top:0;left:0;width:4px;height:100%}
-.kpi-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px}
-.kpi-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.kpi-card{background:#111;border:1px solid #222;border-radius:10px;padding:20px;transition:all .15s;cursor:pointer}
+.kpi-card:hover{border-color:#444;background:#151515}
+.kpi-card .label{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:8px;font-weight:500}
+.kpi-card .value{font-size:28px;font-weight:700;color:#fff;letter-spacing:-0.5px;line-height:1.1}
+.kpi-card .sub{font-size:12px;color:#555;margin-top:6px}
+.kpi-card .value.green{color:#00c853}
+.kpi-card .value.red{color:#ff1744}
+.kpi-card .value.amber{color:#ffab00}
+.kpi-card .value.blue{color:#80d8ff}
 
-/* TABLES */
-.table-wrap{background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
-.table-toolbar{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #e2e8f0;gap:12px;flex-wrap:wrap}
+/* TABLES — minimal black/white */
+.table-wrap{background:#111;border:1px solid #222;border-radius:10px;overflow:hidden;margin-bottom:20px}
+.table-toolbar{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #222;gap:12px;flex-wrap:wrap}
 .table-toolbar .left{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .table-toolbar .right{display:flex;align-items:center;gap:10px}
-.table-toolbar .ttl{font-size:14px;font-weight:600;color:#1e293b}
-.table-toolbar .ttl-sub{font-size:12px;color:#94a3b8}
-input,select{padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#1e293b;font-size:13px;font-family:'Inter',sans-serif;outline:none}
-input:focus,select:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.1)}
-input::placeholder{color:#94a3b8}
-.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:500;font-family:'Inter',sans-serif;cursor:pointer;transition:all .12s;border:none;letter-spacing:0.2px}
-.btn-primary{background:#1e293b;color:#fff}
-.btn-primary:hover{background:#334155}
-.btn-success{background:#16a34a;color:#fff}
-.btn-success:hover{background:#15803d}
-.btn-danger{background:#dc2626;color:#fff}
-.btn-danger:hover{background:#b91c1c}
-.btn-ghost{background:transparent;color:#64748b;border:1px solid #e2e8f0}
-.btn-ghost:hover{background:#f1f5f9;color:#1e293b;border-color:#cbd5e1}
-.btn-amber{background:#d97706;color:#fff}
-.btn-amber:hover{background:#b45309}
+.table-toolbar .ttl{font-size:14px;font-weight:600;color:#fff}
+.table-toolbar .ttl-sub{font-size:12px;color:#666}
+input,select{padding:8px 12px;border-radius:6px;border:1px solid #333;background:#000;color:#fff;font-size:13px;font-family:'Inter',sans-serif;outline:none}
+input:focus,select:focus{border-color:#fff}
+input::placeholder{color:#555}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:6px;font-size:12px;font-weight:500;font-family:'Inter',sans-serif;cursor:pointer;transition:all .12s;border:none;letter-spacing:0.2px}
+.btn-primary{background:#fff;color:#000}
+.btn-primary:hover{background:#e0e0e0}
+.btn-success{background:#00c853;color:#000}
+.btn-success:hover{background:#00b34a}
+.btn-danger{background:#ff1744;color:#fff}
+.btn-danger:hover{background:#d50000}
+.btn-ghost{background:transparent;color:#888;border:1px solid #333}
+.btn-ghost:hover{background:rgba(255,255,255,.04);color:#fff;border-color:#555}
+.btn-amber{background:#ffab00;color:#000}
+.btn-amber:hover{background:#ff8f00}
 .btn-sm{padding:6px 12px;font-size:11px}
 table{width:100%;border-collapse:collapse}
-thead th{text-align:left;padding:10px 16px;font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid #e2e8f0;white-space:nowrap;cursor:pointer;user-select:none;background:#f8fafc}
-thead th:hover{color:#64748b}
-tbody td{padding:10px 16px;font-size:13px;border-bottom:1px solid #f1f5f9;vertical-align:middle;color:#475569}
+thead th{text-align:left;padding:10px 16px;font-size:10px;font-weight:600;color:#666;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid #222;white-space:nowrap;cursor:pointer;user-select:none}
+thead th:hover{color:#999}
+tbody td{padding:10px 16px;font-size:13px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle;color:#ccc}
 tbody tr{cursor:pointer;transition:background .1s}
-tbody tr:hover{background:#f8fafc}
+tbody tr:hover{background:rgba(255,255,255,.03)}
 tbody tr:last-child td{border-bottom:none}
-.pagination{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;font-size:12px;color:#94a3b8}
-.pagination .page-btn{padding:5px 10px;border-radius:4px;border:1px solid #e2e8f0;background:#fff;color:#64748b;cursor:pointer;font-size:11px;font-family:'Inter',sans-serif}
-.pagination .page-btn:disabled{opacity:.4;cursor:not-allowed}
-.pagination .page-btn:hover:not(:disabled){background:#f1f5f9}
+.pagination{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;font-size:12px;color:#666}
+.pagination .page-btn{padding:5px 10px;border-radius:4px;border:1px solid #333;background:#000;color:#ccc;cursor:pointer;font-size:11px;font-family:'Inter',sans-serif}
+.pagination .page-btn:disabled{opacity:.2;cursor:not-allowed}
+.pagination .page-btn:hover:not(:disabled){background:rgba(255,255,255,.06)}
 
 /* BADGES */
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;letter-spacing:0.3px}
-.badge-active{background:#f0fdf4;color:#16a34a}
-.badge-inactive{background:#f8fafc;color:#64748b}
-.badge-pending{background:#fffbeb;color:#d97706}
-.badge-vacant{background:#fef2f2;color:#dc2626}
-.badge-occupied{background:#f0fdf4;color:#16a34a}
-.badge-approved{background:#f0fdf4;color:#16a34a}
-.badge-rejected{background:rgba(220,38,38,.1);color:#dc2626}
-.badge-withdrawn{background:#f8fafc;color:#64748b}
-.badge-periodic{background:#eff6ff;color:#2563eb}
-.badge-new{background:#eff6ff;color:#2563eb}
+.badge-active{background:rgba(0,200,83,.12);color:#00c853}
+.badge-inactive{background:rgba(136,136,136,.12);color:#888}
+.badge-pending{background:rgba(255,171,0,.12);color:#ffab00}
+.badge-vacant{background:rgba(255,23,68,.12);color:#ff1744}
+.badge-occupied{background:rgba(0,200,83,.12);color:#00c853}
+.badge-approved{background:rgba(0,200,83,.12);color:#00c853}
+.badge-rejected{background:rgba(255,23,68,.12);color:#ff1744}
+.badge-withdrawn{background:rgba(136,136,136,.12);color:#666}
+.badge-periodic{background:rgba(128,216,255,.12);color:#80d8ff}
+.badge-new{background:rgba(128,216,255,.12);color:#80d8ff}
 
 /* DETAIL PANEL — slide from right */
-.detail-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(15,23,42,.5);z-index:200}
+.detail-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:200}
 .detail-overlay.open{display:block}
-.detail-panel{position:fixed;top:0;right:-620px;width:600px;max-width:100vw;bottom:0;background:#fff;border-left:1px solid #e2e8f0;z-index:201;transition:right .25s ease;overflow-y:auto}
+.detail-panel{position:fixed;top:0;right:-620px;width:600px;max-width:100vw;bottom:0;background:#111;border-left:1px solid #333;z-index:201;transition:right .25s ease;overflow-y:auto}
 .detail-panel.open{right:0}
-.detail-header{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid #e2e8f0;position:sticky;top:0;background:#fff;z-index:2}
-.detail-header h2{font-size:16px;font-weight:700;color:#1e293b}
-.detail-header .close-btn{background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;padding:4px 8px;border-radius:4px}
-.detail-header .close-btn:hover{color:#1e293b;background:#f1f5f9}
+.detail-header{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid #222;position:sticky;top:0;background:#111;z-index:2}
+.detail-header h2{font-size:16px;font-weight:700;color:#fff}
+.detail-header .close-btn{background:none;border:none;color:#666;font-size:20px;cursor:pointer;padding:4px 8px;border-radius:4px}
+.detail-header .close-btn:hover{color:#fff;background:rgba(255,255,255,.06)}
 .detail-body{padding:24px}
 .detail-section{margin-bottom:28px}
-.detail-section h3{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:12px}
+.detail-section h3{font-size:11px;font-weight:600;color:#666;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:12px}
 .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .detail-field{position:relative}
-.detail-field .label{font-size:10px;color:#94a3b8;margin-bottom:2px;text-transform:uppercase;letter-spacing:.5px}
-.detail-field .val{font-size:13px;color:#475569;word-break:break-word;padding:2px 0}
+.detail-field .label{font-size:10px;color:#666;margin-bottom:2px;text-transform:uppercase;letter-spacing:.5px}
+.detail-field .val{font-size:13px;color:#ccc;word-break:break-word;padding:2px 0}
 .detail-field .val.full{grid-column:1/-1}
-.detail-field .val a{color:#2563eb}
+.detail-field .val a{color:#80d8ff}
 .detail-field .val a:hover{text-decoration:underline}
-.detail-field input,.detail-field select{width:100%;padding:6px 8px;border-radius:6px;border:1px solid #e2e8f0;background:#fff;color:#1e293b;font-size:12px;font-family:'Inter',sans-serif;outline:none;margin-top:2px}
-.detail-field input:focus,.detail-field select:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.1)}
-.detail-field .edit-btn{position:absolute;top:0;right:0;background:none;border:none;color:#94a3b8;font-size:10px;cursor:pointer;padding:2px 4px;border-radius:3px}
-.detail-field .edit-btn:hover{color:#1e293b;background:#f1f5f9}
-.detail-field .save-btn{background:#1e293b;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;margin-top:4px}
-.detail-field .save-btn:hover{background:#334155}
-.detail-field .cancel-btn{background:transparent;color:#64748b;border:1px solid #e2e8f0;padding:4px 10px;border-radius:4px;font-size:10px;cursor:pointer;margin-top:4px;margin-left:4px}
-.detail-field .cancel-btn:hover{color:#1e293b;background:#f1f5f9}
+.detail-field input,.detail-field select{width:100%;padding:6px 8px;border-radius:4px;border:1px solid #333;background:#000;color:#fff;font-size:12px;font-family:'Inter',sans-serif;outline:none;margin-top:2px}
+.detail-field input:focus,.detail-field select:focus{border-color:#fff}
+.detail-field .edit-btn{position:absolute;top:0;right:0;background:none;border:none;color:#555;font-size:10px;cursor:pointer;padding:2px 4px;border-radius:3px}
+.detail-field .edit-btn:hover{color:#fff;background:rgba(255,255,255,.08)}
+.detail-field .save-btn{background:#fff;color:#000;border:none;padding:4px 10px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;margin-top:4px}
+.detail-field .save-btn:hover{background:#e0e0e0}
+.detail-field .cancel-btn{background:transparent;color:#888;border:1px solid #333;padding:4px 10px;border-radius:4px;font-size:10px;cursor:pointer;margin-top:4px;margin-left:4px}
+.detail-field .cancel-btn:hover{color:#fff}
 
 /* MODAL */
-.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(15,23,42,.6);z-index:300;align-items:center;justify-content:center}
+.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.7);z-index:300;align-items:center;justify-content:center}
 .modal-overlay.open{display:flex}
-.modal{background:#fff;border:1px solid #e2e8f0;border-radius:16px;width:520px;max-width:90vw;max-height:90vh;overflow-y:auto;padding:32px;box-shadow:0 20px 60px rgba(15,23,42,.15)}
-.modal h2{font-size:18px;font-weight:700;color:#1e293b;margin-bottom:4px}
-.modal .sub{font-size:13px;color:#64748b;margin-bottom:24px}
+.modal{background:#111;border:1px solid #333;border-radius:12px;width:520px;max-width:90vw;max-height:90vh;overflow-y:auto;padding:32px}
+.modal h2{font-size:18px;font-weight:700;color:#fff;margin-bottom:4px}
+.modal .sub{font-size:13px;color:#666;margin-bottom:24px}
 .modal .form-group{margin-bottom:16px}
-.modal .form-group label{display:block;font-size:11px;font-weight:500;color:#64748b;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
-.modal .form-group input,.modal .form-group select,.modal .form-group textarea{width:100%;padding:10px 12px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#1e293b;font-size:13px;font-family:'Inter',sans-serif;outline:none}
-.modal .form-group input:focus,.modal .form-group select:focus,.modal .form-group textarea:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.1)}
+.modal .form-group label{display:block;font-size:11px;font-weight:500;color:#888;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
+.modal .form-group input,.modal .form-group select,.modal .form-group textarea{width:100%;padding:10px 12px;border-radius:6px;border:1px solid #333;background:#000;color:#fff;font-size:13px;font-family:'Inter',sans-serif;outline:none}
+.modal .form-group input:focus,.modal .form-group select:focus,.modal .form-group textarea:focus{border-color:#fff}
 .modal .form-group textarea{resize:vertical;min-height:60px}
 .modal .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .modal .form-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:24px}
-.modal .btn-cancel{background:transparent;color:#64748b;border:1px solid #e2e8f0;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:500;font-family:'Inter',sans-serif;cursor:pointer}
-.modal .btn-cancel:hover{color:#1e293b;background:#f1f5f9}
-.modal .btn-submit{background:#1e293b;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;font-family:'Inter',sans-serif;cursor:pointer;border:none}
-.modal .btn-submit:hover{background:#334155}
+.modal .btn-cancel{background:transparent;color:#888;border:1px solid #333;padding:10px 20px;border-radius:6px;font-size:13px;font-weight:500;font-family:'Inter',sans-serif;cursor:pointer}
+.modal .btn-cancel:hover{color:#fff}
+.modal .btn-submit{background:#fff;color:#000;padding:10px 20px;border-radius:6px;font-size:13px;font-weight:600;font-family:'Inter',sans-serif;cursor:pointer;border:none}
+.modal .btn-submit:hover{background:#e0e0e0}
 
 /* PIPELINE — applicant kanban */
 .pipeline{display:flex;gap:10px;overflow-x:auto;padding-bottom:16px;min-height:50vh}
-.pipeline-col{flex:0 0 200px;min-width:180px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px;display:flex;flex-direction:column}
-.pipeline-col .col-header{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#64748b;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between}
-.pipeline-col .col-header .count{background:#f1f5f9;padding:2px 7px;border-radius:4px;font-size:10px;color:#64748b}
-.pipeline-card{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:6px;cursor:pointer;transition:all .12s}
-.pipeline-card:hover{border-color:#cbd5e1;box-shadow:0 1px 3px rgba(0,0,0,.06)}
-.pipeline-card .name{font-size:12px;font-weight:600;color:#1e293b}
-.pipeline-card .meta{font-size:10px;color:#64748b;margin-top:4px;display:flex;flex-direction:column;gap:2px}
+.pipeline-col{flex:0 0 200px;min-width:180px;background:#111;border:1px solid #222;border-radius:10px;padding:12px;display:flex;flex-direction:column}
+.pipeline-col .col-header{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#666;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #222;display:flex;justify-content:space-between}
+.pipeline-col .col-header .count{background:rgba(255,255,255,.06);padding:2px 7px;border-radius:4px;font-size:10px;color:#888}
+.pipeline-card{background:#000;border:1px solid #222;border-radius:6px;padding:10px 12px;margin-bottom:6px;cursor:pointer;transition:all .12s}
+.pipeline-card:hover{border-color:#444}
+.pipeline-card .name{font-size:12px;font-weight:600;color:#fff}
+.pipeline-card .meta{font-size:10px;color:#666;margin-top:4px;display:flex;flex-direction:column;gap:2px}
 
 /* SEARCH */
 .search-bar{display:flex;gap:8px;margin-bottom:24px}
-.search-bar input{flex:1;padding:12px 16px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#1e293b;font-size:15px;font-family:'Inter',sans-serif;outline:none}
-.search-bar input:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.1)}
+.search-bar input{flex:1;padding:12px 16px;border-radius:8px;border:1px solid #333;background:#111;color:#fff;font-size:15px;font-family:'Inter',sans-serif;outline:none}
+.search-bar input:focus{border-color:#fff}
 .search-group{margin-bottom:24px}
-.search-group h3{font-size:13px;font-weight:600;color:#64748b;margin-bottom:10px;text-transform:capitalize}
-.search-item{padding:10px 14px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:4px;cursor:pointer;transition:all .12s}
-.search-item:hover{border-color:#cbd5e1;box-shadow:0 1px 3px rgba(0,0,0,.04)}
-.search-item .title{font-size:13px;font-weight:600;color:#1e293b}
-.search-item .desc{font-size:11px;color:#64748b;margin-top:2px}
+.search-group h3{font-size:13px;font-weight:600;color:#888;margin-bottom:10px;text-transform:capitalize}
+.search-item{padding:10px 14px;background:#111;border:1px solid #222;border-radius:6px;margin-bottom:4px;cursor:pointer;transition:all .12s}
+.search-item:hover{border-color:#444}
+.search-item .title{font-size:13px;font-weight:600;color:#fff}
+.search-item .desc{font-size:11px;color:#666;margin-top:2px}
 
 /* FINANCE CARDS */
 .finance-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:24px}
-.finance-card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
-.finance-card .label{font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:6px}
-.finance-card .value{font-size:24px;font-weight:700;color:#1e293b}
-.finance-card .value.green{color:#16a34a}
-.finance-card .value.red{color:#dc2626}
+.finance-card{background:#111;border:1px solid #222;border-radius:10px;padding:20px}
+.finance-card .label{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:6px}
+.finance-card .value{font-size:24px;font-weight:700;color:#fff}
+.finance-card .value.green{color:#00c853}
+.finance-card .value.red{color:#ff1744}
 
 /* LOADING / EMPTY / TOAST */
-.loading{display:flex;align-items:center;justify-content:center;padding:60px 20px;color:#94a3b8;font-size:14px}
-.spinner{width:18px;height:18px;border:2px solid #e2e8f0;border-top-color:#6366f1;border-radius:50%;animation:spin .6s linear infinite;margin-right:10px}
+.loading{display:flex;align-items:center;justify-content:center;padding:60px 20px;color:#666;font-size:14px}
+.spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.08);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;margin-right:10px}
 @keyframes spin{to{transform:rotate(360deg)}}
-.empty-state{text-align:center;padding:60px 20px;color:#94a3b8}
+.empty-state{text-align:center;padding:60px 20px;color:#555}
 .empty-state .icon{font-size:40px;margin-bottom:12px;opacity:.4}
-.empty-state h3{color:#64748b;font-size:15px;margin-bottom:4px;font-weight:500}
+.empty-state h3{color:#888;font-size:15px;margin-bottom:4px;font-weight:500}
 .empty-state p{font-size:13px}
 
 .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:500;z-index:999;opacity:0;transform:translateY(10px);transition:all .25s;max-width:400px}
 .toast.show{opacity:1;transform:translateY(0)}
-.toast.success{background:#16a34a;color:#fff}
-.toast.error{background:#dc2626;color:#fff}
-.toast.info{background:#475569;color:#fff}
+.toast.success{background:#00c853;color:#000}
+.toast.error{background:#ff1744;color:#fff}
+.toast.info{background:#333;color:#fff}
 
 /* RENT COLLECTION */
 .rent-collection{display:flex;flex-direction:column;gap:8px}
-.rent-collection .rc-header{display:flex;justify-content:space-between;font-size:13px;color:#64748b}
-.rent-collection .rc-header .rc-collected{color:#16a34a;font-weight:600}
-.rent-collection .rc-header .rc-expected{color:#94a3b8}
-.rent-collection .rc-bar{height:8px;background:#f1f5f9;border-radius:4px;overflow:hidden}
-.rent-collection .rc-bar .rc-fill{height:100%;border-radius:4px;transition:width .6s ease;background:linear-gradient(90deg,#16a34a,#4ade80)}
-.rent-collection .rc-bar .rc-fill.warning{background:linear-gradient(90deg,#d97706,#fbbf24)}
-.rent-collection .rc-bar .rc-fill.danger{background:linear-gradient(90deg,#dc2626,#f87171)}
-.rent-collection .rc-stats{display:flex;justify-content:space-between;font-size:11px;color:#94a3b8;margin-top:2px}
-.rent-collection .rc-stats .rc-pct{font-weight:600;color:#475569}
+.rent-collection .rc-header{display:flex;justify-content:space-between;font-size:13px;color:#888}
+.rent-collection .rc-header .rc-collected{color:#00c853;font-weight:600}
+.rent-collection .rc-header .rc-expected{color:#666}
+.rent-collection .rc-bar{height:8px;background:#000;border-radius:4px;overflow:hidden}
+.rent-collection .rc-bar .rc-fill{height:100%;border-radius:4px;transition:width .6s ease;background:linear-gradient(90deg,#00c853,#69f0ae)}
+.rent-collection .rc-bar .rc-fill.warning{background:linear-gradient(90deg,#ffab00,#ffd740)}
+.rent-collection .rc-bar .rc-fill.danger{background:linear-gradient(90deg,#ff1744,#ff5252)}
+.rent-collection .rc-stats{display:flex;justify-content:space-between;font-size:11px;color:#666;margin-top:2px}
+.rent-collection .rc-stats .rc-pct{font-weight:600;color:#ccc}
 
 /* ALERTS */
-.alert-item{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid #f1f5f9;cursor:pointer;transition:all .12s}
+.alert-item{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;transition:all .12s}
 .alert-item:last-child{border-bottom:none}
-.alert-item:hover{background:#f8fafc}
+.alert-item:hover{background:rgba(255,255,255,.02)}
 .alert-item .alert-icon{width:30px;height:30px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
-.alert-item .alert-icon.warning{background:#fffbeb;color:#d97706}
-.alert-item .alert-icon.danger{background:#fef2f2;color:#dc2626}
-.alert-item .alert-icon.info{background:#eff6ff;color:#2563eb}
+.alert-item .alert-icon.warning{background:rgba(255,171,0,.12);color:#ffab00}
+.alert-item .alert-icon.danger{background:rgba(255,23,68,.12);color:#ff1744}
+.alert-item .alert-icon.info{background:rgba(128,216,255,.12);color:#80d8ff}
 .alert-item .alert-body{flex:1}
-.alert-item .alert-body .alert-title{font-size:13px;font-weight:600;color:#1e293b}
-.alert-item .alert-body .alert-desc{font-size:11px;color:#64748b;margin-top:2px}
-.alert-item .alert-action{font-size:11px;color:#2563eb;font-weight:500;white-space:nowrap}
+.alert-item .alert-body .alert-title{font-size:13px;font-weight:600;color:#fff}
+.alert-item .alert-body .alert-desc{font-size:11px;color:#666;margin-top:2px}
+.alert-item .alert-action{font-size:11px;color:#80d8ff;font-weight:500;white-space:nowrap}
 
 /* RENEWAL ITEMS */
-.renewal-item{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid #f1f5f9;cursor:pointer;transition:all .12s}
+.renewal-item{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;transition:all .12s}
 .renewal-item:last-child{border-bottom:none}
-.renewal-item:hover{background:#f8fafc}
+.renewal-item:hover{background:rgba(255,255,255,.02)}
 .renewal-item .renewal-info{flex:1}
-.renewal-item .renewal-info .renewal-tenant{font-size:13px;font-weight:600;color:#1e293b}
-.renewal-item .renewal-info .renewal-meta{font-size:11px;color:#64748b;margin-top:2px}
-.renewal-item .renewal-date{font-size:12px;color:#d97706;white-space:nowrap}
+.renewal-item .renewal-info .renewal-tenant{font-size:13px;font-weight:600;color:#fff}
+.renewal-item .renewal-info .renewal-meta{font-size:11px;color:#666;margin-top:2px}
+.renewal-item .renewal-date{font-size:12px;color:#ffab00;white-space:nowrap}
 
 /* RESPONSIVE — full mobile support */
 
 /* SIDEBAR OVERLAY for mobile — click to close */
-.sidebar-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(15,23,42,.5);z-index:99}
+.sidebar-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:99}
 
 /* MOBILE OVERFLOW FIX — no horizontal scroll, no zoom needed */
 @media(max-width:768px){
@@ -310,95 +307,65 @@ tbody tr:last-child td{border-bottom:none}
 /* SCROLLBAR */
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:2px}
-::-webkit-scrollbar-thumb:hover{background:#94a3b8}
-code{background:#f1f5f9;padding:2px 6px;border-radius:3px;font-size:12px;color:#e11d48}
+::-webkit-scrollbar-thumb{background:#333;border-radius:2px}
+::-webkit-scrollbar-thumb:hover{background:#555}
+code{background:#000;padding:2px 6px;border-radius:3px;font-size:12px;color:#ccc}
 
 /* TAG BADGES for property rows */
-.tag-badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600;background:#f8fafc;color:#64748b;margin:1px 2px 1px 0;letter-spacing:0.2px}
-.tag-hmo{background:#eff6ff;color:#2563eb}
-.tag-residential{background:#f0fdf4;color:#16a34a}
+.tag-badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600;background:rgba(255,255,255,.08);color:#aaa;margin:1px 2px 1px 0;letter-spacing:0.2px}
+.tag-hmo{background:rgba(128,216,255,.12);color:#80d8ff}
+.tag-residential{background:rgba(0,200,83,.12);color:#00c853}
 
 /* MESSAGES — three-column layout */
-.msg-layout{display:flex;gap:0;height:calc(100vh - 140px);background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden}
-.msg-threads{width:300px;flex-shrink:0;border-right:1px solid #e2e8f0;display:flex;flex-direction:column;background:#fff}
-.msg-threads .thread-search{padding:12px;border-bottom:1px solid #e2e8f0}
-.msg-threads .thread-search input{width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#1e293b;font-size:12px;font-family:'Inter',sans-serif;outline:none}
-.msg-threads .thread-search input:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.1)}
+.msg-layout{display:flex;gap:0;height:calc(100vh - 140px);background:#111;border:1px solid #222;border-radius:10px;overflow:hidden}
+.msg-threads{width:300px;flex-shrink:0;border-right:1px solid #222;display:flex;flex-direction:column;background:#0d0d0d}
+.msg-threads .thread-search{padding:12px;border-bottom:1px solid #222}
+.msg-threads .thread-search input{width:100%;padding:8px 12px;border-radius:6px;border:1px solid #333;background:#000;color:#fff;font-size:12px;font-family:'Inter',sans-serif;outline:none}
+.msg-threads .thread-search input:focus{border-color:#fff}
 .msg-thread-list{flex:1;overflow-y:auto}
-.msg-thread-item{padding:12px 14px;border-bottom:1px solid #f1f5f9;cursor:pointer;transition:all .1s}
-.msg-thread-item:hover{background:#f8fafc}
-.msg-thread-item.active{background:#f1f5f9;border-left:3px solid #6366f1}
-.msg-thread-item .thread-name{font-size:13px;font-weight:600;color:#1e293b}
-.msg-thread-item .thread-preview{font-size:11px;color:#94a3b8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.msg-thread-item .thread-meta{font-size:10px;color:#94a3b8;margin-top:4px;display:flex;gap:8px}
+.msg-thread-item{padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;transition:all .1s}
+.msg-thread-item:hover{background:rgba(255,255,255,.04)}
+.msg-thread-item.active{background:rgba(255,255,255,.08);border-left:3px solid #fff}
+.msg-thread-item .thread-name{font-size:13px;font-weight:600;color:#fff}
+.msg-thread-item .thread-preview{font-size:11px;color:#666;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.msg-thread-item .thread-meta{font-size:10px;color:#555;margin-top:4px;display:flex;gap:8px}
 .msg-conversation{flex:1;display:flex;flex-direction:column;min-width:0}
-.msg-conversation .msg-header{padding:12px 16px;border-bottom:1px solid #e2e8f0;font-size:13px;font-weight:600;color:#1e293b;background:#fff}
+.msg-conversation .msg-header{padding:12px 16px;border-bottom:1px solid #222;font-size:13px;font-weight:600;color:#fff}
 .msg-conversation .msg-body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px}
 .msg-bubble{max-width:80%;padding:10px 14px;border-radius:8px;font-size:13px;line-height:1.4}
-.msg-bubble.sent{align-self:flex-end;background:#6366f1;color:#fff;border-bottom-right-radius:2px}
-.msg-bubble.received{align-self:flex-start;background:#f1f5f9;border:1px solid #e2e8f0;color:#475569;border-bottom-left-radius:2px}
-.msg-bubble .msg-time{font-size:9px;color:#94a3b8;margin-top:4px;text-align:right}
-.msg-bubble.sent .msg-time{color:rgba(255,255,255,.7)}
-.msg-input-area{display:flex;gap:8px;padding:12px 16px;border-top:1px solid #e2e8f0;background:#fff}
-.msg-input-area input{flex:1;padding:10px 14px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#1e293b;font-size:13px;font-family:'Inter',sans-serif;outline:none}
-.msg-input-area input:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.1)}
-.msg-actions{display:none;position:absolute;top:-28px;right:4px;gap:2px;z-index:5}
-.msg-bubble:hover .msg-actions{display:flex}
-.msg-actions button{background:#fff;border:1px solid #e2e8f0;border-radius:4px;padding:2px 6px;font-size:10px;cursor:pointer;color:#64748b}
-.msg-actions button:hover{background:#f1f5f9;color:#1e293b}
-.msg-actions button.danger:hover{color:#ef4444}
-.msg-edited{font-size:9px;color:rgba(255,255,255,.5);margin-left:4px;font-style:italic}
-.msg-bubble.received .msg-edited{color:#94a3b8}
-.msg-deleted{padding:10px 14px;background:transparent;color:#94a3b8;font-size:11px;font-style:italic;text-align:center}
-.msg-input-area .attach-btn{background:none;border:1px solid #e2e8f0;border-radius:6px;padding:6px 8px;cursor:pointer;color:#94a3b8;font-size:14px}
-.msg-input-area .attach-btn:hover{background:#f1f5f9;color:#6366f1}
-.msg-toolbar{display:flex;gap:8px;padding:8px 12px;border-bottom:1px solid #e2e8f0;align-items:center}
-.msg-toolbar button{background:none;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:11px;color:#64748b;font-family:'Inter',sans-serif}
-.msg-toolbar button:hover{background:#f1f5f9;color:#1e293b}
-.msg-toolbar .spacer{flex:1}
-.msg-status-dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-left:4px}
-.msg-status-dot.sent{background:#94a3b8}
-.msg-status-dot.delivered{background:#6366f1}
-.msg-status-dot.read{background:#22c55e}
-.edit-textarea{width:100%;padding:8px;border:1px solid #6366f1;border-radius:6px;font-size:13px;font-family:'Inter',sans-serif;outline:none;resize:vertical;min-height:50px}
-.edit-actions{display:flex;gap:4px;margin-top:4px}
-.edit-actions button{padding:4px 10px;border-radius:4px;border:none;cursor:pointer;font-size:11px;font-family:'Inter',sans-serif}
-.edit-actions .save-btn{background:#6366f1;color:#fff}
-.edit-actions .cancel-btn{background:#f1f5f9;color:#64748b}
-.msg-task-panel{width:280px;flex-shrink:0;border-left:1px solid #e2e8f0;padding:16px;overflow-y:auto;background:#fff}
-.msg-task-panel .task-label{font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
-.msg-task-panel .task-value{font-size:13px;color:#475569;margin-bottom:12px}
+.msg-bubble.sent{align-self:flex-end;background:#fff;color:#000;border-bottom-right-radius:2px}
+.msg-bubble.received{align-self:flex-start;background:#000;border:1px solid #222;color:#ccc;border-bottom-left-radius:2px}
+.msg-bubble .msg-time{font-size:9px;color:#888;margin-top:4px;text-align:right}
+.msg-bubble.sent .msg-time{color:#666}
+.msg-input-area{display:flex;gap:8px;padding:12px 16px;border-top:1px solid #222;background:#0d0d0d}
+.msg-input-area input{flex:1;padding:10px 14px;border-radius:6px;border:1px solid #333;background:#000;color:#fff;font-size:13px;font-family:'Inter',sans-serif;outline:none}
+.msg-input-area input:focus{border-color:#fff}
+.msg-task-panel{width:280px;flex-shrink:0;border-left:1px solid #222;padding:16px;overflow-y:auto;background:#0d0d0d}
+.msg-task-panel .task-label{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.msg-task-panel .task-value{font-size:13px;color:#ccc;margin-bottom:12px}
 
 /* INVOICES */
 .invoice-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
-.invoice-kpi{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.04)}
-.invoice-kpi .inv-label{font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
-.invoice-kpi .inv-value{font-size:28px;font-weight:700;letter-spacing:-0.5px;color:#1e293b}
-.invoice-kpi .inv-value.green{color:#16a34a}
-.invoice-kpi .inv-value.red{color:#dc2626}
-.invoice-kpi .inv-value.amber{color:#d97706}
+.invoice-kpi{background:#111;border:1px solid #222;border-radius:10px;padding:20px;text-align:center}
+.invoice-kpi .inv-label{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+.invoice-kpi .inv-value{font-size:28px;font-weight:700;letter-spacing:-0.5px}
+.invoice-kpi .inv-value.green{color:#00c853}
+.invoice-kpi .inv-value.red{color:#ff1744}
+.invoice-kpi .inv-value.amber{color:#ffab00}
 
 /* SETTINGS FORM */
 .settings-form{max-width:640px}
 .settings-form .form-group{margin-bottom:18px}
-.settings-form .form-group label{display:block;font-size:11px;font-weight:500;color:#64748b;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
-.settings-form .form-group input,.settings-form .form-group textarea{width:100%;padding:10px 14px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#1e293b;font-size:13px;font-family:'Inter',sans-serif;outline:none}
-.settings-form .form-group input:focus,.settings-form .form-group textarea:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.1)}
+.settings-form .form-group label{display:block;font-size:11px;font-weight:500;color:#888;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
+.settings-form .form-group input,.settings-form .form-group textarea{width:100%;padding:10px 14px;border-radius:6px;border:1px solid #333;background:#000;color:#fff;font-size:13px;font-family:'Inter',sans-serif;outline:none}
+.settings-form .form-group input:focus,.settings-form .form-group textarea:focus{border-color:#fff}
 .settings-form .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .settings-form .form-actions{margin-top:24px;display:flex;gap:10px;justify-content:flex-end}
 
 /* OWNER TAGS in tables */
-.owner-tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:500;background:#f8fafc;color:#64748b;margin:1px}
-.owner-tag.active{background:#f0fdf4;color:#16a34a}
-.owner-tag.inactive{background:#f8fafc;color:#94a3b8}
-
-/* NOTIFICATION DROPDOWN */
-.notif-dropdown{background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 10px 40px rgba(15,23,42,.12)}
-.notif-dropdown .notif-header{border-bottom:1px solid #e2e8f0}
-.notif-dropdown .notif-header span{color:#1e293b}
-.notif-item{border-bottom:1px solid #f1f5f9}
-.notif-item:hover{background:#f8fafc}
+.owner-tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:500;background:rgba(255,255,255,.06);color:#aaa;margin:1px}
+.owner-tag.active{background:rgba(0,200,83,.1);color:#00c853}
+.owner-tag.inactive{background:rgba(136,136,136,.1);color:#666}
 </style>
 </head>
 <body>
@@ -484,9 +451,9 @@ code{background:#f1f5f9;padding:2px 6px;border-radius:3px;font-size:12px;color:#
         <span style="font-size:16px">🔔</span>
         <span id="notif-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:#ff1744;color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;align-items:center;justify-content:center;padding:0 4px">0</span>
       </div>
-      <div class="notif-dropdown" id="notif-dropdown" style="display:none;position:absolute;top:100%;right:0;width:360px;max-height:400px;overflow-y:auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;z-index:999;box-shadow:0 10px 40px rgba(15,23,42,.12);margin-top:4px">
-        <div class="notif-header" style="padding:14px 16px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center">
-          <span style="font-size:13px;font-weight:600;color:#1e293b">Notifications</span>
+      <div class="notif-dropdown" id="notif-dropdown" style="display:none;position:absolute;top:100%;right:0;width:360px;max-height:400px;overflow-y:auto;background:#111;border:1px solid #333;border-radius:10px;z-index:999;box-shadow:0 10px 40px rgba(0,0,0,.5);margin-top:4px">
+        <div style="padding:14px 16px;border-bottom:1px solid #222;display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:13px;font-weight:600;color:#fff">Notifications</span>
           <button class="btn btn-ghost btn-sm" onclick="markAllRead()">Mark all read</button>
         </div>
         <div id="notif-list"><div style="padding:20px;text-align:center;color:#555;font-size:13px">Loading...</div></div>
@@ -834,7 +801,7 @@ async function postComment(entityType, entityId) {
   }
 }
 function linkify(text) {
-  return text.replace(/@(\w+)/g, '<span style="color:#2563eb;font-weight:600">@$1</span>');
+  return text.replace(/@(\w+)/g, '<span style="color:#80d8ff;font-weight:600">@$1</span>');
 }
 
 // Start notification polling after DOM loaded
@@ -905,151 +872,109 @@ async function renderDashboard() {
     const hasAlerts = (d.total_arrears > 0) || (pendingApps > 0) || (d.upcoming_move_outs_count > 0);
 
     el.innerHTML = `
-      <!-- KPI ROW -->
       <div class="kpi-grid">
         <div class="kpi-card" onclick="navigate('properties')">
-          <div class="kpi-accent" style="background:#16a34a"></div>
-          <div class="kpi-top"><span class="label">Properties</span><span class="kpi-icon" style="background:#f0fdf4;color:#16a34a">◧</span></div>
+          <div class="label">Properties</div>
           <div class="value">${d.total_properties||0}</div>
           <div class="sub">Total portfolio</div>
         </div>
         <div class="kpi-card" onclick="navigate('units')">
-          <div class="kpi-accent" style="background:#2563eb"></div>
-          <div class="kpi-top"><span class="label">Units</span><span class="kpi-icon" style="background:#eff6ff;color:#2563eb">▣</span></div>
+          <div class="label">Units</div>
           <div class="value">${d.total_units||0}</div>
           <div class="sub">${d.occupied_units||0} occupied · ${d.vacant_units||0} vacant</div>
         </div>
         <div class="kpi-card" onclick="navigate('tenancies')">
-          <div class="kpi-accent" style="background:#16a34a"></div>
-          <div class="kpi-top"><span class="label">Active tenancies</span><span class="kpi-icon" style="background:#f0fdf4;color:#16a34a">≡</span></div>
+          <div class="label">Active tenancies</div>
           <div class="value green">${d.active_tenancies||0}</div>
           <div class="sub">Of ${d.total_tenancies||0} total</div>
         </div>
         <div class="kpi-card" onclick="navigate('units')">
-          <div class="kpi-accent" style="background:${(d.unit_occupancy_rate||0)>=80?'#16a34a':'#d97706'}"></div>
-          <div class="kpi-top"><span class="label">Occupancy rate</span><span class="kpi-icon" style="background:#f0fdf4;color:#16a34a">◉</span></div>
-          <div class="value" style="color:${(d.unit_occupancy_rate||0)>=80?'#16a34a':'#d97706'}">${fmtPct(d.unit_occupancy_rate)}</div>
+          <div class="label">Occupancy rate</div>
+          <div class="value" style="color:${(d.unit_occupancy_rate||0)>=80?'#00c853':'#ffab00'}">${fmtPct(d.unit_occupancy_rate)}</div>
           <div class="sub">${d.occupied_units||0}/${d.total_units||0} units filled</div>
         </div>
         <div class="kpi-card" onclick="navigate('tenants')">
-          <div class="kpi-accent" style="background:#6366f1"></div>
-          <div class="kpi-top"><span class="label">Tenants</span><span class="kpi-icon" style="background:#eef2ff;color:#6366f1">●</span></div>
+          <div class="label">Tenants</div>
           <div class="value">${d.total_tenants||0}</div>
           <div class="sub">Registered occupants</div>
         </div>
         <div class="kpi-card" onclick="navigate('applicants')">
-          <div class="kpi-accent" style="background:#2563eb"></div>
-          <div class="kpi-top"><span class="label">Applicants</span><span class="kpi-icon" style="background:#eff6ff;color:#2563eb">○</span></div>
-          <div class="value blue">${pendingApps}</div>
-          <div class="sub">${d.total_applicants||0} total applicants</div>
+          <div class="label">Applicants</div>
+          <div class="value">${d.total_applicants||0}</div>
+          <div class="sub">${pendingApps} pending</div>
         </div>
         <div class="kpi-card" onclick="navigate('finance')">
-          <div class="kpi-accent" style="background:#16a34a"></div>
-          <div class="kpi-top"><span class="label">Monthly rent roll</span><span class="kpi-icon" style="background:#f0fdf4;color:#16a34a">£</span></div>
+          <div class="label">Monthly rent roll</div>
           <div class="value green">${fmtMoney(d.monthly_rent_income||d.monthly_rent_roll)}</div>
           <div class="sub">Gross monthly income</div>
         </div>
         <div class="kpi-card" onclick="navigate('finance')">
-          <div class="kpi-accent" style="background:#dc2626"></div>
-          <div class="kpi-top"><span class="label">Arrears</span><span class="kpi-icon" style="background:#fef2f2;color:#dc2626">⚠</span></div>
-          <div class="value" style="color:#dc2626">${fmtMoney(d.total_arrears)}</div>
+          <div class="label">Arrears</div>
+          <div class="value" style="color:#ff1744">${fmtMoney(d.total_arrears)}</div>
           <div class="sub">Outstanding</div>
         </div>
         <div class="kpi-card" onclick="navigate('finance')">
-          <div class="kpi-accent" style="background:#6366f1"></div>
-          <div class="kpi-top"><span class="label">Deposits held</span><span class="kpi-icon" style="background:#eef2ff;color:#6366f1">◈</span></div>
+          <div class="label">Deposits held</div>
           <div class="value">${fmtMoney(d.total_deposits_held)}</div>
           <div class="sub">Active tenancies</div>
         </div>
-        <div class="kpi-card" onclick="navigate('tenancies','move-in')">
-          <div class="kpi-accent" style="background:#16a34a"></div>
-          <div class="kpi-top"><span class="label">Moving in (this month)</span><span class="kpi-icon" style="background:#f0fdf4;color:#16a34a">↓</span></div>
+        <div class="kpi-card" onclick="navigate('tenancies')">
+          <div class="label">Moving in (this month)</div>
           <div class="value green">${d.recent_arrivals_count||0}</div>
           <div class="sub">Expected arrivals</div>
         </div>
-        <div class="kpi-card" onclick="navigate('tenancies','move-out')">
-          <div class="kpi-accent" style="background:#d97706"></div>
-          <div class="kpi-top"><span class="label">Moving out (this month)</span><span class="kpi-icon" style="background:#fffbeb;color:#d97706">↑</span></div>
-          <div class="value" style="color:#d97706">${d.upcoming_move_outs_count||0}</div>
+        <div class="kpi-card" onclick="navigate('tenancies')">
+          <div class="label">Moving out (this month)</div>
+          <div class="value" style="color:#ffab00">${d.upcoming_move_outs_count||0}</div>
           <div class="sub">Expected departures</div>
         </div>
       </div>
       ${d.leading_property?`<div class="kpi-grid" style="margin-top:-16px"><div class="kpi-card" style="grid-column:1/-1"><div class="label">Top property</div><div class="value">${escHtml(d.leading_property.name)}</div><div class="sub">${fmtMoney(d.leading_property.total_rent)}/mo · highest rental income</div></div></div>`:''}
-      <!-- Two-column: Performance + Rent Collection -->
-      <div class="dash-two-col" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-        <div class="table-wrap" style="margin-bottom:0">
-          <div class="table-toolbar"><span class="ttl">Performance Overview</span><span class="ttl-sub">Key metrics</span></div>
-          <div style="padding:20px">
-            <div style="display:flex;justify-content:center;margin-bottom:16px">
-              <svg width="120" height="120" viewBox="0 0 120 120">
-                <circle cx="60" cy="60" r="50" fill="none" stroke="#e2e8f0" stroke-width="8"/>
-                <circle cx="60" cy="60" r="50" fill="none" stroke="#16a34a" stroke-width="8" stroke-dasharray="${2*Math.PI*50}" stroke-dashoffset="${2*Math.PI*50*(1-rentPct/100)}" transform="rotate(-90 60 60)" stroke-linecap="round"/>
-                <text x="60" y="60" text-anchor="middle" dominant-baseline="middle" font-size="18" font-weight="700" fill="#1e293b">${rentPct}%</text>
-              </svg>
+      <!-- Rent collection -->
+      <div class="table-wrap" style="margin-bottom:16px">
+        <div class="table-toolbar"><span class="ttl">Rent collection</span><span class="ttl-sub">This month</span></div>
+        <div style="padding:20px">
+          <div class="rent-collection">
+            <div class="rc-header">
+              <span class="rc-collected">Collected: ${fmtMoney(rentCollected)}</span>
+              <span class="rc-expected">Expected: ${fmtMoney(rentExpected)}</span>
             </div>
-            <div style="display:flex;justify-content:space-around;text-align:center">
-              <div><div style="font-size:20px;font-weight:700;color:#1e293b">${d.occupied_units||0}</div><div style="font-size:10px;color:#94a3b8">Occupied</div></div>
-              <div><div style="font-size:20px;font-weight:700;color:#1e293b">${d.vacant_units||0}</div><div style="font-size:10px;color:#94a3b8">Vacant</div></div>
-              <div><div style="font-size:20px;font-weight:700;color:#1e293b">${d.total_properties||0}</div><div style="font-size:10px;color:#94a3b8">Properties</div></div>
-            </div>
-          </div>
-        </div>
-        <div class="table-wrap" style="margin-bottom:0">
-          <div class="table-toolbar"><span class="ttl">Rent Collection</span><span class="ttl-sub">This month</span></div>
-          <div style="padding:20px">
-            <div class="rent-collection">
-              <div class="rc-header">
-                <span class="rc-collected">Collected: ${fmtMoney(rentCollected)}</span>
-                <span class="rc-expected">Expected: ${fmtMoney(rentExpected)}</span>
-              </div>
-              <div class="rc-bar"><div class="rc-fill ${rentPct>=90?'':rentPct>=70?'warning':'danger'}" style="width:${rentPct}%"></div></div>
-              <div class="rc-stats">
-                <span class="rc-pct">${rentPct}% collected</span>
-                <span>${fmtMoney(Math.max(rentExpected-rentCollected,0))} outstanding</span>
-              </div>
+            <div class="rc-bar"><div class="rc-fill ${rentPct>=90?'':rentPct>=70?'warning':'danger'}" style="width:${rentPct}%"></div></div>
+            <div class="rc-stats">
+              <span class="rc-pct">${rentPct}% collected</span>
+              <span>${fmtMoney(Math.max(rentExpected-rentCollected,0))} outstanding</span>
             </div>
           </div>
         </div>
       </div>
-      <!-- Two-column: Tasks & Alerts + Tenancies Ending Soon -->
+      <!-- Two-column: Ending soon + Moving in -->
       <div class="dash-two-col" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
         <div class="table-wrap" style="margin-bottom:0">
-          <div class="table-toolbar"><span class="ttl">Tasks & Alerts</span></div>
-          <div id="alerts-list">
-            ${hasAlerts?`<div class="loading" style="padding:24px"><div class="spinner"></div></div>`:`<div class="empty-state" style="padding:24px"><p>All clear — no action needed</p></div>`}
-          </div>
-        </div>
-        <div class="table-wrap" style="margin-bottom:0">
-          <div class="table-toolbar"><span class="ttl">Tenancies Ending Soon</span><span class="ttl-sub">Next 60 days</span></div>
+          <div class="table-toolbar"><span class="ttl">Ending soon</span><span class="ttl-sub">Next 60 days</span></div>
           <div id="ending-soon-list"><div class="loading" style="padding:24px"><div class="spinner"></div></div></div>
         </div>
-      </div>
-      <!-- Two-column: Schedule + Recent Applicants -->
-      <div class="dash-two-col" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
         <div class="table-wrap" style="margin-bottom:0">
-          <div class="table-toolbar"><span class="ttl">Upcoming Schedule</span><span class="ttl-sub">Moving in this month</span></div>
+          <div class="table-toolbar"><span class="ttl">Moving in</span><span class="ttl-sub">This month</span></div>
           <div id="moving-in-list"><div class="loading" style="padding:24px"><div class="spinner"></div></div></div>
         </div>
-        <div class="table-wrap" style="margin-bottom:0">
-          <div class="table-toolbar"><span class="ttl">Recent Applicants</span><span class="ttl-sub">Awaiting action</span></div>
-          <div id="recent-applicants-list"><div class="loading" style="padding:24px"><div class="spinner"></div></div></div>
-        </div>
       </div>
-      <!-- Quick Links -->
+      <!-- Alerts -->
+      <!-- Compliance Status -->
       <div class="table-wrap" style="margin-bottom:16px">
-        <div class="table-toolbar"><span class="ttl">Quick Links</span></div>
-        <div style="padding:16px 20px;display:flex;gap:10px;flex-wrap:wrap">
-          <button class="btn btn-primary btn-sm" onclick="showNewApplicantForm()">+ Add Applicant</button>
-          <button class="btn btn-primary btn-sm" onclick="showNewTenancyForm()">+ New Tenancy</button>
-          <button class="btn btn-success btn-sm" onclick="navigate('finance')">Record Payment</button>
-          <button class="btn btn-ghost btn-sm" onclick="showUploadDocumentForm()">Upload Doc</button>
-          <button class="btn btn-ghost btn-sm" onclick="navigate('messages')">Messages</button>
-        </div>
+        <div class="table-toolbar"><span class="ttl">Compliance & Certificates</span><span class="ttl-sub">Missing or expired</span></div>
+        <div id="compliance-list"><div class="loading" style="padding:20px"><div class="spinner"></div></div></div>
       </div>
-      <!-- Recent Activity -->
-      <div class="table-wrap">
-        <div class="table-toolbar"><span class="ttl">Recent Activity</span><span class="ttl-sub">Latest updates & comments</span></div>
+      <!-- Messages / Recent Updates -->
+      <div class="table-wrap" style="margin-bottom:16px">
+        <div class="table-toolbar"><span class="ttl">Recent Updates</span><span class="ttl-sub">Latest comments & notes</span></div>
         <div id="recent-updates-list"><div class="loading" style="padding:20px"><div class="spinner"></div></div></div>
+      </div>
+      <!-- Alerts -->
+      <div class="table-wrap">
+        <div class="table-toolbar"><span class="ttl">Alerts</span></div>
+        <div id="alerts-list">
+          ${hasAlerts?`<div class="loading" style="padding:24px"><div class="spinner"></div></div>`:`<div class="empty-state" style="padding:24px"><p>All clear — no action needed</p></div>`}
+        </div>
       </div>
     `;
     // Load ending soon
@@ -1074,22 +999,6 @@ async function renderDashboard() {
       }
       document.getElementById('moving-in-list').innerHTML = html;
     }).catch(() => document.getElementById('moving-in-list').innerHTML = '<div class="empty-state" style="padding:24px"><p>Could not load</p></div>');
-    // Load recent applicants (latest 5 pending)
-    api('/applicants?per_page=5&status=pending').then(r => {
-      const items = r.data || [];
-      const ra = document.getElementById('recent-applicants-list');
-      if (!ra) return;
-      if (items.length===0) { ra.innerHTML = '<div class="empty-state" style="padding:24px"><p>No pending applicants</p></div>'; return; }
-      let html = '<table><thead><tr><th>Name</th><th>Property</th><th>Status</th></tr></thead><tbody>';
-      items.forEach(a => {
-        html += `<tr onclick="showApplicant(${a.id})"><td>${escHtml((a.first_name||'')+' '+(a.last_name||''))}</td><td>${escHtml(a.property_name||a.property_interest||'—')}</td><td>${statusBadge(a.status)}</td></tr>`;
-      });
-      html += '</tbody></table>';
-      ra.innerHTML = html;
-    }).catch(() => {
-      const ra = document.getElementById('recent-applicants-list');
-      if (ra) ra.innerHTML = '<div class="empty-state" style="padding:24px"><p>Could not load</p></div>';
-    });
     // Load compliance
     api('/properties/compliance').then(r => {
       const items = r.data || [];
@@ -1150,7 +1059,7 @@ async function renderProperties() {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading properties...</div>';
   try {
     const {page,perPage,search,conditionFilter} = propsState;
-    let url = `/properties/enhanced?page=${page}&per_page=${perPage}&search=${encodeURIComponent(search)}`;
+    let url = `/api/banksia-os/properties/enhanced?page=${page}&per_page=${perPage}&search=${encodeURIComponent(search)}`;
     if (conditionFilter && conditionFilter.length > 0) url += `&conditions=${conditionFilter.join(',')}`;
     const res = await api(url);
     propsState.total = res.total;
@@ -1166,7 +1075,7 @@ async function renderProperties() {
       html += '<table><thead><tr><th>Ref</th><th>Property Name</th><th>Type</th><th>Address</th><th>City</th><th>Owner</th><th>Condition</th><th>Units</th></tr></thead><tbody>';
       items.forEach(p => {
         const typeLabel = p.property_type === 'multi' ? 'Multi-unit' : (p.property_type === 'single' ? 'Single Property' : escHtml(p.property_type||p.name||'—'));
-        const tags = (p.tags_list || []).map(t => `<span class="tag-badge">${escHtml(t)}</span>`).join('');
+        const tags = (p.tags || []).map(t => `<span class="tag-badge">${escHtml(t)}</span>`).join('');
         const unitsStr = `${p.occupied_units||0} of ${p.total_units||0} units`;
         const conditionStr = p.condition ? `<span class="tag-badge tag-${(p.condition||'').toLowerCase()}">${escHtml(p.condition)}</span>` : '—';
         html += `<tr onclick="showProperty(${p.id})"><td>${escHtml(p.ref||'—')}</td><td><strong>${escHtml(p.name||p.ref||'—')}</strong>${tags?'<br>'+tags:''}</td><td>${typeLabel}</td><td>${escHtml(p.address_line_1||'')}</td><td>${escHtml(p.city||'')}</td><td>${escHtml(p.owner_name||p.property_owner_name||'—')}</td><td>${conditionStr}</td><td>${unitsStr}</td></tr>`;
@@ -1230,70 +1139,40 @@ async function showProperty(id) {
   try {
     const res = await api(`/properties/${id}`);
     const p = res.data;
-    // Use ref/address for display name if name is generic 'multi'
-    const displayName = (p.name && p.name !== 'multi') ? p.name : (p.ref || p.address_line_1 || 'Property');
     let html = `<div class="detail-section"><h3>Property Details</h3><div class="detail-grid">`;
-    html += makeEditable('properties',id,'ref','Ref',p.ref||'','text');
-    html += makeEditable('properties',id,'name','Name',displayName,'text');
-    const addrFields = [
-      ['address_line_1','Address Line 1','text'],['city','City','text'],
-      ['county','County','text'],['postcode','Postcode','text'],
-      ['country','Country','text'],['property_type','Type','text'],
-      ['total_units','Total Units','number'],['bedrooms','Bedrooms','number'],
-      ['bathrooms','Bathrooms','number'],['council_tax_band','Council Tax Band','text'],
-      ['council_account_no','Council Account No','text'],
-      ['property_owner_name','Owner','text'],['features','Features','text']
+    const fields = [
+      ['Ref','ref','text'],['Name','name','text'],['Address Line 1','address_line_1','text'],
+      ['City','city','text'],['County','county','text'],['Postcode','postcode','text'],
+      ['Country','country','text'],['Type','property_type','text'],['Total Units','total_units','number'],
+      ['Bedrooms','bedrooms','number'],['Bathrooms','bathrooms','number'],
+      ['Council Tax Band','council_tax_band','text'],['Council Account No','council_account_no','text'],
+      ['Owner','property_owner_name','text'],['Features','features','text'],['Notes','notes','text']
     ];
-    addrFields.forEach(([f,l,t]) => {
+    fields.forEach(([l,f,t]) => {
       const v = p[f]; if (v!=null && v!=='') html += makeEditable('properties',id,f,l,v,t);
     });
     html += '</div></div>';
-    // Notes section - parse JSON notes array
-    html += '<div class="detail-section"><h3>Notes</h3><div style="margin-bottom:10px">';
-    try {
-      const notesArr = p.notes ? JSON.parse(p.notes) : [];
-      if (notesArr.length === 0) {
-        html += '<p style="color:#94a3b8;font-size:13px">No notes yet.</p>';
-      } else {
-        notesArr.forEach(n => {
-          const author = n.author || n.tags?.join(', ') || 'Unknown';
-          const date = n.date || '';
-          html += `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;margin-bottom:8px">
-            <div style="font-size:12px;color:#64748b;margin-bottom:4px">${escHtml(author)}${date ? ' · ' + fmtDate(date) : ''}</div>
-            <div style="font-size:13px;line-height:1.5;color:#1e293b">${escHtml(n.content||'')}</div>
-          </div>`;
-        });
-      }
-    } catch(e) {
-      // notes is a plain string
-      html += `<p style="font-size:13px;color:#475569">${escHtml(p.notes||'')}</p>`;
-    }
-    html += `<div style="display:flex;gap:8px;margin-top:8px">
-      <input id="note-input-${id}" placeholder="Add a note..." style="flex:1;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px">
-      <button class="btn btn-primary btn-sm" onclick="addPropertyNote(${id})">Add Note</button>
-    </div></div>`;
-    // Units table
+    // Units
     if (p.units && p.units.length > 0) {
-      html += `<div class="detail-section"><h3>Units / Rooms (${p.units.length})</h3><table><thead><tr>
-        <th>Ref</th><th>Tenant</th><th>Rent</th><th>Status</th><th>Occupants</th>
-      </tr></thead><tbody>`;
+      html += `<div class="detail-section"><h3>Units / Rooms (${p.units.length})</h3><table><thead><tr><th>Ref</th><th>Type</th><th>Furnished</th><th>Beds</th><th>Rent</th><th>Status</th></tr></thead><tbody>`;
       p.units.forEach(u => {
-        const isLet = u.tenancy_status && (u.tenancy_status.toLowerCase() === 'active' || u.tenancy_status.toLowerCase() === 'periodic');
-        const statusText = isLet ? 'Let' : (u.unit_status || 'Vacant');
-        const statusClass = isLet ? 'badge-occupied' : (u.unit_vacant ? 'badge-vacant' : 'badge-pending');
-        const tenantLink = u.tenant_name ? `<a href="#" onclick="event.preventDefault();closeDetail();propsState.page=1;renderProperties();setTimeout(()=>navigate('tenants',${u.tenant_id}),100)" style="color:#2563eb;text-decoration:none;font-weight:500">${escHtml(u.tenant_name)}</a>` : '—';
-        html += `<tr>
-          <td><strong>${escHtml(u.unit_ref||'—')}</strong></td>
-          <td>${tenantLink}</td>
-          <td style="font-weight:600">${u.tenancy_rent > 0 ? fmtMoney(u.tenancy_rent) : (u.market_rent > 0 ? fmtMoney(u.market_rent) : '—')}</td>
-          <td><span class="badge ${statusClass}">${statusText}</span></td>
-          <td>${u.occupant_count || '—'}</td>
-        </tr>`;
+        html += `<tr onclick="closeDetail();propsState.page=1;renderProperties();setTimeout(()=>showUnit(${u.id}),100)"><td>${escHtml(u.unit_ref||'—')}</td><td>${escHtml(u.unit_type||'—')}</td><td>${escHtml(u.furnished||'—')}</td><td>${u.bedrooms||'—'}</td><td>${fmtMoney(u.market_rent)}</td><td>${statusBadge(u.unit_status)}</td></tr>`;
       });
+      // Fixtures & fittings summary
+      const hasFixtures = p.units.some(u => u.features || u.short_description);
+      if (hasFixtures) {
+        html += '<tr style="background:rgba(255,255,255,.02)"><td colspan="6" style="padding:10px 16px;font-size:11px;color:#888">';
+        p.units.forEach(u => {
+          if (u.features || u.short_description) {
+            html += `<div style="margin-bottom:4px"><strong style="color:#ccc">${escHtml(u.unit_ref||'Unit')}:</strong> ${escHtml(u.short_description||'')} ${u.features ? '— ' + escHtml(u.features) : ''}</div>`;
+          }
+        });
+        html += '</td></tr>';
+      }
       html += '</tbody></table></div>';
     }
     html += `<div class="detail-section"><button class="btn btn-ghost btn-sm" onclick="uploadPropertyImage(${id})">+ Upload Image</button></div>`;
-    openDetail(displayName, html, 'properties', id);
+    openDetail(p.name||'Property', html, 'properties', id);
     setTimeout(async () => {
       const body = document.getElementById('detail-body');
       if (body) {
@@ -1309,32 +1188,6 @@ async function showProperty(id) {
     }, 100);
   } catch(e) {
     showToast('Failed to load property: ' + e.message, 'error');
-  }
-}
-
-async function addPropertyNote(id) {
-  const input = document.getElementById(`note-input-${id}`);
-  if (!input || !input.value.trim()) return;
-  const text = input.value.trim();
-  input.value = '';
-  try {
-    // Get current notes
-    const res = await api(`/properties/${id}`);
-    const p = res.data;
-    let notes = [];
-    try { notes = JSON.parse(p.notes || '[]'); } catch(e) { notes = []; }
-    if (!Array.isArray(notes)) notes = [];
-    // Add new note
-    const now = new Date().toISOString();
-    const author = user?.username || user?.name || user?.email || 'Unknown';
-    notes.push({ id: Date.now(), content: text, author: author, date: now, tags: [author] });
-    // Save via PATCH
-    await api(`/properties/${id}`, { method:'PATCH', body:JSON.stringify({notes: JSON.stringify(notes)}) });
-    showToast('Note added');
-    // Re-render property detail
-    showProperty(id);
-  } catch(e) {
-    showToast('Failed to add note: ' + e.message, 'error');
   }
 }
 
@@ -1402,47 +1255,28 @@ async function showUnit(id) {
 // ══════════════════════════════════════════
 let tenState = { page:1, perPage:20, search:'', status:'', total:0 };
 
-async function renderTenancies(filter) {
+async function renderTenancies() {
   const el = document.getElementById('page-content');
   el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading tenancies...</div>';
   try {
     const {page,perPage,search,status} = tenState;
-    let url;
-    let title = '';
-    if (filter === 'move-in') {
-      url = `/tenancies/moving-in-this-month?page=${page}&per_page=${perPage}`;
-      title = 'Moving In (This Month)';
-    } else if (filter === 'move-out') {
-      url = `/tenancies/moving-out-this-month?page=${page}&per_page=${perPage}`;
-      title = 'Moving Out (This Month)';
-    } else {
-      url = `/tenancies?page=${page}&per_page=${perPage}&search=${encodeURIComponent(search)}`;
-      if (status) url += `&status=${status}`;
-    }
+    let url = `/tenancies?page=${page}&per_page=${perPage}&search=${encodeURIComponent(search)}`;
+    if (status) url += `&status=${status}`;
     const res = await api(url);
     tenState.total = res.total;
     const items = res.data || [];
     let html = '<div class="table-wrap"><div class="table-toolbar"><div class="left">';
-    if (filter) {
-      html += `<span class="ttl" style="font-size:16px">${title}</span>`;
-    } else {
-      html += `<input placeholder="Search tenancies..." value="${escHtml(search)}" onkeyup="if(event.key==='Enter'){tenState.search=this.value;tenState.page=1;renderTenancies()}" style="width:200px">`;
-      html += `<select onchange="tenState.status=this.value;tenState.page=1;renderTenancies()"><option value=""${status==''?' selected':''}>Active (Current/Periodic)</option><option value="Current"${status=='Current'?' selected':''}>Current</option><option value="Periodic"${status=='Periodic'?' selected':''}>Periodic</option><option value="all"${status=='all'?' selected':''}>All (Including Past)</option><option value="Past"${status=='Past'?' selected':''}>Past</option></select>`;
-    }
+    html += `<input placeholder="Search tenancies..." value="${escHtml(search)}" onkeyup="if(event.key==='Enter'){tenState.search=this.value;tenState.page=1;renderTenancies()}" style="width:200px">`;
+    html += `<select onchange="tenState.status=this.value;tenState.page=1;renderTenancies()"><option value=""${status==''?' selected':''}>Active (Current/Periodic)</option><option value="Current"${status=='Current'?' selected':''}>Current</option><option value="Periodic"${status=='Periodic'?' selected':''}>Periodic</option><option value="all"${status=='all'?' selected':''}>All (Including Past)</option><option value="Past"${status=='Past'?' selected':''}>Past</option></select>`;
     html += '</div><div class="right">';
-    if (filter) {
-      html += `<button class="btn btn-ghost btn-sm" onclick="navigate('tenancies')">← All Tenancies</button>`;
-    } else {
-      html += `<button class="btn btn-primary btn-sm" onclick="showNewTenancyForm()">+ New Tenancy</button>`;
-      html += ` <button class="btn btn-ghost btn-sm" onclick="tenState.status='';tenState.search='';tenState.page=1;renderTenancies()">Clear</button>`;
-    }
-    html += '</div></div>';
+    html += `<button class="btn btn-primary btn-sm" onclick="showNewTenancyForm()">+ New Tenancy</button>`;
+    html += ` <button class="btn btn-ghost btn-sm" onclick="tenState.status='';tenState.search='';tenState.page=1;renderTenancies()">Clear</button></div></div>`;
     if (items.length===0) {
       html += '<div class="empty-state"><div class="icon">≡</div><h3>No tenancies found</h3></div>';
     } else {
       html += '<table><thead><tr><th>Ref</th><th>Property</th><th>Tenant</th><th>Status</th><th>Start</th><th>End</th><th>Rent</th></tr></thead><tbody>';
       items.forEach(t => {
-        html += `<tr onclick="showTenancy(${t.id})"><td>${escHtml(t.ref||'—')}</td><td>${escHtml(t.full_address||'—')}</td><td>${escHtml(t.main_tenant_name||'—')}</td><td>${statusBadge(t.status)}</td><td>${fmtDate(t.start_date||t.move_in_date)}</td><td>${fmtDate(t.end_date)}</td><td>${fmtMoney(t.rent_amount)}</td></tr>`;
+        html += `<tr onclick="showTenancy(${t.id})"><td>${escHtml(t.ref||'—')}</td><td>${escHtml(t.full_address||'—')}</td><td>${escHtml(t.main_tenant_name||'—')}</td><td>${statusBadge(t.status)}</td><td>${fmtDate(t.start_date)}</td><td>${fmtDate(t.end_date)}</td><td>${fmtMoney(t.rent_amount)}</td></tr>`;
       });
       html += '</tbody></table>';
       html += paginationControls(tenState, 'tenPagination');
@@ -1713,65 +1547,56 @@ async function showTenant(id) {
 }
 
 // ══════════════════════════════════════════
-// APPLICANTS — Table view
+// APPLICANTS — Pipeline
 // ══════════════════════════════════════════
-let appState = { page:1, perPage:20, total:0, search:'', statusFilter:'', sourceFilter:'', assignedFilter:'' };
+let appState = { page:1, perPage:50, total:0, sourceFilter:'', assignedFilter:'' };
+const PIPELINE_STAGES = ['New','Viewing','Application','Referencing','Guarantor','Approved','Agreement','Signature','Move In','Rejected','Withdrawn'];
 async function renderApplicants() {
   const el = document.getElementById('page-content');
   el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading applicants...</div>';
   try {
-    const {page,perPage,search,statusFilter,sourceFilter,assignedFilter} = appState;
-    let url = `/applicants?page=${page}&per_page=${perPage}&search=${encodeURIComponent(search)}`;
-    if (statusFilter && statusFilter !== 'all') url += `&status=${statusFilter}`;
-    if (sourceFilter) url += `&source=${encodeURIComponent(sourceFilter)}`;
-    if (assignedFilter) url += `&assigned_to=${encodeURIComponent(assignedFilter)}`;
-    const res = await api(url);
+    const res = await api('/applicants?per_page=200');
     appState.total = res.total;
     const items = res.data || [];
     // Collect unique sources and assigned_to values for filters
-    const allItems = items;
-    const sources = [...new Set(allItems.map(a => a.source).filter(Boolean))];
-    const assignedTos = [...new Set(allItems.map(a => a.assigned_to).filter(Boolean))];
-    let html = '<div class="table-wrap"><div class="table-toolbar"><div class="left">';
-    html += `<input placeholder="Search applicants..." value="${escHtml(search)}" onkeyup="if(event.key==='Enter'){appState.search=this.value;appState.page=1;renderApplicants()}" style="width:200px">`;
-    html += `<select onchange="appState.statusFilter=this.value;appState.page=1;renderApplicants()" style="width:120px">
-      <option value=""${statusFilter==''?' selected':''}>All</option>
-      <option value="Active"${statusFilter=='Active'?' selected':''}>Active</option>
-      <option value="Concluded"${statusFilter=='Concluded'?' selected':''}>Concluded</option>
-      <option value="Inactive"${statusFilter=='Inactive'?' selected':''}>Inactive</option>
-    </select>`;
-    html += ` <select onchange="appState.sourceFilter=this.value;appState.page=1;renderApplicants()" style="width:130px"><option value="">All Sources</option>${sources.map(s => `<option value="${escHtml(s)}" ${sourceFilter===s?'selected':''}>${escHtml(s)}</option>`).join('')}</select>`;
-    html += ` <select onchange="appState.assignedFilter=this.value;appState.page=1;renderApplicants()" style="width:140px"><option value="">All Assignees</option>${assignedTos.map(s => `<option value="${escHtml(s)}" ${assignedFilter===s?'selected':''}>${escHtml(s)}</option>`).join('')}</select>`;
-    html += '</div><div class="right"><button class="btn btn-primary btn-sm" onclick="showNewApplicantForm()">+ New Applicant</button></div></div>';
-    if (items.length===0) {
-      html += '<div class="empty-state"><div class="icon">○</div><h3>No applicants found</h3></div>';
-    } else {
-      html += '<table><thead><tr><th>Name</th><th>Status</th><th>Property Interest</th><th>Source</th><th>Assigned To</th><th>Applied</th><th>Actions</th></tr></thead><tbody>';
-      items.forEach(a => {
-        html += `<tr onclick="showApplicant(${a.id})">
-          <td><strong>${escHtml((a.first_name||'')+' '+(a.last_name||''))}</strong></td>
-          <td>${statusBadge(a.status)}</td>
-          <td>${escHtml(a.property_name||a.property_interest||'—')}</td>
-          <td>${escHtml(a.source||'—')}</td>
-          <td>${escHtml(a.assigned_to||'—')}</td>
-          <td>${fmtDate(a.created||a.applied_at||'')}</td>
-          <td>
-            <button class="btn btn-sm btn-success" onclick="event.stopPropagation();createTenancyFromApplicant(${a.id})" style="font-size:9px;padding:3px 6px">→ Tenancy</button>
-            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();showCreditReport(${a.id})" style="font-size:9px;padding:3px 6px">Credit</button>
-          </td>
-        </tr>`;
+    const sources = [...new Set(items.map(a => a.source).filter(Boolean))];
+    const assignedTos = [...new Set(items.map(a => a.assigned_to).filter(Boolean))];
+    // Filter
+    let filtered = items;
+    if (appState.sourceFilter) filtered = filtered.filter(a => a.source === appState.sourceFilter);
+    if (appState.assignedFilter) filtered = filtered.filter(a => a.assigned_to === appState.assignedFilter);
+    const grouped = {};
+    PIPELINE_STAGES.forEach(s => grouped[s.toLowerCase()]=[]);
+    filtered.forEach(a => { const k=(a.status||'new').toLowerCase(); if(grouped[k]) grouped[k].push(a); });
+    let html = '<div style="margin-bottom:16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
+    html += `<button class="btn btn-primary btn-sm" onclick="showNewApplicantForm()">+ New Applicant</button>`;
+    html += ` <span style="font-size:12px;color:#666">${appState.total} total</span>`;
+    html += ` <select onchange="appState.sourceFilter=this.value;renderApplicants()" style="width:130px;padding:6px 10px;font-size:12px"><option value="">All Sources</option>${sources.map(s => `<option value="${escHtml(s)}" ${appState.sourceFilter===s?'selected':''}>${escHtml(s)}</option>`).join('')}</select>`;
+    html += ` <select onchange="appState.assignedFilter=this.value;renderApplicants()" style="width:140px;padding:6px 10px;font-size:12px"><option value="">All Assignees</option>${assignedTos.map(s => `<option value="${escHtml(s)}" ${appState.assignedFilter===s?'selected':''}>${escHtml(s)}</option>`).join('')}</select>`;
+    html += '</div>';
+    html += '<div class="pipeline">';
+    PIPELINE_STAGES.forEach(stage => {
+      const key = stage.toLowerCase();
+      const apps = grouped[key]||[];
+      html += `<div class="pipeline-col"><div class="col-header"><span>${stage}</span><span class="count">${apps.length}</span></div>`;
+      if (apps.length===0) html += '<div style="text-align:center;padding:16px;color:#444;font-size:12px">Empty</div>';
+      else apps.forEach(a => {
+        html += `<div class="pipeline-card" onclick="showApplicant(${a.id})">
+          <div class="name">${escHtml(a.first_name||'')} ${escHtml(a.last_name||'')}</div>
+          <div class="meta"><span>${escHtml(a.property_name||a.property_interest||'—')}</span><span>${fmtDate(a.created||a.applied_at||'')}</span></div>
+          <div style="margin-top:6px;display:flex;gap:4px">
+            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();showCreditReport(${a.id})" style="font-size:9px;padding:3px 6px">Credit Report</button>
+            <button class="btn btn-sm btn-success" onclick="event.stopPropagation();createTenancyFromApplicant(${a.id})" style="font-size:9px;padding:3px 6px">Create Tenancy</button>
+          </div></div>`;
       });
-      html += '</tbody></table>';
-      html += paginationControls(appState, 'appPagination');
-    }
+      html += '</div>';
+    });
     html += '</div>';
     el.innerHTML = html;
   } catch(e) {
     el.innerHTML = `<div class="empty-state"><div class="icon">⚠</div><h3>Failed to load applicants</h3><p>${escHtml(e.message)}</p></div>`;
   }
 }
-function appPagination(p) { appState.page=p; renderApplicants(); }
-const PIPELINE_STAGES = ['New','Viewing','Application','Referencing','Guarantor','Approved','Agreement','Signature','Move In','Rejected','Withdrawn'];
 async function showApplicant(id) {
   try {
     const res = await api(`/applicants/${id}`);
@@ -2625,8 +2450,7 @@ async function renderPropertyOwners() {
     } else {
       html += '<table><thead><tr><th>Name</th><th>Company</th><th>Main Contact</th><th>Phone</th><th>Status</th><th>Tags</th></tr></thead><tbody>';
       items.forEach(o => {
-        const tagArr = typeof o.tags === 'string' ? (()=>{try{return JSON.parse(o.tags)}catch(e){return o.tags.split(',').map(t=>t.trim()).filter(Boolean)}})() : (o.tags_list||o.tags||[]);
-        const tags = tagArr.map(t => `<span class="tag-badge">${escHtml(t)}</span>`).join('');
+        const tags = (o.tags||[]).map(t => `<span class="tag-badge">${escHtml(t)}</span>`).join('');
         html += `<tr onclick="showOwnerDetail(${o.id})"><td><strong>${escHtml(o.name||o.owner_name||'—')}</strong></td>
           <td>${escHtml(o.company||'—')}</td>
           <td>${escHtml(o.main_contact||o.contact_name||'—')}</td>
@@ -2695,38 +2519,129 @@ async function submitNewOwner() {
 }
 
 // ══════════════════════════════════════════
-// ══════════════════════════════════════════
 // MESSAGES — Threaded conversations
 // ══════════════════════════════════════════
 let msgState = { threads:[], selectedThread:null, messages:[], search:'', taskDetails:null };
-function fmtTimeDate(d) {
-  if (!d) return '—';
+async function renderMessages() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading messages...</div>';
   try {
-    const dt = new Date(d);
-    const now = new Date();
-    const isToday = dt.toDateString() === now.toDateString();
-    const time = dt.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
-    if (isToday) return time;
-    const yesterday = new Date(now); yesterday.setDate(yesterday.getDate()-1);
-    if (dt.toDateString() === yesterday.toDateString()) return 'Yesterday ' + time;
-    return dt.toLocaleDateString('en-GB', {day:'numeric',month:'short'}) + ' ' + time;
-  } catch(e) { return d; }
+    const res = await api('/threads');
+    msgState.threads = res.data || [];
+    el.innerHTML = buildMessagesLayout();
+    renderThreadList();
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">✉</div><h3>Failed to load threads</h3><p>${escHtml(e.message)}</p></div>`;
+  }
 }
-async function renderMessages() { try { const res = await api('/threads'); msgState.threads = res.data || []; const el = document.getElementById('page-content'); el.innerHTML = buildMessagesLayout(); renderThreadList(); } catch(e) { document.getElementById('page-content').innerHTML = '<div class="empty-state" style="padding:40px"><div class="icon">✉</div><h3>Failed to load threads</h3><p>'+escHtml(e.message)+'</p></div>'; } }
-function buildMessagesLayout() { return '<div class="msg-layout"><div class="msg-threads"><div class="msg-toolbar"><button onclick="showNewThreadForm()">+ New Thread</button><span class="spacer"></span><button onclick="document.getElementById(\'msg-thread-search-input\').focus()">🔍</button></div><div class="thread-search"><input placeholder="Search threads..." id="msg-thread-search-input" value="'+escHtml(msgState.search)+'" onkeyup="if(event.key===\'Enter\'){msgState.search=this.value;renderThreadList()}"></div><div class="msg-thread-list" id="msg-thread-list"></div></div><div class="msg-conversation" id="msg-conversation"><div class="msg-header" id="msg-conv-header">Select a thread</div><div class="msg-body" id="msg-conv-body"><div class="empty-state" style="padding:40px"><div class="icon">✉</div><h3>Select a conversation</h3></div></div><div class="msg-input-area" id="msg-input-area" style="display:none"><button class="attach-btn" onclick="document.getElementById(\'msg-file-input\').click()" title="Attach file">📎</button><input type="file" id="msg-file-input" style="display:none" onchange="attachFile(this)"><input type="text" id="msg-reply-input" placeholder="Type a message..." onkeyup="if(event.key===\'Enter\')sendMessage()" autocomplete="off"><button class="btn btn-primary btn-sm" onclick="sendMessage()">Send</button></div></div><div class="msg-task-panel" id="msg-task-panel"><div class="empty-state" style="padding:20px"><div class="icon">☰</div><h3>Task Details</h3><p style="font-size:11px;color:#555">Select a thread to view</p></div></div></div>'; }
-function renderThreadList() { const list = document.getElementById('msg-thread-list'); if (!list) return; const search = msgState.search.toLowerCase(); const filtered = msgState.threads.filter(t => (t.subject||t.title||'').toLowerCase().includes(search) || (t.participants||[]).some(p => (p||'').toLowerCase().includes(search))); if (filtered.length === 0) { list.innerHTML = '<div style="padding:20px;text-align:center;color:#555;font-size:12px">No threads found</div>'; return; } list.innerHTML = filtered.map(t => { const id = t.id||t.thread_id; const isActive = msgState.selectedThread && (msgState.selectedThread.id === id); const lm = t.last_message||{}; const preview = lm.body||t.preview||''; const lmAuthor = lm.author ? (lm.author+': ') : ''; return '<div class="msg-thread-item '+(isActive?'active':'')+'" onclick="selectThread(\''+id+'\')"><div class="thread-name">'+escHtml(t.subject||t.title||'Untitled')+'</div><div class="thread-preview">'+escHtml(lmAuthor+preview)+'</div><div class="thread-meta"><span>'+escHtml((t.participants||[]).join(', '))+'</span><span>'+fmtTimeDate(t.last_updated||t.updated_at)+'</span></div></div>'; }).join(''); }
-async function selectThread(id) { const t = msgState.threads.find(t => (t.id||t.thread_id) == id); if (!t) return; msgState.selectedThread = t; renderThreadList(); const header = document.getElementById('msg-conv-header'); const body = document.getElementById('msg-conv-body'); const inputArea = document.getElementById('msg-input-area'); if (header) header.textContent = escHtml(t.subject||t.title||'Conversation'); if (body) body.innerHTML = '<div class="loading"><div class="spinner"></div>Loading messages...</div>'; if (inputArea) inputArea.style.display = 'flex'; try { const res = await api('/threads/'+id); const msgs = res.data?.messages||[]; msgState.messages = msgs; renderMessagesToBody(body); renderTaskPanel(t); } catch(e) { if(body) body.innerHTML = '<div class="empty-state" style="padding:20px"><div class="icon">⚠</div><h3>Failed to load messages</h3></div>'; } }
-function renderMessagesToBody(body) { if(!body) return; if(msgState.messages.length===0) { body.innerHTML = '<div class="empty-state" style="padding:20px"><p style="color:#555;font-size:13px">No messages yet. Start the conversation.</p></div>'; return; } const currentUser = (user?.username||user?.name||'').toLowerCase(); body.innerHTML = msgState.messages.map(m => { const msgAuthor = (m.author||m.sender||m.from||'').toLowerCase(); const isSent = msgAuthor===currentUser||msgAuthor==='me'||m.is_me||m.author_role==='team'; const isDeleted = m.is_deleted==1; const isEdited = m.edited==1; const msgId = m.id; if(isDeleted) return '<div class="msg-deleted">[This message was deleted]</div>'; return '<div class="msg-bubble '+(isSent?'sent':'received')+'" style="position:relative">'+(isSent?'<div class="msg-actions"><button onclick="editMessage('+msgId+',event)" title="Edit">✏️</button><button class="danger" onclick="deleteMessage('+msgId+',event)" title="Delete">🗑️</button></div>':'')+'<div class="msg-text" id="msg-text-'+msgId+'">'+escHtml(m.body||m.message||m.content||'')+(isEdited?'<span class="msg-edited">(edited)</span>':'')+'</div><div class="msg-time">'+(isSent?'You':escHtml(m.author||m.sender||m.from||'Unknown'))+' · '+fmtTimeDate(m.created_at||m.timestamp||m.created)+'</div></div>'; }).join(''); body.scrollTop = body.scrollHeight; }
-async function editMessage(id, event) { if(event) event.stopPropagation(); const textEl = document.getElementById('msg-text-'+id); if(!textEl) return; const currentText = textEl.textContent.replace(/\s*\(edited\)\s*$/,''); textEl.innerHTML = '<textarea class="edit-textarea" id="edit-input-'+id+'">'+escHtml(currentText)+'</textarea><div class="edit-actions"><button class="save-btn" onclick="saveEdit('+id+')">Save</button><button class="cancel-btn" onclick="cancelEdit('+id+',\''+escHtml(currentText).replace(/'/g,"\\'")+'\')">Cancel</button></div>'; document.getElementById('edit-input-'+id).focus(); }
-async function saveEdit(id) { const input = document.getElementById('edit-input-'+id); if(!input||!input.value.trim()) return; try { await api('/messages/'+id, {method:'PATCH', body:JSON.stringify({body: input.value.trim()})}); const tid = msgState.selectedThread?.id||msgState.selectedThread?.thread_id; if(tid) { const res = await api('/threads/'+tid); msgState.messages = res.data?.messages||[]; renderMessagesToBody(document.getElementById('msg-conv-body')); } showToast('Message updated'); } catch(e) { showToast('Failed to edit: '+e.message,'error'); } }
-function cancelEdit(id, originalText) { const textEl = document.getElementById('msg-text-'+id); if(textEl) textEl.innerHTML = escHtml(originalText); }
-async function deleteMessage(id, event) { if(event) event.stopPropagation(); if(!confirm('Delete this message?')) return; try { await api('/messages/'+id, {method:'DELETE'}); const tid = msgState.selectedThread?.id||msgState.selectedThread?.thread_id; if(tid) { const res = await api('/threads/'+tid); msgState.messages = res.data?.messages||[]; renderMessagesToBody(document.getElementById('msg-conv-body')); } showToast('Message deleted'); } catch(e) { showToast('Failed to delete: '+e.message,'error'); } }
-async function sendMessage() { const input = document.getElementById('msg-reply-input'); if(!input||!input.value.trim()||!msgState.selectedThread) return; const text = input.value.trim(); input.value = ''; const id = msgState.selectedThread.id||msgState.selectedThread.thread_id; try { await api('/messages', {method:'POST', body:JSON.stringify({thread_id: id, body: text, author: user?.username||user?.name||'User', author_role: 'team'})}); const res = await api('/threads/'+id); msgState.messages = res.data?.messages||[]; renderMessagesToBody(document.getElementById('msg-conv-body')); } catch(e) { showToast('Failed to send: '+e.message,'error'); } }
-function attachFile(input) { if(!input||!input.files||!input.files[0]) return; showToast('Attached: '+input.files[0].name); input.value = ''; }
-function renderTaskPanel(thread) { const panel = document.getElementById('msg-task-panel'); if(!panel) return; let html = '<div class="task-label">Subject</div><div class="task-value">'+escHtml(thread.subject||thread.title||'—')+'</div>'; html += '<div class="task-label">Participants</div><div class="task-value">'+escHtml((thread.participants||[]).join(', ')||'—')+'</div>'; html += '<div class="task-label">Status</div><div class="task-value">'+statusBadge(thread.status||'active')+'</div>'; html += '<div class="task-label">Priority</div><div class="task-value">'+escHtml(thread.priority||'Normal')+'</div>'; html += '<div class="task-label">Messages</div><div class="task-value">'+(thread.message_count||0)+'</div>'; html += '<div class="task-label">Last Updated</div><div class="task-value">'+fmtTimeDate(thread.last_updated||thread.updated_at)+'</div>'; html += '<div class="task-label">Notes</div><div class="task-value">'+escHtml(thread.notes||'—')+'</div>'; if(thread.assigned_to) html += '<div class="task-label">Assigned To</div><div class="task-value">'+escHtml(thread.assigned_to)+'</div>'; panel.innerHTML = html; }
-function showNewThreadForm() { openModal('<h2>New Thread</h2><div class="sub">Start a new conversation</div><div class="form-group"><label>Subject</label><input type="text" id="newthread-title" placeholder="Thread subject..."></div><div class="form-group"><label>Participants</label><input type="text" id="newthread-participants" placeholder="Comma-separated names"></div><div class="form-row"><div class="form-group" style="flex:1"><label>Priority</label><select id="newthread-priority"><option value="low">Low</option><option value="normal" selected>Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></div><div class="form-group" style="flex:1"><label>Status</label><select id="newthread-status"><option value="open" selected>Open</option><option value="in-progress">In Progress</option><option value="resolved">Resolved</option></select></div></div><div class="form-group"><label>First Message</label><textarea id="newthread-body" rows="3" placeholder="Write your first message..."></textarea></div><div class="form-actions"><button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button><button class="btn btn-submit" onclick="submitNewThread()">Create Thread</button></div>'); }
-async function submitNewThread() { const title = document.getElementById('newthread-title')?.value?.trim(); if(!title) { showToast('Subject required','error'); return; } const participants = document.getElementById('newthread-participants')?.value?.split(',').map(s=>s.trim()).filter(Boolean)||[]; const priority = document.getElementById('newthread-priority')?.value||'normal'; const status = document.getElementById('newthread-status')?.value||'open'; const body = document.getElementById('newthread-body')?.value?.trim()||''; try { await api('/threads', {method:'POST', body:JSON.stringify({title, status, priority, participants: JSON.stringify(participants), raised_by: user?.username||user?.name||'User', body, author: user?.username||user?.name||'User'})}); closeModal(null); showToast('Thread created'); renderMessages(); } catch(e) { showToast('Failed: '+e.message,'error'); } }
-
+function buildMessagesLayout() {
+  return `<div class="msg-layout">
+    <div class="msg-threads">
+      <div class="thread-search">
+        <input placeholder="Search threads..." id="msg-search-input" value="${escHtml(msgState.search)}" onkeyup="if(event.key==='Enter'){msgState.search=this.value;renderThreadList()}">
+      </div>
+      <div class="msg-thread-list" id="msg-thread-list"></div>
+    </div>
+    <div class="msg-conversation" id="msg-conversation">
+      <div class="msg-header" id="msg-conv-header">Select a thread</div>
+      <div class="msg-body" id="msg-conv-body">
+        <div class="empty-state" style="padding:40px"><div class="icon">✉</div><h3>Select a conversation</h3></div>
+      </div>
+      <div class="msg-input-area" id="msg-input-area" style="display:none">
+        <input type="text" id="msg-reply-input" placeholder="Type a message..." onkeyup="if(event.key==='Enter')sendMessage()">
+        <button class="btn btn-primary btn-sm" onclick="sendMessage()">Send</button>
+      </div>
+    </div>
+    <div class="msg-task-panel" id="msg-task-panel">
+      <div class="empty-state" style="padding:20px"><div class="icon">☰</div><h3>Task Details</h3><p style="font-size:11px;color:#555">Select a thread to view</p></div>
+    </div>
+  </div>`;
+}
+function renderThreadList() {
+  const list = document.getElementById('msg-thread-list');
+  if (!list) return;
+  const search = msgState.search.toLowerCase();
+  const filtered = msgState.threads.filter(t => (t.subject||t.title||'').toLowerCase().includes(search) || (t.participants||[]).some(p => (p||'').toLowerCase().includes(search)));
+  if (filtered.length === 0) {
+    list.innerHTML = '<div style="padding:20px;text-align:center;color:#555;font-size:12px">No threads found</div>';
+    return;
+  }
+  list.innerHTML = filtered.map(t => {
+    const id = t.id||t.thread_id;
+    const isActive = msgState.selectedThread && (msgState.selectedThread.id === id);
+    return `<div class="msg-thread-item ${isActive?'active':''}" onclick="selectThread('${id}')">
+      <div class="thread-name">${escHtml(t.subject||t.title||'Untitled')}</div>
+      <div class="thread-preview">${escHtml(t.last_message||t.preview||'')}</div>
+      <div class="thread-meta"><span>${escHtml((t.participants||[]).join(', '))}</span><span>${fmtDate(t.last_updated||t.updated_at)}</span></div>
+    </div>`;
+  }).join('');
+}
+async function selectThread(id) {
+  const t = msgState.threads.find(t => (t.id||t.thread_id) == id);
+  if (!t) return;
+  msgState.selectedThread = t;
+  renderThreadList();
+  const header = document.getElementById('msg-conv-header');
+  const body = document.getElementById('msg-conv-body');
+  const inputArea = document.getElementById('msg-input-area');
+  if (header) header.textContent = escHtml(t.subject||t.title||'Conversation');
+  if (body) body.innerHTML = '<div class="loading"><div class="spinner"></div>Loading messages...</div>';
+  if (inputArea) inputArea.style.display = 'flex';
+  // Load messages
+  try {
+    const res = await api(`/banksia-os/threads/${id}/messages`);
+    const msgs = res.data || [];
+    msgState.messages = msgs;
+    renderMessagesToBody(body);
+    // Task details
+    renderTaskPanel(t);
+  } catch(e) {
+    if (body) body.innerHTML = '<div class="empty-state" style="padding:20px"><div class="icon">⚠</div><h3>Failed to load messages</h3></div>';
+  }
+}
+function renderMessagesToBody(body) {
+  if (!body) return;
+  if (msgState.messages.length === 0) {
+    body.innerHTML = '<div class="empty-state" style="padding:20px"><p style="color:#555;font-size:13px">No messages yet. Start the conversation.</p></div>';
+    return;
+  }
+  body.innerHTML = msgState.messages.map(m => {
+    const isSent = (m.sender||m.from||'').toLowerCase() === 'me' || m.is_me;
+    return `<div class="msg-bubble ${isSent?'sent':'received'}">
+      <div>${escHtml(m.body||m.message||m.content||'')}</div>
+      <div class="msg-time">${isSent?'You':escHtml(m.sender||m.from||'Unknown')} · ${fmtDateISO(m.created_at||m.timestamp)}</div>
+    </div>`;
+  }).join('');
+  body.scrollTop = body.scrollHeight;
+}
+async function sendMessage() {
+  const input = document.getElementById('msg-reply-input');
+  if (!input || !input.value.trim() || !msgState.selectedThread) return;
+  const text = input.value.trim();
+  input.value = '';
+  const id = msgState.selectedThread.id||msgState.selectedThread.thread_id;
+  try {
+    await api(`/banksia-os/threads/${id}/messages`, { method:'POST', body:JSON.stringify({body:text}) });
+    // Reload messages
+    const res = await api(`/banksia-os/threads/${id}/messages`);
+    msgState.messages = res.data || [];
+    renderMessagesToBody(document.getElementById('msg-conv-body'));
+  } catch(e) { showToast('Failed to send: '+e.message,'error'); }
+}
+function renderTaskPanel(thread) {
+  const panel = document.getElementById('msg-task-panel');
+  if (!panel) return;
+  let html = '<div class="task-label">Subject</div><div class="task-value">' + escHtml(thread.subject||thread.title||'—') + '</div>';
+  html += '<div class="task-label">Participants</div><div class="task-value">' + escHtml((thread.participants||[]).join(', ')||'—') + '</div>';
+  html += '<div class="task-label">Status</div><div class="task-value">' + statusBadge(thread.status||'active') + '</div>';
+  html += '<div class="task-label">Priority</div><div class="task-value">' + escHtml(thread.priority||'Normal') + '</div>';
+  html += '<div class="task-label">Last Updated</div><div class="task-value">' + fmtDateISO(thread.last_updated||thread.updated_at) + '</div>';
+  html += '<div class="task-label">Notes</div><div class="task-value">' + escHtml(thread.notes||'—') + '</div>';
+  if (thread.assigned_to) {
+    html += '<div class="task-label">Assigned To</div><div class="task-value">' + escHtml(thread.assigned_to) + '</div>';
+  }
+  panel.innerHTML = html;
+}
 
 // ══════════════════════════════════════════
 // INVOICES
@@ -2738,7 +2653,7 @@ async function renderInvoices() {
   try {
     const [summaryRes, listRes] = await Promise.all([
       api('/invoices/summary').catch(() => ({data:{}})),
-      api(`/invoices?page=${invState.page}&per_page=${invState.perPage}&search=${encodeURIComponent(invState.search)}`)
+      api(`/banksia-os/invoices?page=${invState.page}&per_page=${invState.perPage}&search=${encodeURIComponent(invState.search)}`)
     ]);
     const summary = summaryRes.data || {};
     invState.total = listRes.total;
@@ -2776,7 +2691,7 @@ async function renderInvoices() {
 function invPagination(p) { invState.page=p; renderInvoices(); }
 async function showInvoiceDetail(id) {
   try {
-    const res = await api(`/invoices/${id}`);
+    const res = await api(`/banksia-os/invoices/${id}`);
     const inv = res.data;
     let html = '<div class="detail-section"><h3>Invoice Details</h3><div class="detail-grid">';
     const fields = [['Invoice #','invoice_number','text'],['Tenant','tenant_name','text'],['Property','property_name','text'],
@@ -2792,12 +2707,12 @@ async function showInvoiceDetail(id) {
   } catch(e) { showToast('Failed: '+e.message,'error'); }
 }
 async function markInvoicePaid(id) {
-  try { await api(`/invoices/${id}/pay`, { method:'POST', body:JSON.stringify({}) }); showToast('Marked as paid'); closeDetail(); renderInvoices(); }
+  try { await api(`/banksia-os/invoices/${id}/pay`, { method:'POST', body:JSON.stringify({}) }); showToast('Marked as paid'); closeDetail(); renderInvoices(); }
   catch(e) { showToast('Failed: '+e.message,'error'); }
 }
 async function cancelInvoice(id) {
   if (!confirm('Cancel this invoice?')) return;
-  try { await api(`/invoices/${id}`, { method:'DELETE' }); showToast('Invoice cancelled'); closeDetail(); renderInvoices(); }
+  try { await api(`/banksia-os/invoices/${id}`, { method:'DELETE' }); showToast('Invoice cancelled'); closeDetail(); renderInvoices(); }
   catch(e) { showToast('Failed: '+e.message,'error'); }
 }
 function showNewInvoiceForm() {
