@@ -2787,9 +2787,14 @@ def api_properties_enhanced():
             avail_u = db.execute("SELECT COUNT(*) AS cnt FROM units WHERE property_id=? AND unit_vacant=1", (p["id"],)).fetchone()["cnt"]
             p["total_unit_count"] = total_u
             p["available_units"] = avail_u
-            # Parse tags from comma-separated text
+            # Parse tags from JSON string
             if p.get("tags"):
-                p["tags_list"] = [t.strip() for t in p["tags"].split(",") if t.strip()]
+                try:
+                    import json as jmod
+                    parsed = jmod.loads(p["tags"])
+                    p["tags_list"] = parsed if isinstance(parsed, list) else [str(parsed)]
+                except (json.JSONDecodeError, TypeError):
+                    p["tags_list"] = [t.strip() for t in p["tags"].split(",") if t.strip()]
             else:
                 p["tags_list"] = []
         return json_success(props, total, page, per_page)
