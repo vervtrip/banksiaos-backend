@@ -87,22 +87,43 @@ def arthur_get_all_pages(path, params=None, max_pages=None):
         ]
 
         raw_response = None
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            raw_response = r.stdout
-            if r.returncode != 0:
-                print(f"  [ERROR] curl failed (rc={r.returncode}): {r.stderr[:200]}")
-                break
+        data = {}
+        last_err = None
+        for attempt in range(1, 4):  # Retry up to 3 times
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+                raw_response = r.stdout
+                if r.returncode != 0:
+                    last_err = f"curl failed (rc={r.returncode}): {r.stderr[:200]}"
+                    print(f"  [WARN] {last_err} (attempt {attempt}/3)")
+                    time.sleep(2 ** attempt)
+                    continue
 
-            data = json.loads(raw_response)
-        except json.JSONDecodeError as e:
-            preview = raw_response[:500] if raw_response else "N/A"
-            print(f"  [ERROR] JSON decode failed on page {page}: {e}")
-            print(f"  Raw response (first 500 chars): {preview}")
-            break
-        except subprocess.TimeoutExpired:
-            print(f"  [ERROR] curl timeout on page {page}")
-            break
+                data = json.loads(raw_response)
+                last_err = None
+                break  # Success
+            except json.JSONDecodeError as e:
+                preview = raw_response[:500] if raw_response else "N/A"
+                last_err = f"JSON decode failed: {e}"
+                print(f"  [WARN] {last_err} (attempt {attempt}/3)")
+                print(f"  Raw response (first 500 chars): {preview}")
+                time.sleep(2 ** attempt)
+                continue
+            except subprocess.TimeoutExpired:
+                last_err = f"curl timeout"
+                print(f"  [WARN] curl timeout on page {page} (attempt {attempt}/3)")
+                time.sleep(2 ** attempt)
+                continue
+
+        if last_err:
+            print(f"  [ERROR] Giving up on page {page} after 3 attempts: {last_err}")
+            if page > 1:
+                # Skip this page and continue rather than aborting entirely
+                print(f"  [INFO] Skipping page {page}, continuing to next page...")
+                page += 1
+                continue
+            else:
+                break
 
         status = data.get("status", 0)
         if status != 200:
