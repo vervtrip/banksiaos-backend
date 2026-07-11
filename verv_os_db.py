@@ -379,9 +379,45 @@ def insert(table, data):
             conn.close()
 
 
-def update(table, row_id, data):
+def _log_sync_conflict(table, row_id, detail=""):
+    """Record that an inbound overwrite was blocked to protect a local edit."""
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=30)
+        arthur_id = ""
+        r = conn.execute(f"SELECT arthur_id FROM {table} WHERE id = ?", (row_id,)).fetchone()
+        if r:
+            arthur_id = str(r[0] or "")
+        conn.execute(
+            "INSERT INTO sync_conflicts (table_name,row_id,arthur_id,detected_at,direction,detail) "
+            "VALUES (?,?,?,?,?,?)",
+            (table, row_id, arthur_id, datetime.now(timezone.utc).isoformat(), "pull_blocked", detail),
+        )
+        conn.commit(); conn.close()
+    except Exception:
+        pass
+
+
+def update(table, row_id, data, mark_dirty=False):
     now = datetime.now(timezone.utc).isoformat()
     data["modified"] = now
+    if mark_dirty:
+        # Local (Banksia OS) edit: flag for push-back to Arthur and protect
+        # this record from being overwritten by the next inbound pull sync.
+        data["sync_dirty"] = 1
+        data["local_modified"] = now
+        data["sync_origin"] = "banksia_os"
+    else:
+        # Inbound/programmatic update. Never clobber a local edit that has not
+        # yet been pushed back to Arthur (sync_dirty=1). Skip and log instead.
+        try:
+            _c = sqlite3.connect(DB_PATH, timeout=30)
+            _r = _c.execute(f"SELECT sync_dirty FROM {table} WHERE id = ?", (row_id,)).fetchone()
+            _c.close()
+            if _r and (_r[0] or 0) == 1:
+                _log_sync_conflict(table, row_id, "inbound pull blocked; local edit pending push")
+                return
+        except sqlite3.OperationalError:
+            pass  # table has no sync_dirty column (e.g. transactions) -> proceed
     items = [(k, data[k]) for k in data if data[k] is not None]
     if not items:
         return

@@ -95,11 +95,23 @@ def api_update_resource(table, item_id):
     valid_tables = {"properties", "units", "tenancies", "tenants", "applicants", "property_owners", "message_threads"}
     if table not in valid_tables:
         return json_error(f"Invalid table: {table}", 400)
+    # Tables mirrored from Arthur carry dirty-tracking columns. Any local edit
+    # must flag the row so (a) the inbound pull sync won't overwrite it and
+    # (b) the push-back sync knows to send the change to Arthur.
+    SYNCED_TABLES = {"properties", "units", "tenancies", "tenants", "applicants"}
+    protected_keys = {"sync_dirty", "local_modified", "sync_origin", "pushed_at", "arthur_id", "id"}
     for key, val in data.items():
+        if key in protected_keys:
+            continue  # never let the client set tracking/identity fields directly
         set_parts.append(f"{key} = ?")
         params.append(val)
     if not set_parts:
         return json_error("No fields to update")
+    if table in SYNCED_TABLES:
+        _now = datetime.now(timezone.utc).isoformat()
+        set_parts.append("sync_dirty = ?");    params.append(1)
+        set_parts.append("local_modified = ?"); params.append(_now)
+        set_parts.append("sync_origin = ?");    params.append("banksia_os")
     params.append(item_id)
     db = get_dict_db()
     try:
