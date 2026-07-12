@@ -1,0 +1,33 @@
+[SYNC] Starting Arthur live sync at 2026-07-11T19:04:30.032857+00:00
+
+[SYNC] Syncing properties...
+  Total items: 46, Total pages: 3
+  Properties synced: 46 (inserted: 0, updated: 46)
+
+[SYNC] Syncing units...
+  Total items: 158, Total pages: 8
+  Units synced: 158 (inserted: 0, updated: 158)
+
+[SYNC] Syncing tenancies...
+  Total items: 461, Total pages: 24
+  Tenancies synced: 461 (inserted: 1, updated: 460)
+
+[SYNC] Syncing tenants...
+  Total items: 527, Total pages: 27
+  Tenants synced: 527 (inserted: 1, updated: 526)
+
+[SYNC] Syncing applicants...
+  Total items: 675, Total pages: 34
+  Applicants synced: 675 (inserted: 0, updated: 675)
+
+[SYNC] Syncing transactions...
+  Total items: 7255, Total pages: 363
+  Transactions synced: 7255 (inserted: 3, updated: 7252)
+
+[SYNC] Sync complete in 386.7s
+  Properties:   50
+  Units:        162
+  Tenancies:    464
+  Tenants:      530
+  Applicants:   675
+  Transactions: 7292
