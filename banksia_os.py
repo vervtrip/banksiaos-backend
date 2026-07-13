@@ -100,13 +100,24 @@ def api_update_resource(table, item_id):
     # (b) the push-back sync knows to send the change to Arthur.
     SYNCED_TABLES = {"properties", "units", "tenancies", "tenants", "applicants"}
     protected_keys = {"sync_dirty", "local_modified", "sync_origin", "pushed_at", "arthur_id", "id"}
+    # Introspect the real columns so an unknown field from the client is ignored
+    # rather than crashing the UPDATE with a 500 "no such column" error.
+    _col_db = get_dict_db()
+    try:
+        real_cols = {r["name"] for r in _col_db.execute(f"PRAGMA table_info({table})").fetchall()}
+    finally:
+        _col_db.close()
+    ignored = []
     for key, val in data.items():
         if key in protected_keys:
             continue  # never let the client set tracking/identity fields directly
+        if key not in real_cols:
+            ignored.append(key)
+            continue  # skip fields that don't exist on this table
         set_parts.append(f"{key} = ?")
         params.append(val)
     if not set_parts:
-        return json_error("No fields to update")
+        return json_error(f"No valid fields to update (ignored: {', '.join(ignored) or 'none'})")
     if table in SYNCED_TABLES:
         _now = datetime.now(timezone.utc).isoformat()
         set_parts.append("sync_dirty = ?");    params.append(1)
@@ -117,7 +128,8 @@ def api_update_resource(table, item_id):
     try:
         db.execute(f"UPDATE {table} SET {', '.join(set_parts)} WHERE id = ?", params)
         db.commit()
-        return json_success({"updated": True, "id": item_id, "fields": list(data.keys())})
+        updated_fields = [k for k in data.keys() if k in real_cols and k not in protected_keys]
+        return json_success({"updated": True, "id": item_id, "fields": updated_fields, "ignored": ignored})
     except Exception as e:
         return json_error(str(e), 500)
     finally:

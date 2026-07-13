@@ -17,6 +17,10 @@ app.register_blueprint(banksia)
 from banksia_os import banksia_os_bp
 app.register_blueprint(banksia_os_bp)
 
+# ── Register Referencing Blueprint ──
+from referencing_api import referencing_bp
+app.register_blueprint(referencing_bp)
+
 # ── Multi-user auth system ──
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
 
@@ -2250,6 +2254,60 @@ def api_update_profile():
     
     _save_users(users)
     return jsonify({"success": True, "message": "Profile updated"})
+
+
+# ── Referencing Form Page ──
+@app.route("/apply")
+@app.route("/apply/<token>")
+def referencing_form_page(token=None):
+    # Support both /apply?token=x (query) and /apply/x (path) link styles.
+    return render_template("referencing_form.html", url_token=token or "")
+
+
+# ── Referencing Admin Panel (team) ──
+@app.route("/banksia-os/referencing")
+@require_auth
+def referencing_admin_page():
+    return render_template("referencing_admin.html", user=request.current_user)
+
+
+# ── E-Signature Signing Page (public, token-gated) ──
+@app.route("/sign/<token>")
+def esignature_sign_page(token):
+    return render_template("referencing_sign.html", token=token)
+
+
+# ── Tenant / Applicant Portal (public login) ──
+@app.route("/portal")
+def tenant_portal_page():
+    return render_template("portal.html")
+
+
+# ── Referencing Form by Token API ──
+@app.route("/api/referencing/forms/by-token")
+def api_form_by_token():
+    token = request.args.get("token", "")
+    if not token:
+        return jsonify({"success": False, "error": "Token required"}), 400
+    from verv_os_db import get_db
+    db = get_db()
+    db.row_factory = lambda c, r: {col[0]: r[idx] for idx, col in enumerate(c.description)}
+    try:
+        form = db.execute("SELECT * FROM referencing_forms WHERE form_token = ?", [token]).fetchone()
+        if not form:
+            return jsonify({"success": False, "error": "Form not found"}), 404
+        documents = db.execute(
+            "SELECT * FROM referencing_documents WHERE form_id = ? ORDER BY uploaded_at DESC",
+            [form["id"]]
+        ).fetchall()
+        return jsonify({
+            "success": True, "data": {
+                "form": form,
+                "documents": documents
+            }
+        })
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

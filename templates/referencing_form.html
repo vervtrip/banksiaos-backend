@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Apply — Banksia OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,sans-serif;background:#f8fafc;color:#0f172a;min-height:100vh}
+.top-bar{background:#fff;border-bottom:1px solid #e2e8f0;padding:20px 40px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
+.top-bar .brand{display:flex;align-items:center;gap:12px}
+.top-bar .brand h1{font-size:22px;font-weight:800;color:#1e293b;letter-spacing:-0.5px}
+.top-bar .brand .tag{font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:2px;background:#f1f5f9;padding:3px 8px;border-radius:4px}
+.top-bar .status-badge{font-size:12px;font-weight:600;padding:6px 14px;border-radius:20px}
+.status-badge.draft{background:#fef3c7;color:#92400e}
+.status-badge.submitted{background:#dbeafe;color:#1e40af}
+.status-badge.approved{background:#dcfce7;color:#166534}
+.status-bar{background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:20px 40px;display:flex;gap:32px;flex-wrap:wrap}
+.stat-item{display:flex;flex-direction:column;gap:2px}
+.stat-item .label{font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;font-weight:500}
+.stat-item .value{font-size:24px;font-weight:700;color:#0f172a}
+.stat-item .value.complete{color:#16a34a}
+.form-container{max-width:960px;margin:40px auto;padding:0 40px}
+.section-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;margin-bottom:24px;overflow:hidden;transition:box-shadow .2s}
+.section-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.04)}
+.section-header{padding:20px 28px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+.section-header .left{display:flex;align-items:center;gap:12px}
+.section-header .step-num{width:28px;height:28px;border-radius:50%;background:#e2e8f0;color:#64748b;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.section-header.active .step-num{background:#1e293b;color:#fff}
+.section-header.complete .step-num{background:#dcfce7;color:#16a34a}
+.section-header .section-title{font-size:15px;font-weight:600;color:#1e293b}
+.section-header .section-desc{font-size:12px;color:#94a3b8;margin-top:2px}
+.section-header .status-icon{font-size:16px}
+.section-body{padding:28px;display:none}
+.section-body.open{display:block}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.form-grid.full{grid-template-columns:1fr}
+.form-group{display:flex;flex-direction:column;gap:5px}
+.form-group.full{grid-column:1/-1}
+.form-group label{font-size:12px;font-weight:600;color:#475569;letter-spacing:0.2px}
+.form-group label .required{color:#ef4444;margin-left:2px}
+.form-group input,.form-group select,.form-group textarea{padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;font-family:inherit;color:#0f172a;background:#fff;transition:border-color .15s;outline:none}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:#1e293b;box-shadow:0 0 0 3px rgba(30,41,59,.08)}
+.form-group input.error{border-color:#ef4444}
+.form-group .error-text{font-size:11px;color:#ef4444;display:none}
+.form-group input.error + .error-text{display:block}
+.form-group textarea{resize:vertical;min-height:80px}
+.form-group .hint{font-size:11px;color:#94a3b8;margin-top:2px}
+.form-group .checkbox-row{display:flex;align-items:center;gap:10px;padding:8px 0}
+.form-group .checkbox-row input[type="checkbox"]{width:18px;height:18px;accent-color:#1e293b}
+.form-group .checkbox-row label{font-size:13px;font-weight:400;color:#334155;cursor:pointer}
+.conditional-section{display:none;padding:16px;background:#f8fafc;border-radius:10px;margin-top:12px;border:1px solid #e2e8f0;grid-column:1/-1}
+.conditional-section.visible{display:block}
+.conditional-section .form-grid{margin-top:12px}
+.upload-area{border:2px dashed #e2e8f0;border-radius:12px;padding:32px;text-align:center;cursor:pointer;transition:all .15s;grid-column:1/-1}
+.upload-area:hover{border-color:#94a3b8;background:#f8fafc}
+.upload-area.dragover{border-color:#1e293b;background:#f1f5f9}
+.upload-area .icon{font-size:32px;margin-bottom:8px}
+.upload-area .text{font-size:13px;color:#64748b}
+.upload-area .subtext{font-size:11px;color:#94a3b8;margin-top:4px}
+.file-list{grid-column:1/-1;display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.file-item{display:flex;align-items:center;gap:12px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px}
+.file-item .file-icon{font-size:20px}
+.file-item .file-info{flex:1}
+.file-item .file-info .name{font-size:13px;font-weight:500;color:#1e293b}
+.file-item .file-info .size{font-size:11px;color:#94a3b8}
+.file-item .file-status{font-size:12px;font-weight:500}
+.file-item .file-status.verified{color:#16a34a}
+.file-item .file-status.pending{color:#d97706}
+.file-item .remove-btn{background:none;border:none;color:#94a3b8;cursor:pointer;font-size:16px;padding:4px}
+.file-item .remove-btn:hover{color:#ef4444}
+.section-footer{display:flex;justify-content:space-between;align-items:center;padding:20px 28px;border-top:1px solid #f1f5f9;gap:12px}
+.section-footer .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .15s;border:none}
+.section-footer .btn-primary{background:#1e293b;color:#fff}
+.section-footer .btn-primary:hover{background:#0f172a}
+.section-footer .btn-secondary{background:#f1f5f9;color:#475569}
+.section-footer .btn-secondary:hover{background:#e2e8f0}
+.section-footer .btn-success{background:#16a34a;color:#fff}
+.section-footer .btn-success:hover{background:#15803d}
+.section-footer .btn:disabled{opacity:.5;cursor:not-allowed}
+.declaration-box{border:1.5px solid #fef3c7;background:#fffbeb;border-radius:12px;padding:20px;margin-bottom:20px;grid-column:1/-1}
+.declaration-box p{font-size:13px;color:#92400e;line-height:1.6}
+.signature-canvas{border:2px solid #e2e8f0;border-radius:10px;width:100%;height:150px;cursor:crosshair;touch-action:none;grid-column:1/-1}
+.signature-actions{display:flex;gap:8px;grid-column:1/-1}
+.submit-bar{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-top:32px;display:flex;align-items:center;justify-content:space-between}
+.submit-bar .summary{font-size:13px;color:#64748b}
+.submit-bar .summary strong{color:#1e293b}
+.submit-bar .btn{display:inline-flex;align-items:center;gap:8px;padding:14px 32px;border-radius:12px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;transition:all .15s;border:none}
+.submit-bar .btn-primary{background:#1e293b;color:#fff}
+.submit-bar .btn-primary:hover{background:#0f172a}
+.submit-bar .btn-primary:disabled{opacity:.4;cursor:not-allowed}
+.success-screen{display:none;max-width:600px;margin:80px auto;text-align:center;padding:40px}
+.success-screen.visible{display:block}
+.success-screen .icon{font-size:64px;margin-bottom:16px}
+.success-screen h2{font-size:24px;font-weight:700;color:#1e293b;margin-bottom:8px}
+.success-screen p{font-size:14px;color:#64748b;line-height:1.6;margin-bottom:24px}
+@media(max-width:768px){
+.top-bar{padding:16px 20px}
+.status-bar{padding:16px 20px;gap:20px}
+.form-container{padding:0 20px;margin:20px auto}
+.form-grid{grid-template-columns:1fr}
+.section-header{padding:16px 20px}
+.section-body{padding:20px}
+.submit-bar{flex-direction:column;gap:16px;text-align:center}
+.stat-item .value{font-size:20px}
+}
+</style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<div class="top-bar">
+  <div class="brand">
+    <h1>Banksia 🌿</h1>
+    <span class="tag">Tenant Referencing</span>
+  </div>
+  <div class="status-badge draft" id="statusBadge">Draft</div>
+</div>
+
+<!-- Status Bar -->
+<div class="status-bar" id="statusBar">
+  <div class="stat-item">
+    <span class="label">Progress</span>
+    <span class="value" id="progressValue">0%</span>
+  </div>
+  <div class="stat-item">
+    <span class="label">Sections Complete</span>
+    <span class="value" id="sectionsComplete">0/13</span>
+  </div>
+  <div class="stat-item">
+    <span class="label">Documents Uploaded</span>
+    <span class="value" id="docCount">0</span>
+  </div>
+</div>
+
+<!-- Form Container -->
+<div class="form-container" id="formContainer">
+  <div id="formContent"></div>
+  <div class="submit-bar" id="submitBar" style="display:none">
+    <div class="summary">
+      <strong id="submitName">Complete all sections</strong> to submit your application
+    </div>
+    <button class="btn btn-primary" id="submitBtn" disabled onclick="submitForm()">
+      ✦ Submit Application
+    </button>
+  </div>
+</div>
+
+<!-- Success Screen -->
+<div class="success-screen" id="successScreen">
+  <div class="icon">✅</div>
+  <h2>Application Submitted</h2>
+  <p>Your referencing application has been received. Our team will review your documents and get back to you within 1-2 working days. You'll receive an email confirmation shortly.</p>
+  <button class="btn btn-primary" onclick="location.reload()" style="display:inline-flex;align-items:center;gap:8px;padding:14px 32px;border-radius:12px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;border:none;background:#1e293b;color:#fff">
+    Back to Home
+  </button>
+</div>
+
+<script>
+// ── State ──
+const FORM_TOKEN = new URLSearchParams(window.location.search).get('token') || "{{ url_token }}";
+let FORM_ID = null;
+let formData = {};
+let uploadedDocs = [];
+let currentSection = 0;
+let isLoading = false;
+
+// ── Section Definitions ──
+const SECTIONS = [
+  {
+    key: 'personal', title: 'Personal Details', desc: 'Your full name, date of birth and gender',
+    fields: [
+      {key:'title',label:'Title',type:'select',options:['Mr','Mrs','Ms','Miss','Dr','Other'],required:true},
+      {key:'first_name',label:'First Name',type:'text',required:true},
+      {key:'last_name',label:'Last Name',type:'text',required:true},
+      {key:'date_of_birth',label:'Date of Birth',type:'date',required:true},
+      {key:'gender',label:'Gender',type:'select',options:['Male','Female','Non-binary','Prefer not to say']},
+    ]
+  },
+  {
+    key: 'contact', title: 'Contact Details', desc: 'Your email, phone and current address',
+    fields: [
+      {key:'email',label:'Email Address',type:'email',required:true},
+      {key:'mobile_phone',label:'Mobile Phone',type:'tel',required:true},
+      {key:'current_address_line1',label:'Current Address Line 1',type:'text',required:true},
+      {key:'current_address_line2',label:'Address Line 2',type:'text'},
+      {key:'current_city',label:'City',type:'text',required:true},
+      {key:'current_postcode',label:'Postcode',type:'text',required:true},
+      {key:'current_country',label:'Country',type:'text',required:true},
+      {key:'current_address_length',label:'How long have you lived here?',type:'select',options:['Less than 6 months','6-12 months','1-2 years','2-5 years','5+ years'],required:true},
+    ]
+  },
+  {
+    key: 'residential', title: 'Residential Status', desc: 'Your identification and right to rent',
+    fields: [
+      {key:'id_type',label:'ID Type',type:'select',options:['Passport','Driving Licence','BRP','Visa'],required:true},
+      {key:'id_number',label:'ID Number',type:'text',required:true},
+      {key:'nationality',label:'Nationality',type:'text',required:true},
+      {key:'country_of_origin',label:'Country of Origin',type:'text'},
+      {key:'ni_number',label:'National Insurance Number',type:'text',hint:'e.g. AB123456C'},
+      {key:'share_code',label:'Right to Rent Share Code',type:'text',hint:'If you have one'},
+      {key:'visa_number',label:'Visa/BRP Number',type:'text',hint:'If applicable'},
+      {key:'visa_type',label:'Visa Type',type:'text'},
+      {key:'visa_expiry',label:'Visa Expiry Date',type:'date'},
+    ]
+  },
+  {
+    key: 'employment', title: 'Employment', desc: 'Your employment status and income details',
+    fields: [
+      {key:'employment_status',label:'Employment Status',type:'select',options:['Employed','Self-Employed','Student','Unemployed','Retired','Homemaker'],required:true},
+      {key:'employer_name',label:'Employer Name',type:'text',showIf:{key:'employment_status',values:['Employed']}},
+      {key:'employer_address',label:'Employer Address',type:'text',showIf:{key:'employment_status',values:['Employed']}},
+      {key:'employer_email',label:'Employer Email',type:'email',showIf:{key:'employment_status',values:['Employed']}},
+      {key:'employer_phone',label:'Employer Phone',type:'tel',showIf:{key:'employment_status',values:['Employed']}},
+      {key:'job_title',label:'Job Title',type:'text',showIf:{key:'employment_status',values:['Employed','Self-Employed']}},
+      {key:'annual_salary',label:'Annual Salary (£)',type:'number',required:true,showIf:{key:'employment_status',values:['Employed','Self-Employed']}},
+      {key:'employment_length',label:'How long in this role?',type:'select',options:['Less than 3 months','3-6 months','6-12 months','1-2 years','3-5 years','5+ years'],showIf:{key:'employment_status',values:['Employed','Self-Employed']}},
+      {key:'employment_contract_type',label:'Contract Type',type:'select',options:['Permanent','Fixed Term','Zero Hours','Other'],showIf:{key:'employment_status',values:['Employed']}},
+    ]
+  },
+  {
+    key: 'self_employed', title: 'Self-Employment Details', desc: 'Complete if you are self-employed',
+    fields: [
+      {key:'self_employed_company',label:'Company Name',type:'text'},
+      {key:'self_employed_utr',label:'UTR Number',type:'text',hint:'Unique Taxpayer Reference'},
+      {key:'self_employed_address',label:'Business Address',type:'text'},
+      {key:'self_employed_annual_profit',label:'Annual Net Profit (£)',type:'number'},
+      {key:'self_employed_length',label:'How long trading?',type:'select',options:['Less than 1 year','1-2 years','2-5 years','5+ years']},
+      {key:'accountant_name',label:'Accountant Name',type:'text'},
+      {key:'accountant_email',label:'Accountant Email',type:'email'},
+      {key:'accountant_phone',label:'Accountant Phone',type:'tel'},
+    ]
+  },
+  {
+    key: 'student', title: 'Student Details', desc: 'Complete if you are a student',
+    fields: [
+      {key:'student_university',label:'University/College',type:'text'},
+      {key:'student_course_id',label:'Course ID',type:'text'},
+      {key:'student_course_name',label:'Course Name',type:'text'},
+      {key:'student_expected_graduation',label:'Expected Graduation Date',type:'date'},
+      {key:'student_loan_amount',label:'Student Loan Amount (£/year)',type:'number'},
+      {key:'student_maintenance_loan',label:'Maintenance Loan (£/year)',type:'number'},
+    ]
+  },
+  {
+    key: 'guarantor', title: 'Guarantor', desc: 'Someone who can guarantee your rent if needed',
+    fields: [
+      {key:'has_guarantor',label:'Do you have a guarantor?',type:'checkbox'},
+      {key:'guarantor_title',label:'Title',type:'select',options:['Mr','Mrs','Ms','Miss','Dr'],showIf:{key:'has_guarantor'}},
+      {key:'guarantor_first_name',label:'First Name',type:'text',showIf:{key:'has_guarantor'}},
+      {key:'guarantor_last_name',label:'Last Name',type:'text',showIf:{key:'has_guarantor'}},
+      {key:'guarantor_date_of_birth',label:'Date of Birth',type:'date',showIf:{key:'has_guarantor'}},
+      {key:'guarantor_relation',label:'Relationship to you',type:'select',options:['Parent','Sibling','Employer','Friend','Other'],showIf:{key:'has_guarantor'}},
+      {key:'guarantor_email',label:'Email',type:'email',showIf:{key:'has_guarantor'}},
+      {key:'guarantor_phone',label:'Phone',type:'tel',showIf:{key:'has_guarantor'}},
+      {key:'guarantor_mobile',label:'Mobile',type:'tel',showIf:{key:'has_guarantor'}},
+      {key:'guarantor_address_line1',label:'Address Line 1',type:'text',showIf:{key:'has_guarantor'}},
+      {key:'guarantor_city',label:'City',type:'text',showIf:{key:'has_guarantor'}},
+      {key:'guarantor_postcode',label:'Postcode',type:'text',showIf:{key:'has_guarantor'}},
+      {key:'guarantor_profession',label:'Profession',type:'text',showIf:{key:'has_guarantor'}},
+      {key:'guarantor_annual_income',label:'Annual Income (£)',type:'number',showIf:{key:'has_guarantor'}},
+      {key:'guarantor_homeowner',label:'Homeowner?',type:'checkbox',showIf:{key:'has_guarantor'}},
+    ]
+  },
+  {
+    key: 'housing_benefit', title: 'Housing Benefit', desc: 'If you receive housing benefit',
+    fields: [
+      {key:'housing_benefit',label:'Do you receive Housing Benefit?',type:'checkbox'},
+      {key:'housing_benefit_council',label:'Local Council',type:'text',showIf:{key:'housing_benefit'}},
+      {key:'housing_benefit_number',label:'Benefit Reference Number',type:'text',showIf:{key:'housing_benefit'}},
+    ]
+  },
+  {
+    key: 'kin', title: 'Next of Kin', desc: 'Emergency contact information',
+    fields: [
+      {key:'kin_first_name',label:'First Name',type:'text',required:true},
+      {key:'kin_last_name',label:'Last Name',type:'text',required:true},
+      {key:'kin_relation',label:'Relationship',type:'select',options:['Partner','Parent','Sibling','Friend','Other'],required:true},
+      {key:'kin_email',label:'Email',type:'email'},
+      {key:'kin_phone',label:'Phone',type:'tel',required:true},
+      {key:'kin_mobile',label:'Mobile',type:'tel'},
+      {key:'kin_address',label:'Address',type:'text'},
+    ]
+  },
+  {
+    key: 'bank', title: 'Bank Details', desc: 'For setting up rent payments',
+    fields: [
+      {key:'bank_name',label:'Bank Name',type:'text',required:true},
+      {key:'bank_account_name',label:'Account Name',type:'text',required:true},
+      {key:'bank_sort_code',label:'Sort Code',type:'text',placeholder:'00-00-00',required:true},
+      {key:'bank_account_number',label:'Account Number',type:'text',required:true},
+    ]
+  },
+  {
+    key: 'landlord', title: 'Previous Landlord', desc: 'Your most recent landlord',
+    fields: [
+      {key:'previous_landlord_name',label:'Landlord/Agency Name',type:'text'},
+      {key:'previous_landlord_email',label:'Email',type:'email'},
+      {key:'previous_landlord_phone',label:'Phone',type:'tel'},
+      {key:'previous_landlord_address',label:'Address',type:'text'},
+      {key:'previous_landlord_reason_for_leaving',label:'Reason for leaving',type:'textarea'},
+    ]
+  },
+  {
+    key: 'additional', title: 'Additional Information', desc: 'Pets, declarations and preferences',
+    fields: [
+      {key:'has_pet',label:'Do you have any pets?',type:'checkbox'},
+      {key:'pet_details',label:'Pet Details (type, breed)',type:'text',showIf:{key:'has_pet'}},
+      {key:'has_ccj',label:'Do you have any CCJs?',type:'checkbox'},
+      {key:'ccj_details',label:'CCJ Details',type:'textarea',showIf:{key:'has_ccj'}},
+      {key:'has_iva',label:'Are you in an IVA?',type:'checkbox'},
+      {key:'iva_details',label:'IVA Details',type:'textarea',showIf:{key:'has_iva'}},
+      {key:'has_bankruptcy',label:'Have you ever been bankrupt?',type:'checkbox'},
+      {key:'bankruptcy_details',label:'Bankruptcy Details',type:'textarea',showIf:{key:'has_bankruptcy'}},
+      {key:'has_eviction',label:'Have you ever been evicted?',type:'checkbox'},
+      {key:'eviction_details',label:'Eviction Details',type:'textarea',showIf:{key:'has_eviction'}},
+      {key:'smoking_preference',label:'Do you smoke?',type:'select',options:['No','Yes - inside','Yes - outside only','Occasionally']},
+      {key:'preferred_move_in_date',label:'Preferred Move-In Date',type:'date'},
+      {key:'special_requirements',label:'Special Requirements',type:'textarea',hint:'Any accessibility needs or other requirements'},
+    ]
+  },
+  {
+    key: 'declaration', title: 'Declaration', desc: 'Confirm and sign your application',
+    fields: []
+  }
+];
+
+// ── Document Upload Categories ──
+const DOC_CATEGORIES = {
+  passport: {label:'Passport / ID',accept:'.jpg,.jpeg,.png,.pdf',maxSize:10},
+  driving_licence: {label:'Driving Licence',accept:'.jpg,.jpeg,.png,.pdf',maxSize:10},
+  right_to_rent: {label:'Right to Rent Share Code',accept:'',maxSize:0},
+  payslip: {label:'3 Recent Payslips',accept:'.pdf,.jpg,.jpeg,.png',maxSize:10,multiple:3},
+  bank_statement: {label:'3 Bank Statements',accept:'.pdf,.jpg,.jpeg,.png',maxSize:10,multiple:3},
+  employment_contract: {label:'Employment Contract',accept:'.pdf,.jpg,.jpeg,.png',maxSize:10},
+  guarantor_id: {label:'Guarantor ID',accept:'.jpg,.jpeg,.png,.pdf',maxSize:10},
+  student_letter: {label:'University Enrolment Letter',accept:'.pdf,.jpg,.jpeg,.png',maxSize:10},
+  student_id: {label:'Student ID Card',accept:'.jpg,.jpeg,.png,.pdf',maxSize:10},
+  council_tax: {label:'Council Tax Statement',accept:'.pdf,.jpg,.jpeg,.png',maxSize:10},
+  other: {label:'Other Document',accept:'.pdf,.jpg,.jpeg,.png,.doc,.docx',maxSize:20},
+};
+
+// ── Initialization ──
+function showFatalError(heading, message) {
+  // Hide the progress stats and status badge so the page reads as a clean
+  // error state rather than a half-rendered form.
+  const statusBar = document.getElementById('statusBar');
+  if (statusBar) statusBar.style.display = 'none';
+  const badge = document.getElementById('statusBadge');
+  if (badge) badge.style.display = 'none';
+  document.getElementById('formContainer').innerHTML =
+    `<div style="padding:80px 24px;text-align:center;max-width:520px;margin:0 auto">
+       <div style="font-size:48px;margin-bottom:16px">🔗</div>
+       <h2 style="margin:0 0 12px">${heading}</h2>
+       <p style="color:#667085;line-height:1.5">${message}</p>
+     </div>`;
+}
+
+async function init() {
+  if (!FORM_TOKEN) {
+    showFatalError('Invalid Link', 'This application link is missing its secure access token. Please use the full link sent to you by the Banksia team, or contact us for a new one.');
+    return;
+  }
+
+  // Fetch form data
+  try {
+    const res = await fetch(`/api/referencing/forms/by-token?token=${encodeURIComponent(FORM_TOKEN)}`);
+    if (!res.ok) throw new Error('Not found');
+    const data = await res.json();
+    formData = data.data.form || {};
+    FORM_ID = formData.id;
+    uploadedDocs = data.data.documents || [];
+    renderForm();
+    updateProgress();
+  } catch (e) {
+    showFatalError('Application Not Found', 'This link may have expired or already been completed. Please contact the Banksia team for assistance.');
+  }
+}
+
+// ── Render Form ──
+function renderForm() {
+  const container = document.getElementById('formContent');
+  container.innerHTML = '';
+
+  SECTIONS.forEach((section, idx) => {
+    const isComplete = isSectionComplete(idx);
+    const card = document.createElement('div');
+    card.className = 'section-card';
+    card.id = `section-${idx}`;
+
+    card.innerHTML = `
+      <div class="section-header ${isComplete ? 'complete' : ''}" onclick="toggleSection(${idx})">
+        <div class="left">
+          <div class="step-num">${isComplete ? '✓' : idx + 1}</div>
+          <div>
+            <div class="section-title">${section.title}</div>
+            <div class="section-desc">${section.desc}</div>
+          </div>
+        </div>
+        <div class="status-icon">${isComplete ? '✅' : '○'}</div>
+      </div>
+      <div class="section-body" id="body-${idx}">
+        <div class="form-grid">
+          ${section.fields.map(f => renderField(f, idx)).join('')}
+          ${idx === SECTIONS.length - 1 ? renderDeclaration() : ''}
+          ${idx === 1 ? renderDocumentUpload('passport') : ''}
+          ${[3,4].includes(idx) ? renderDocumentUpload(['payslip','bank_statement'].includes) : ''}
+        </div>
+        <div class="section-footer">
+          <span style="font-size:12px;color:#94a3b8">${isComplete ? '✅ Completed' : '○ Not completed'}</span>
+          <div style="display:flex;gap:8px">
+            ${idx > 0 ? `<button class="btn btn-secondary" onclick="toggleSection(${idx-1})">← Previous</button>` : ''}
+            <button class="btn btn-primary" onclick="saveSection(${idx})">Save & Continue →</button>
+          </div>
+        </div>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+
+  // Show submit bar
+  document.getElementById('submitBar').style.display = 'flex';
+  updateSubmitBtn();
+}
+
+function renderField(field, sectionIdx) {
+  // Handle showIf conditional fields
+  if (field.showIf) {
+    const showIfKey = field.showIf.key;
+    const values = field.showIf.values;
+    // For checkbox showIf, check the formData
+    const showVal = formData[showIfKey];
+    const shouldShow = values ? values.includes(showVal) : showVal;
+    if (!shouldShow) return '';
+  }
+
+  const val = formData[field.key] || '';
+  const required = field.required ? '<span class="required">*</span>' : '';
+
+  let input = '';
+  switch (field.type) {
+    case 'text':
+    case 'email':
+    case 'tel':
+    case 'number':
+    case 'date':
+      input = `<input type="${field.type}" id="field-${field.key}" value="${escapeHtml(val)}" ${field.placeholder ? `placeholder="${escapeHtml(field.placeholder)}"` : ''} ${field.required ? 'required' : ''}>`;
+      break;
+    case 'select':
+      const opts = field.options.map(o => `<option value="${o}" ${val === o ? 'selected' : ''}>${o}</option>`).join('');
+      input = `<select id="field-${field.key}" ${field.required ? 'required' : ''}>${opts}</select>`;
+      break;
+    case 'textarea':
+      input = `<textarea id="field-${field.key}">${escapeHtml(val)}</textarea>`;
+      break;
+    case 'checkbox':
+      input = `<div class="checkbox-row"><input type="checkbox" id="field-${field.key}" ${val ? 'checked' : ''}><label for="field-${field.key}">${field.label}</label></div>`;
+      break;
+    default:
+      input = `<input type="text" id="field-${field.key}" value="${escapeHtml(val)}">`;
+  }
+
+  const hint = field.hint ? `<div class="hint">${field.hint}</div>` : '';
+  const errorEl = `<div class="error-text" id="error-${field.key}"></div>`;
+
+  if (field.type === 'checkbox') {
+    return `<div class="form-group full">${input}${errorEl}${hint}</div>`;
+  }
+  return `<div class="form-group">${field.label ? `<label for="field-${field.key}">${field.label}${required}</label>` : ''}${input}${errorEl}${hint}</div>`;
+}
+
+function renderDeclaration() {
+  return `
+    <div class="form-group full">
+      <div class="declaration-box">
+        <p><strong>Declaration</strong></p>
+        <p style="margin-top:8px">I confirm that the information provided in this application is true and complete. I authorise Banksia to verify the information provided and to carry out a credit reference check. I understand that providing false or misleading information may result in my application being rejected.</p>
+        <p style="margin-top:8px">I consent to Banksia processing my personal data in accordance with their privacy policy for the purposes of tenancy referencing and management.</p>
+        <div class="checkbox-row" style="margin-top:12px">
+          <input type="checkbox" id="field-declaration_confirmed" ${formData.declaration_confirmed ? 'checked' : ''}>
+          <label for="field-declaration_confirmed">I confirm and agree to the above declaration</label>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderDocumentUpload(categories) {
+  const cats = Array.isArray(categories) ? categories : [categories];
+  return cats.map(cat => {
+    const info = DOC_CATEGORIES[cat] || {label:cat, accept:'.pdf,.jpg,.jpeg,.png', maxSize:10};
+    const existing = uploadedDocs.filter(d => d.category === cat);
+    return `
+      <div class="form-group full" style="margin-top:8px">
+        <label>${info.label}</label>
+        <div class="upload-area" data-category="${cat}" onclick="document.getElementById('fileInput-${cat}').click()" ondragover="this.classList.add('dragover');event.preventDefault()" ondragleave="this.classList.remove('dragover')" ondrop="handleDrop(event,'${cat}')">
+          <div class="icon">📄</div>
+          <div class="text">Click to upload or drag and drop</div>
+          <div class="subtext">${info.accept} (max ${info.maxSize}MB)</div>
+          <input type="file" id="fileInput-${cat}" accept="${info.accept}" style="display:none" ${info.multiple ? 'multiple' : ''} onchange="uploadFile(event,'${cat}')">
+        </div>
+        <div class="file-list" id="fileList-${cat}">
+          ${existing.map(f => `
+            <div class="file-item">
+              <span class="file-icon">📄</span>
+              <div class="file-info">
+                <div class="name">${f.original_filename}</div>
+                <div class="size">${(f.file_size / 1024).toFixed(1)} KB</div>
+              </div>
+              <span class="file-status ${f.is_verified ? 'verified' : 'pending'}">${f.ai_verified ? 'Verified ✓' : 'Pending'}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ── Section Management ──
+function toggleSection(idx) {
+  const body = document.getElementById(`body-${idx}`);
+  const isOpen = body.classList.contains('open');
+  // Close all
+  document.querySelectorAll('.section-body').forEach(b => b.classList.remove('open'));
+  if (!isOpen) body.classList.add('open');
+}
+
+async function saveSection(idx) {
+  const section = SECTIONS[idx];
+  
+  // Collect values
+  const updates = {};
+  for (const field of section.fields) {
+    const el = document.getElementById(`field-${field.key}`);
+    if (!el) continue;
+    if (field.type === 'checkbox') {
+      updates[field.key] = el.checked ? 1 : 0;
+    } else {
+      updates[field.key] = el.value;
+    }
+  }
+
+  // Also collect declaration
+  const declEl = document.getElementById('field-declaration_confirmed');
+  if (declEl) {
+    updates.declaration_confirmed = declEl.checked ? 1 : 0;
+  }
+
+  try {
+    const res = await fetch(`/api/referencing/forms/${FORM_ID}?token=${FORM_TOKEN}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(updates)
+    });
+    const data = await res.json();
+    if (data.success) {
+      formData = data.data;
+      // Re-render to show updated section states
+      renderForm();
+      updateProgress();
+      // Move to next section
+      if (idx < SECTIONS.length - 1) {
+        toggleSection(idx + 1);
+      }
+    }
+  } catch (e) {
+    console.error('Save failed:', e);
+  }
+}
+
+// ── Document Upload Handling ──
+async function uploadFile(event, category) {
+  const files = event.target.files;
+  if (!files.length) return;
+  
+  for (const file of files) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('form_id', FORM_ID);
+    formData.append('category', category);
+    formData.append('token', FORM_TOKEN);
+
+    try {
+      const res = await fetch('/api/referencing/documents/upload', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (data.success) {
+        uploadedDocs.push(data.data);
+        renderForm(); // Re-render to show uploaded files
+        updateProgress();
+      }
+    } catch (e) {
+      console.error('Upload failed:', e);
+    }
+  }
+}
+
+function handleDrop(event, category) {
+  event.preventDefault();
+  event.target.classList.remove('dragover');
+  if (event.dataTransfer.files.length) {
+    const input = document.getElementById(`fileInput-${category}`);
+    input.files = event.dataTransfer.files;
+    uploadFile({target: input}, category);
+  }
+}
+
+// ── Form Submission ──
+async function submitForm() {
+  if (isLoading) return;
+  isLoading = true;
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Submitting...';
+
+  try {
+    const res = await fetch(`/api/referencing/forms/${FORM_ID}/submit`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token: FORM_TOKEN})
+    });
+    const data = await res.json();
+    if (data.success) {
+      document.getElementById('formContainer').style.display = 'none';
+      document.getElementById('successScreen').classList.add('visible');
+      document.getElementById('statusBadge').textContent = 'Submitted';
+      document.getElementById('statusBadge').className = 'status-badge submitted';
+    } else {
+      alert(data.error || 'Submission failed');
+      btn.disabled = false;
+      btn.textContent = '✦ Submit Application';
+    }
+  } catch (e) {
+    alert('Submission failed. Please try again.');
+    btn.disabled = false;
+    btn.textContent = '✦ Submit Application';
+  }
+  isLoading = false;
+}
+
+// ── Progress Tracking ──
+function isSectionComplete(idx) {
+  const section = SECTIONS[idx];
+  if (idx === SECTIONS.length - 1) return formData.declaration_confirmed;
+  
+  return section.fields.every(f => {
+    if (!f.required) return true;
+    const val = formData[f.key];
+    return val && val.trim() !== '';
+  });
+}
+
+function updateProgress() {
+  const complete = SECTIONS.filter((_, i) => isSectionComplete(i)).length;
+  const total = SECTIONS.length;
+  const pct = Math.round((complete / total) * 100);
+  
+  document.getElementById('progressValue').textContent = `${pct}%`;
+  document.getElementById('sectionsComplete').textContent = `${complete}/${total}`;
+  document.getElementById('docCount').textContent = uploadedDocs.filter(d => !d.ai_flagged).length;
+
+  // Update submit button
+  const allComplete = complete === total;
+  document.getElementById('submitBtn').disabled = !allComplete;
+  if (allComplete) {
+    const name = `${formData.first_name || ''} ${formData.last_name || ''}`.trim();
+    document.getElementById('submitName').textContent = name ? `${name}'s application` : 'Your application';
+  }
+}
+
+function updateSubmitBtn() {
+  // Called after render
+  const allComplete = SECTIONS.map((_, i) => isSectionComplete(i)).every(Boolean);
+  document.getElementById('submitBtn').disabled = !allComplete;
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+}
+
+// ── Start ──
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
