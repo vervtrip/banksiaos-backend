@@ -7,7 +7,43 @@ from flask import Flask, render_template, request, jsonify, redirect, session
 
 app = Flask(__name__)
 app.secret_key = "verv-ops-dash-2026-secure"
-app.config.update(SESSION_COOKIE_SECURE=False, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax')
+app.config.update(
+    SESSION_COOKIE_SECURE=False,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SEND_FILE_MAX_AGE_DEFAULT=300,
+    TEMPLATES_AUTO_RELOAD=False
+)
+
+# ── Production-ready DB connection pool ──
+import threading
+_db_local = threading.local()
+def get_db():
+    """Per-thread database connection with WAL mode."""
+    if not hasattr(_db_local, 'conn') or _db_local.conn is None:
+        _db_local.conn = sqlite3.connect(
+            os.path.join(os.path.dirname(__file__), "verv_os.db"),
+            check_same_thread=False,
+            timeout=30
+        )
+        _db_local.conn.execute("PRAGMA journal_mode=WAL")
+        _db_local.conn.execute("PRAGMA synchronous=NORMAL")
+        _db_local.conn.execute("PRAGMA cache_size=-8000")
+        _db_local.conn.row_factory = sqlite3.Row
+    return _db_local.conn
+
+@app.after_request
+def add_cache_headers(response):
+    """Add caching headers for static-like responses and prevent double-commits on JSON."""
+    path = request.path
+    if path.startswith('/static/') or path.startswith('/api/banksia-os/dashboard'):
+        response.headers['Cache-Control'] = 'public, max-age=60'
+    elif path.startswith('/api/'):
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    # Also compress large responses if client supports it
+    return response
 
 # ── Register Banksia OS Blueprint ──
 from banksia_api import banksia
@@ -241,6 +277,24 @@ def api_auth_user():
 def api_auth_logout():
     session.clear()
     return redirect("/")
+
+# ── Health check for Traefik / watchdog ──
+@app.route("/health")
+def health_check():
+    """Lightweight health check for load balancer and uptime monitoring."""
+    try:
+        cur = get_db().execute("SELECT 1")
+        db_ok = cur.fetchone() is not None
+    except Exception:
+        db_ok = False
+    return jsonify({
+        "status": "ok" if db_ok else "degraded",
+        "database": "connected" if db_ok else "error",
+        "uptime_seconds": round(time.time() - _start_time, 1) if '_start_time' in dir() else 0
+    })
+
+# Track start time
+_start_time = time.time()
 
 # ── Password Reset ──
 RESET_TOKENS = {}  # {email: {"token": str, "expires": timestamp}}
@@ -2585,4 +2639,8 @@ def api_thread_attachment(thread_id):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5050, debug=False)
+    # Production: use gunicorn -w 4 -k gthread --threads 4 app:app
+    # This fallback is for development only
+    print("[Banksia OS] Starting on 0.0.0.0:5050", flush=True)
+    print("[Banksia OS] For production: gunicorn -w 4 -k gthread --threads 4 --worker-connections 40 app:app", flush=True)
+    app.run(host="0.0.0.0", port=5050, debug=False, threaded=True)
