@@ -57,6 +57,57 @@ a{color:#334155;text-decoration:none}
 .kpi-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px}
 .kpi-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
 
+/* ── VIEW TOGGLE ── */
+.view-toggle{display:flex;background:#f1f5f9;border-radius:8px;padding:3px;border:1px solid #e2e8f0}
+.view-toggle button{padding:6px 14px;border:none;border-radius:6px;font-size:11px;font-weight:500;cursor:pointer;background:transparent;color:#94a3b8;transition:all .12s}
+.view-toggle button.active{background:#fff;color:#1e293b;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+
+/* ── MODERN DASHBOARD VIEW ── */
+.modern-dash{display:none}
+body.modern .modern-dash{display:block}
+body.modern .classic-dash{display:none}
+
+.md-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px}
+.md-card{background:#fff;border-radius:14px;padding:24px;position:relative;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);cursor:pointer;transition:transform .15s,box-shadow .15s;border:1px solid #e2e8f0}
+.md-card:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,.08)}
+.md-card .icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:16px}
+.md-card .label{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;font-weight:500;margin-bottom:4px}
+.md-card .value{font-size:30px;font-weight:800;color:#1e293b;letter-spacing:-0.5px;line-height:1.1}
+.md-card .sub{font-size:12px;color:#64748b;margin-top:4px}
+.md-card .trend{font-size:11px;font-weight:500;margin-top:6px;display:flex;align-items:center;gap:4px}
+
+.md-widgets{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:20px}
+.md-widget{background:#fff;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.04)}
+.md-widget-header{padding:16px 20px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between}
+.md-widget-header .ttl{font-size:13px;font-weight:600;color:#1e293b}
+.md-widget-header .badge{font-size:10px;background:#f1f5f9;color:#64748b;padding:3px 10px;border-radius:10px;font-weight:500}
+.md-widget-body{padding:16px 20px}
+
+.md-big-number{font-size:36px;font-weight:800;color:#1e293b;letter-spacing:-1px}
+.md-big-sub{font-size:12px;color:#94a3b8;margin-top:4px}
+.md-progress{margin-top:16px}
+.md-progress-bar{height:6px;background:#f1f5f9;border-radius:3px;overflow:hidden}
+.md-progress-fill{height:100%;border-radius:3px;transition:width .6s ease}
+.md-progress-labels{display:flex;justify-content:space-between;font-size:11px;color:#94a3b8;margin-top:6px}
+
+.md-alert-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:8px}
+.md-item{display:flex;align-items:center;padding:12px 0;border-bottom:1px solid #f1f5f9;cursor:pointer;transition:background .1s}
+.md-item:last-child{border-bottom:none}
+.md-item:hover{background:#fafafa;margin:0 -20px;padding:12px 20px}
+.md-item .info{flex:1}
+.md-item .info .name{font-size:13px;font-weight:500;color:#1e293b}
+.md-item .info .detail{font-size:11px;color:#94a3b8;margin-top:2px}
+.md-item .meta{text-align:right}
+.md-item .meta .val{font-size:13px;font-weight:600}
+.md-item .meta .dtl{font-size:10px;color:#94a3b8}
+
+.md-quick{display:flex;flex-wrap:wrap;gap:8px;padding:4px 0}
+.md-quick-btn{padding:10px 18px;border-radius:10px;border:1px solid #e2e8f0;background:#fff;font-size:12px;font-weight:500;cursor:pointer;transition:all .12s}
+.md-quick-btn:hover{border-color:#6366f1;color:#6366f1;background:#f8f7ff}
+
+@media(max-width:1100px){.md-grid{grid-template-columns:repeat(2,1fr)}.md-widgets{grid-template-columns:1fr}}
+@media(max-width:600px){.md-grid{grid-template-columns:1fr;gap:10px}.md-card{padding:18px}.md-widget-body{padding:12px 16px}body.modern .topbar .date-display{display:none}}
+
 /* TABLES */
 .table-wrap{background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
 .table-toolbar{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #e2e8f0;gap:12px;flex-wrap:wrap}
@@ -291,6 +342,19 @@ tbody tr:last-child td{border-bottom:none}
   .detail-field input,.detail-field select,.detail-field textarea{font-size:16px!important;min-height:44px}
   /* Sidebar close button at bottom of sidebar on mobile */
   .sidebar .sidebar-close-mobile{display:flex!important}
+  /* Profile page mobile */
+  .profile-card{flex-direction:column;align-items:center;text-align:center;padding:16px}
+  .profile-info{min-width:auto;width:100%}
+  .profile-actions{justify-content:center}
+  .profile-avatar .avatar-img,.profile-avatar .avatar-initial{width:72px;height:72px;font-size:28px}
+  .profile-name{font-size:18px}
+  /* Toggle rows compact */
+  .toggle-row{padding:10px 12px}
+  .toggle-row .toggle-label{font-size:12px}
+  .toggle-row .toggle-desc{font-size:10px}
+  /* Settings form compact */
+  .settings-form{padding:16px}
+  .settings-form .form-group{margin-bottom:12px}
 }
 @media(max-width:480px){
   .kpi-grid{grid-template-columns:1fr 1fr;gap:6px}
@@ -399,6 +463,62 @@ code{background:#f1f5f9;padding:2px 6px;border-radius:3px;font-size:12px;color:#
 .notif-dropdown .notif-header span{color:#1e293b}
 .notif-item{border-bottom:1px solid #f1f5f9}
 .notif-item:hover{background:#f8fafc}
+
+/* PROFILE PAGE */
+.profile-card{display:flex;gap:24px;padding:24px;flex-wrap:wrap}
+.profile-avatar{text-align:center;flex-shrink:0}
+.profile-avatar .avatar-img{width:96px;height:96px;border-radius:50%;object-fit:cover;border:3px solid #e2e8f0}
+.profile-avatar .avatar-initial{width:96px;height:96px;border-radius:50%;background:#1e293b;display:flex;align-items:center;justify-content:center;font-size:36px;color:#64748b;margin:0 auto}
+.profile-info{flex:1;min-width:260px}
+.profile-name{font-size:20px;font-weight:700;color:#1e293b;margin-bottom:4px}
+.profile-role{font-size:12px;color:#64748b;margin-bottom:16px}
+.profile-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+
+/* TOGGLE SWITCHES */
+.toggle-group{margin-bottom:12px}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:6px;background:#fff}
+.toggle-row .toggle-label{font-size:13px;font-weight:500;color:#1e293b}
+.toggle-row .toggle-desc{font-size:11px;color:#94a3b8;margin-top:2px}
+.toggle-switch{position:relative;width:44px;height:24px;flex-shrink:0;cursor:pointer}
+.toggle-switch input{opacity:0;width:0;height:0}
+.toggle-switch .slider{position:absolute;top:0;left:0;right:0;bottom:0;background:#e2e8f0;border-radius:12px;transition:.2s}
+.toggle-switch .slider::before{content:'';position:absolute;width:18px;height:18px;border-radius:50%;background:#fff;top:3px;left:3px;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.toggle-switch input:checked+.slider{background:#6366f1}
+.toggle-switch input:checked+.slider::before{transform:translateX(20px)}
+
+/* ATTACHMENT LINK IN MESSAGES */
+.msg-attachment{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-radius:6px;font-size:12px;cursor:pointer;transition:all .12s;margin-top:4px}
+.msg-attachment:hover{background:rgba(99,102,241,.2);border-color:rgba(99,102,241,.4)}
+.msg-bubble.sent .msg-attachment{background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.2)}
+.msg-bubble.sent .msg-attachment:hover{background:rgba(255,255,255,.25)}
+.msg-attachment a{color:inherit;text-decoration:none}
+.msg-attachment .att-icon{font-size:14px}
+/* ── Maintenance view toggle ── */
+.mv-toggle{display:inline-flex;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;padding:2px;gap:2px}
+.mv-btn{border:none;background:transparent;color:#64748b;font-size:12px;font-weight:600;padding:5px 12px;border-radius:6px;cursor:pointer;transition:all .12s}
+.mv-btn:hover{color:#1e293b}
+.mv-btn.active{background:#fff;color:#4f46e5;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+/* ── Monday-style maintenance board (dark) ── */
+.mb-board{display:flex;gap:16px;overflow-x:auto;padding-bottom:16px;-webkit-overflow-scrolling:touch}
+.mb-lane{flex:0 0 300px;max-width:300px;background:#0f172a;border:1px solid #1e293b;border-radius:12px;display:flex;flex-direction:column;max-height:calc(100vh - 220px)}
+.mb-lane-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:#111c33;border-radius:12px 12px 0 0;position:sticky;top:0;z-index:1}
+.mb-lane-title{font-size:12px;font-weight:700;letter-spacing:.4px;text-transform:uppercase}
+.mb-lane-count{font-size:11px;font-weight:700;color:#94a3b8;background:#1e293b;padding:2px 9px;border-radius:10px}
+.mb-lane-body{padding:10px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+.mb-card{display:flex;background:#1e293b;border:1px solid #334155;border-radius:10px;overflow:hidden;cursor:pointer;transition:all .12s}
+.mb-card:hover{border-color:#475569;transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.3)}
+.mb-priline{flex:0 0 4px}
+.mb-body{padding:10px 12px;flex:1;min-width:0}
+.mb-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.mb-ref{font-size:10px;font-weight:700;color:#64748b;font-family:ui-monospace,monospace}
+.mb-pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:5px;white-space:nowrap}
+.mb-title{font-size:13px;font-weight:600;color:#e2e8f0;line-height:1.35;margin-bottom:8px;word-break:break-word}
+.mb-meta{display:flex;flex-direction:column;gap:3px;margin-bottom:8px}
+.mb-meta span{font-size:11px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mb-flags{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.mb-flag{font-size:10px;font-weight:600;padding:2px 7px;border-radius:5px;white-space:nowrap}
+.mb-cost{font-size:11px;font-weight:700;color:#e2e8f0}
+@media(max-width:768px){.mb-lane{flex:0 0 260px;max-width:260px}}
 </style>
 </head>
 <body>
@@ -428,6 +548,14 @@ code{background:#f1f5f9;padding:2px 6px;border-radius:3px;font-size:12px;color:#
     <div class="nav-item" data-page="applicants" onclick="navigate('applicants')">
       <span class="icon">○</span> Applicants
     </div>
+    <div class="nav-item" data-page="submissions" onclick="navigate('submissions')">
+      <span class="icon">📥</span> Submissions
+      <span class="badge" id="nav-badge-submissions" style="display:none"></span>
+    </div>
+    <div class="nav-item" data-page="maintenance" onclick="navigate('maintenance')">
+      <span class="icon">🔧</span> Maintenance
+      <span class="badge" id="nav-badge-maintenance" style="display:none"></span>
+    </div>
     <div class="nav-item" data-page="finance" onclick="navigate('finance')">
       <span class="icon">£</span> Finance
     </div>
@@ -455,6 +583,9 @@ code{background:#f1f5f9;padding:2px 6px;border-radius:3px;font-size:12px;color:#
     <div class="nav-item" data-page="users" onclick="navigate('users')">
       <span class="icon">⊗</span> Users
     </div>
+    <div class="nav-item" data-page="my-profile" onclick="navigate('my-profile')">
+      <span class="icon">👤</span> My Profile
+    </div>
   </div>
   <div class="user-section">
     <div class="name" id="sidebar-user-name">{{ user.username }}</div>
@@ -480,6 +611,10 @@ code{background:#f1f5f9;padding:2px 6px;border-radius:3px;font-size:12px;color:#
     </div>
     <div class="right" style="position:relative">
       <div class="date-display" id="date-display"></div>
+      <div class="view-toggle" id="view-toggle" style="display:flex">
+        <button class="active" onclick="setDashboardView('classic')">📋 Classic</button>
+        <button onclick="setDashboardView('modern')">🎨 Modern</button>
+      </div>
       <div class="notif-btn" id="notif-btn" onclick="toggleNotifications()" style="position:relative;cursor:pointer;padding:6px 10px;border-radius:6px;transition:all .12s;background:transparent;border:1px solid #222">
         <span style="font-size:16px">🔔</span>
         <span id="notif-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:#ff1744;color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;align-items:center;justify-content:center;padding:0 4px">0</span>
@@ -550,11 +685,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const role = user.role === 'super_admin' ? 'Super Admin' : (user.role === 'admin' ? 'Admin' : user.role);
   document.getElementById('sidebar-user-role').textContent = role;
   document.getElementById('topbar-user-role').textContent = role;
+  window.isSuperAdmin = user.role === 'super_admin';
   // Read initial page from server or URL
   const urlInfo = parseCurrentUrl();
   const startPage = INITIAL_PAGE || urlInfo.page || 'dashboard';
   const startResourceId = INITIAL_RESOURCE_ID || urlInfo.resourceId || '';
   navigate(startPage, startResourceId);
+  updateSubmissionsBadge();
+  updateMaintenanceBadge();
+  // Restore dashboard view preference
+  const savedView = localStorage.getItem('banksia_dash_view');
+  if (savedView === 'modern') {
+    setTimeout(() => setDashboardView('modern'), 100);
+  }
 });
 
 // ── NAV ──
@@ -858,6 +1001,8 @@ function renderPage(page, resourceId) {
     tenancies: ['Tenancies', '150 active tenancies'],
     tenants: ['Tenants', '524 registered tenants'],
     applicants: ['Applicants', '672 applicants in pipeline'],
+    submissions: ['Submissions', 'Tenant portal & referencing submissions'],
+    maintenance: ['Maintenance', 'Job management & contractor orders'],
     finance: ['Finance', 'Rent roll, arrears & deposits'],
     search: ['Search', 'Find anything across all records'],
     documents: ['Documents', 'Templates & generated documents'],
@@ -866,7 +1011,8 @@ function renderPage(page, resourceId) {
     messages: ['Messages', 'Threaded conversations & tasks'],
     invoices: ['Invoices', 'Tenant invoices & payments'],
     settings: ['Company Settings', 'Business profile & preferences'],
-    users: ['Users', 'Team members & permissions']
+    users: ['Users', 'Team members & permissions'],
+    'my-profile': ['My Profile', 'Personal settings & preferences']
   };
   const t = titles[page] || ['Page',''];
   document.getElementById('page-title').textContent = t[0];
@@ -875,10 +1021,12 @@ function renderPage(page, resourceId) {
   const fns = {
     dashboard: renderDashboard, properties: renderProperties, units: renderUnits,
     tenancies: renderTenancies, tenants: renderTenants, applicants: renderApplicants,
+    submissions: renderSubmissions,
+    maintenance: renderMaintenance,
     finance: renderFinance, search: renderSearch, documents: renderDocuments,
     access: renderAccess, 'property-owners': renderPropertyOwners,
     messages: renderMessages, invoices: renderInvoices, settings: renderSettings,
-    users: renderUsers
+    users: renderUsers, 'my-profile': renderMyProfile
   };
   if (fns[page]) {
     fns[page](resourceId);
@@ -906,6 +1054,7 @@ async function renderDashboard() {
 
     el.innerHTML = `
       <!-- KPI ROW -->
+      <div class="classic-dash">
       <div class="kpi-grid">
         <div class="kpi-card" onclick="navigate('properties')">
           <div class="kpi-accent" style="background:#16a34a"></div>
@@ -942,6 +1091,18 @@ async function renderDashboard() {
           <div class="kpi-top"><span class="label">Applicants</span><span class="kpi-icon" style="background:#eff6ff;color:#2563eb">○</span></div>
           <div class="value blue">${pendingApps}</div>
           <div class="sub">${d.total_applicants||0} total applicants</div>
+        </div>
+        <div class="kpi-card" onclick="navigate('submissions', ${(d.new_submissions_total||0)>0?'new':'all'})">
+          <div class="kpi-accent" style="background:${(d.new_submissions_total||0)>0?'#dc2626':'#16a34a'}"></div>
+          <div class="kpi-top"><span class="label">New submissions</span><span class="kpi-icon" style="background:#eef2ff;color:#6366f1">📥</span></div>
+          <div class="value" style="color:${(d.new_submissions_total||0)>0?'#dc2626':'#1e293b'}">${d.new_submissions_total||0}</div>
+          <div class="sub">${d.pending_referencing_submissions||0} referencing · ${d.open_maintenance_requests||0} maintenance · ${d.open_message_threads||0} messages · ${d.pending_document_uploads||0} documents</div>
+        </div>
+        <div class="kpi-card" onclick="navigate('maintenance')">
+          <div class="kpi-accent" style="background:#d97706"></div>
+          <div class="kpi-top"><span class="label">Open maintenance</span><span class="kpi-icon" style="background:#fffbeb;color:#d97706">🔧</span></div>
+          <div class="value amber">${d.open_maintenance_requests||0}</div>
+          <div class="sub">Active maintenance jobs</div>
         </div>
         <div class="kpi-card" onclick="navigate('finance')">
           <div class="kpi-accent" style="background:#16a34a"></div>
@@ -1051,6 +1212,7 @@ async function renderDashboard() {
         <div class="table-toolbar"><span class="ttl">Recent Activity</span><span class="ttl-sub">Latest updates & comments</span></div>
         <div id="recent-updates-list"><div class="loading" style="padding:20px"><div class="spinner"></div></div></div>
       </div>
+    </div>
     `;
     // Load ending soon
     api('/tenancies/ending-soon').then(r => {
@@ -1130,6 +1292,147 @@ async function renderDashboard() {
       else alerts.forEach(a => { html += `<div class="alert-item" onclick="navigate('${a.nav}')"><div class="alert-icon ${a.icon}">${a.emoji}</div><div class="alert-body"><div class="alert-title">${escHtml(a.title)}</div><div class="alert-desc">${escHtml(a.desc)}</div></div><div class="alert-action">${a.action} →</div></div>`; });
       document.getElementById('alerts-list').innerHTML = html;
     }).catch(() => { /* fallback silent */ });
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠</div><h3>Failed to load dashboard</h3><p>${escHtml(e.message)}</p></div>`;
+  }
+}
+
+// ═══ VIEW TOGGLE ═══
+let dashView = localStorage.getItem('banksia_dash_view') || 'classic';
+
+function setDashboardView(view) {
+  dashView = view;
+  localStorage.setItem('banksia_dash_view', view);
+  document.body.classList.toggle('modern', view === 'modern');
+  // Update toggle buttons
+  document.querySelectorAll('#view-toggle button').forEach(b => b.classList.toggle('active', b.textContent.toLowerCase().includes(view)));
+  if (view === 'modern') renderModernDashboard();
+  else renderDashboard();
+}
+
+async function renderModernDashboard() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading dashboard...</div>';
+  try {
+    const [dashRes, finRes, maintRes] = await Promise.all([
+      api('/dashboard'),
+      api('/finance/overview').catch(() => null),
+      api('/banksia_os/maintenance/jobs').catch(() => null),
+    ]);
+    const d = dashRes.data;
+    const fin = finRes ? finRes.data : {};
+    const maint = maintRes ? maintRes.data || [] : [];
+    const openMaint = d.open_maintenance_requests || 0;
+    const rentCollect = fin.total_collected_monthly || fin.total_collected || 0;
+    const rentExpect = fin.total_expected_monthly || fin.monthly_income || d.monthly_rent_income || 150295;
+    const rentPct = rentExpect > 0 ? Math.min(Math.round((rentCollect / rentExpect) * 100), 100) : 0;
+    const occRate = d.unit_occupancy_rate || 0;
+    const arrears = d.total_arrears || 0;
+    
+    el.innerHTML = `<div class="modern-dash" style="display:block">
+      <!-- 4-column Metric Cards -->
+      <div class="md-grid">
+        <div class="md-card" onclick="navigate('properties')">
+          <div class="icon" style="background:#eef2ff;color:#6366f1">◧</div><div class="label">Properties</div><div class="value">${d.total_properties||0}</div><div class="sub">${d.occupied_units||0} occupied · ${d.vacant_units||0} vacant</div>
+        </div>
+        <div class="md-card" onclick="navigate('tenancies')">
+          <div class="icon" style="background:#f0fdf4;color:#16a34a">≡</div><div class="label">Active Tenancies</div><div class="value" style="color:#16a34a">${d.active_tenancies||0}</div><div class="sub">${d.total_tenancies||0} total · <span style="color:${occRate>=80?'#16a34a':'#d97706'}">${fmtPct(occRate)} occ</span></div>
+        </div>
+        <div class="md-card" onclick="navigate('finance')">
+          <div class="icon" style="background:#fffbeb;color:#d97706">⬡</div><div class="label">Open Maintenance</div><div class="value" style="color:#d97706">${openMaint}</div><div class="trend" style="color:#dc2626">🔧 ${maint.data?maint.data.length:'0'} total jobs</div>
+        </div>
+        <div class="md-card" onclick="navigate('tenants')">
+          <div class="icon" style="background:#fef2f2;color:#dc2626">●</div><div class="label">Tenants</div><div class="value">${d.total_tenants||0}</div><div class="sub">${d.total_applicants||0} applicants in pipeline</div>
+        </div>
+        <div class="md-card" onclick="navigate('finance')">
+          <div class="icon" style="background:#f0fdf4;color:#16a34a">£</div><div class="label">Monthly Rent Roll</div><div class="value" style="color:#16a34a">${fmtMoney(rentExpect)}</div><div class="trend" style="color:${rentPct>=80?'#16a34a':'#d97706'}">${rentPct}% collected</div>
+        </div>
+        <div class="md-card" onclick="navigate('finance')">
+          <div class="icon" style="background:#fef2f2;color:#dc2626">⚠</div><div class="label">Arrears</div><div class="value" style="color:${arrears>0?'#dc2626':'#16a34a'}">${fmtMoney(arrears)}</div><div class="trend" style="color:#94a3b8">${arrears>0?'Outstanding':'All clear'}</div>
+        </div>
+        <div class="md-card" onclick="navigate('submissions')">
+          <div class="icon" style="background:#eef2ff;color:#6366f1">📥</div><div class="label">New Submissions</div><div class="value">${d.new_submissions_total||0}</div><div class="sub">${d.pending_referencing_submissions||0} referencing · ${d.open_message_threads||0} messages</div>
+        </div>
+        <div class="md-card" onclick="navigate('finance')">
+          <div class="icon" style="background:#eef2ff;color:#6366f1">◈</div><div class="label">Deposits Held</div><div class="value" style="color:#2563eb">${fmtMoney(d.total_deposits_held)}</div><div class="sub">Active tenancies</div>
+        </div>
+      </div>
+      <!-- Two-column Widgets -->
+      <div class="md-widgets">
+        <div class="md-widget">
+          <div class="md-widget-header"><span class="ttl">Rent Collection</span><span class="badge">${fmtPct(rentPct)}</span></div>
+          <div class="md-widget-body">
+            <div class="md-big-number" style="color:#16a34a">${fmtMoney(rentCollect)}</div>
+            <div class="md-big-sub">Collected of ${fmtMoney(rentExpect)} expected</div>
+            <div class="md-progress">
+              <div class="md-progress-bar"><div class="md-progress-fill" style="width:${rentPct}%;background:${rentPct>=90?'#16a34a':rentPct>=70?'#d97706':'#dc2626'}"></div></div>
+              <div class="md-progress-labels"><span>${fmtMoney(rentCollect)}</span><span>${fmtMoney(Math.max(rentExpect-rentCollect,0))} outstanding</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="md-widget">
+          <div class="md-widget-header"><span class="ttl">Occupancy</span><span class="badge">${fmtPct(occRate)}</span></div>
+          <div class="md-widget-body">
+            <div class="md-big-number" style="color:${occRate>=80?'#16a34a':occRate>=60?'#d97706':'#dc2626'}">${d.occupied_units||0}</div>
+            <div class="md-big-sub">of ${d.total_units||0} units filled (${d.vacant_units||0} vacant)</div>
+            <div class="md-progress">
+              <div class="md-progress-bar"><div class="md-progress-fill" style="width:${Math.min(occRate,100)}%;background:${occRate>=80?'#16a34a':occRate>=60?'#d97706':'#dc2626'}"></div></div>
+              <div class="md-progress-labels"><span>Occupied</span><span>Vacancy ${100-occRate}%</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Alerts & Quick Actions -->
+      <div class="md-widgets">
+        <div class="md-widget">
+          <div class="md-widget-header"><span class="ttl">Quick Actions</span></div>
+          <div class="md-widget-body">
+            <div class="md-quick">
+              <button class="md-quick-btn" onclick="window.showNewApplicantForm?showNewApplicantForm():navigate('applicants')">+ New Applicant</button>
+              <button class="md-quick-btn" onclick="window.showNewTenancyForm?showNewTenancyForm():navigate('tenancies')">+ New Tenancy</button>
+              <button class="md-quick-btn" onclick="navigate('finance')">Record Payment</button>
+              <button class="md-quick-btn" onclick="window.showUploadDocumentForm?showUploadDocumentForm():navigate('documents')">Upload Doc</button>
+              <button class="md-quick-btn" onclick="navigate('maintenance')">Maintenance</button>
+              <button class="md-quick-btn" onclick="navigate('messages')">Messages</button>
+            </div>
+          </div>
+        </div>
+        <div class="md-widget">
+          <div class="md-widget-header"><span class="ttl">Schedule</span><span class="badge">This month</span></div>
+          <div class="md-widget-body" id="md-schedule">
+            <div class="loading" style="padding:10px 0"><div class="spinner"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+    // Load schedule data into widget
+    Promise.all([
+      api('/tenancies/moving-in-this-month').catch(() => ({data:[]})),
+      api('/tenancies/moving-out-this-month').catch(() => ({data:[]})),
+    ]).then(([inRes, outRes]) => {
+      const arrivals = inRes.data || [];
+      const departures = outRes.data || [];
+      let html = '';
+      if (arrivals.length === 0 && departures.length === 0) {
+        html = '<div style="color:#94a3b8;font-size:13px;padding:4px 0">No scheduled events this month</div>';
+      } else {
+        if (arrivals.length > 0) {
+          html += '<div style="font-size:11px;color:#16a34a;font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">👇 Moving In</div>';
+          arrivals.slice(0, 3).forEach(t => {
+            html += `<div class="md-item" onclick="navigate('tenancies',${t.id})"><div class="info"><div class="name">${escHtml(t.main_tenant_name||'—')}</div><div class="detail">${escHtml(t.full_address||'')}</div></div><div class="meta"><div class="val" style="color:#16a34a">${fmtDate(t.move_in_date||t.start_date)}</div><div class="dtl">${fmtMoney(t.rent_amount)}</div></div></div>`;
+          });
+        }
+        if (departures.length > 0) {
+          html += '<div style="font-size:11px;color:#d97706;font-weight:600;margin-bottom:8px;margin-top:12px;text-transform:uppercase;letter-spacing:0.5px">👆 Moving Out</div>';
+          departures.slice(0, 3).forEach(t => {
+            html += `<div class="md-item" onclick="navigate('tenancies',${t.id})"><div class="info"><div class="name">${escHtml(t.main_tenant_name||'—')}</div><div class="detail">${escHtml(t.full_address||'')}</div></div><div class="meta"><div class="val" style="color:#d97706">${fmtDate(t.move_out_date)}</div><div class="dtl">${fmtMoney(t.rent_amount)}</div></div></div>`;
+          });
+        }
+      }
+      const schedEl = document.getElementById('md-schedule');
+      if (schedEl) schedEl.innerHTML = html;
+    }).catch(() => {});
   } catch(e) {
     el.innerHTML = `<div class="empty-state"><div class="icon">⚠</div><h3>Failed to load dashboard</h3><p>${escHtml(e.message)}</p></div>`;
   }
@@ -2220,14 +2523,15 @@ async function showUserDetail(username) {
           </div>
           <div style="flex:1;min-width:200px">
             <div class="detail-grid">
-              <div class="detail-field"><div class="label">Username</div><div class="val">\${escHtml(username)}</div></div>
-              <div class="detail-field"><div class="label">Role</div><div class="val">\${escHtml(u.role||'member')}</div></div>
-              \${u.email ? '<div class="detail-field"><div class="label">Email</div><div class="val">\${escHtml(u.email)}</div></div>' : ''}
-              \${u.phone ? '<div class="detail-field"><div class="label">Phone</div><div class="val">\${escHtml(u.phone)}</div></div>' : ''}
-              \${u.date_of_birth ? '<div class="detail-field"><div class="label">Date of Birth</div><div class="val">\${escHtml(u.date_of_birth)}</div></div>' : ''}
-              \${u.biography ? '<div class="detail-field" style="grid-column:1/-1"><div class="label">Biography</div><div class="val">\${escHtml(u.biography)}</div></div>' : ''}
+              <div class="detail-field"><div class="label">Username</div><div class="val">${escHtml(username)}</div></div>
+              <div class="detail-field"><div class="label">Role</div><div class="val">${escHtml(u.role||'member')}</div></div>
+              ${isSuperAdmin && (u.department||u.position) ? '<div class="detail-field" style="grid-column:1/-1"><div class="label">Department</div><div class="val">'+escHtml(u.department||'—')+' · '+escHtml(u.position||'—')+'</div></div>' : ''}
+              ${u.email ? '<div class="detail-field"><div class="label">Email</div><div class="val">'+escHtml(u.email)+'</div></div>' : ''}
+              ${u.phone ? '<div class="detail-field"><div class="label">Phone</div><div class="val">'+escHtml(u.phone)+'</div></div>' : ''}
+              ${u.date_of_birth ? '<div class="detail-field"><div class="label">Date of Birth</div><div class="val">'+escHtml(u.date_of_birth)+'</div></div>' : ''}
+              ${u.biography ? '<div class="detail-field" style="grid-column:1/-1"><div class="label">Biography</div><div class="val">'+escHtml(u.biography)+'</div></div>' : ''}
             </div>
-            \${canEdit ? '<div style="margin-top:12px;display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="showEditUserForm(\''+escHtml(username)+'\')">✏️ Edit Profile</button><button class="btn btn-ghost btn-sm" onclick="showChangePasswordForm(\''+escHtml(username)+'\')">🔑 Change Password</button></div>' : ''}
+            ${canEdit ? '<div style="margin-top:12px;display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="showEditUserForm(\''+escHtml(username)+'\')">✏️ Edit Profile</button><button class="btn btn-ghost btn-sm" onclick="showChangePasswordForm(\''+escHtml(username)+'\')">🔑 Change Password</button></div>' : ''}
           </div>
         </div>
       </div>
@@ -2238,20 +2542,24 @@ async function showUserDetail(username) {
 }
 
 function showEditUserForm(username) {
-  openModal(`<h2>Edit Profile</h2><div class="sub">\${escHtml(username)}</div>
+  openModal(`<h2>Edit Profile</h2><div class="sub">${escHtml(username)}</div>
+    ${window.isSuperAdmin?`<div class="form-group"><label>Role</label><select id="edit-role"><option value="admin">Admin</option><option value="super_admin">Super Admin</option><option value="projects">Projects</option></select></div>`:''}
     <div class="form-group"><label>Email</label><input type="email" id="edit-email" placeholder="email@example.com"></div>
     <div class="form-group"><label>Phone</label><input type="tel" id="edit-phone" placeholder="+44..."></div>
+    ${window.isSuperAdmin?`<div class="form-group"><label>Department</label><input type="text" id="edit-dept" placeholder="e.g. Operations, Finance, Property"></div><div class="form-group"><label>Position</label><input type="text" id="edit-pos" placeholder="e.g. Property Manager, Accountant"></div>`:''}
     <div class="form-group"><label>Date of Birth</label><input type="date" id="edit-dob"></div>
     <div class="form-group"><label>Biography</label><textarea id="edit-bio" rows="3" placeholder="About this team member..."></textarea></div>
     <div class="form-actions"><button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
-    <button class="btn btn-submit" onclick="submitEditUser('\${username}')">Save</button></div>`);
-  // Load current data
+    <button class="btn btn-submit" onclick="submitEditUser('${username}')">Save</button></div>`);
   fetch('/api/users/'+encodeURIComponent(username)).then(r=>r.json()).then(d=>{
     const u = d.user||d;
     const email = document.getElementById('edit-email'); if(email) email.value = u.email||'';
     const phone = document.getElementById('edit-phone'); if(phone) phone.value = u.phone||'';
     const dob = document.getElementById('edit-dob'); if(dob) dob.value = u.date_of_birth||'';
     const bio = document.getElementById('edit-bio'); if(bio) bio.value = u.biography||'';
+    const role = document.getElementById('edit-role'); if(role) role.value = u.role||'admin';
+    const dept = document.getElementById('edit-dept'); if(dept) dept.value = u.department||'';
+    const pos = document.getElementById('edit-pos'); if(pos) pos.value = u.position||'';
   }).catch(()=>{});
 }
 async function submitEditUser(username) {
@@ -2260,6 +2568,9 @@ async function submitEditUser(username) {
   const phone = document.getElementById('edit-phone'); if(phone) payload.phone = phone.value;
   const dob = document.getElementById('edit-dob'); if(dob) payload.date_of_birth = dob.value;
   const bio = document.getElementById('edit-bio'); if(bio) payload.biography = bio.value;
+  const dept = document.getElementById('edit-dept'); if(dept) payload.department = dept.value;
+  const pos = document.getElementById('edit-pos'); if(pos) payload.position = pos.value;
+  const role = document.getElementById('edit-role'); if(role) payload.role = role.value;
   try {
     const res = await fetch('/api/users/'+encodeURIComponent(username), {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
     const data = await res.json();
@@ -2324,6 +2635,139 @@ async function deleteUser(username) {
     const res = await fetch('/api/users/'+encodeURIComponent(username), { method:'DELETE' });
     if (!res.ok) throw new Error('Failed');
     showToast('User deleted'); renderUsers();
+  } catch(e) { showToast('Failed: '+e.message,'error'); }
+}
+
+// ══════════════════════════════════════════
+// MY PROFILE — Personal settings
+// ══════════════════════════════════════════
+async function renderMyProfile() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading profile...</div>';
+  try {
+    const res = await fetch('/api/users/'+encodeURIComponent(user.username));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed');
+    const u = data.user || data;
+    const prefs = u.preferences || {};
+    const avatarHtml = u.avatar
+      ? `<img src="${escHtml(u.avatar)}" class="avatar-img">`
+      : `<div class="avatar-initial">${escHtml(user.username.charAt(0).toUpperCase())}</div>`;
+    el.innerHTML = `
+      <div class="table-wrap">
+        <div class="table-toolbar"><span class="ttl">My Profile</span><span class="ttl-sub">Personal information</span></div>
+        <div class="profile-card">
+          <div class="profile-avatar">${avatarHtml}</div>
+          <div class="profile-info">
+            <div class="profile-name">${escHtml(user.username)}</div>
+            <div class="profile-role">${user.role === 'super_admin' ? 'Super Admin' : (user.role === 'admin' ? 'Admin' : user.role)}</div>
+            <div class="detail-grid">
+              <div class="detail-field"><div class="label">Email</div><div class="val">${escHtml(u.email||'—')}</div></div>
+              <div class="detail-field"><div class="label">Phone</div><div class="val">${escHtml(u.phone||'—')}</div></div>
+              <div class="detail-field"><div class="label">Date of Birth</div><div class="val">${escHtml(u.date_of_birth||'—')}</div></div>
+              <div class="detail-field"><div class="label">Biography</div><div class="val">${escHtml(u.biography||'—')}</div></div>
+            </div>
+            <div class="profile-actions">
+              <button class="btn btn-ghost btn-sm" onclick="showEditProfileForm()">✏️ Edit Profile</button>
+              <button class="btn btn-ghost btn-sm" onclick="showChangePasswordModal()">🔑 Change Password</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap" style="margin-top:16px">
+        <div class="table-toolbar"><span class="ttl">Preferences</span><span class="ttl-sub">Notification & alert settings</span></div>
+        <div style="padding:16px">
+          <div class="toggle-group">
+            <div class="toggle-row">
+              <div><div class="toggle-label">Email Notifications</div><div class="toggle-desc">Receive email notifications for updates</div></div>
+              <label class="toggle-switch">
+                <input type="checkbox" ${prefs.email_notifications!==false?'checked':''} onchange="saveUserPreference('email_notifications', this.checked)">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <div><div class="toggle-label">Maintenance Alerts</div><div class="toggle-desc">Get alerted about new maintenance requests</div></div>
+              <label class="toggle-switch">
+                <input type="checkbox" ${prefs.maintenance_alerts!==false?'checked':''} onchange="saveUserPreference('maintenance_alerts', this.checked)">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <div><div class="toggle-label">Weekly Reports</div><div class="toggle-desc">Receive weekly performance summary</div></div>
+              <label class="toggle-switch">
+                <input type="checkbox" ${prefs.weekly_reports||false?'checked':''} onchange="saveUserPreference('weekly_reports', this.checked)">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">👤</div><h3>Failed to load profile</h3><p>${escHtml(e.message)}</p></div>`;
+  }
+}
+
+function showEditProfileForm() {
+  openModal(`<h2>Edit Profile</h2><div class="sub">Update your personal information</div>
+    <div class="form-group"><label>Email</label><input type="email" id="my-edit-email" placeholder="email@example.com"></div>
+    <div class="form-group"><label>Phone</label><input type="tel" id="my-edit-phone" placeholder="+44..."></div>
+    <div class="form-group"><label>Date of Birth</label><input type="date" id="my-edit-dob"></div>
+    <div class="form-group"><label>Biography</label><textarea id="my-edit-bio" rows="3" placeholder="About you..."></textarea></div>
+    <div class="form-actions"><button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-submit" onclick="submitEditProfile()">Save</button></div>`);
+  fetch('/api/users/'+encodeURIComponent(user.username)).then(r=>r.json()).then(d=>{
+    const u = d.user||d;
+    const email = document.getElementById('my-edit-email'); if(email) email.value = u.email||'';
+    const phone = document.getElementById('my-edit-phone'); if(phone) phone.value = u.phone||'';
+    const dob = document.getElementById('my-edit-dob'); if(dob) dob.value = u.date_of_birth||'';
+    const bio = document.getElementById('my-edit-bio'); if(bio) bio.value = u.biography||'';
+  }).catch(()=>{});
+}
+
+async function submitEditProfile() {
+  const payload = {};
+  const email = document.getElementById('my-edit-email'); if(email) payload.email = email.value;
+  const phone = document.getElementById('my-edit-phone'); if(phone) payload.phone = phone.value;
+  const dob = document.getElementById('my-edit-dob'); if(dob) payload.date_of_birth = dob.value;
+  const bio = document.getElementById('my-edit-bio'); if(bio) payload.biography = bio.value;
+  try {
+    const res = await fetch('/api/users/'+encodeURIComponent(user.username), {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error||'Failed');
+    closeModal(); showToast('Profile updated'); renderMyProfile();
+  } catch(e) { showToast('Failed: '+e.message,'error'); }
+}
+
+function showChangePasswordModal() {
+  openModal(`<h2>Change Password</h2><div class="sub">Update your account password</div>
+    <div class="form-group"><label>Current Password</label><input type="password" id="cp-current" placeholder="Enter current password"></div>
+    <div class="form-group"><label>New Password</label><input type="password" id="cp-new" placeholder="Enter new password (min 6 chars)"></div>
+    <div class="form-group"><label>Confirm New Password</label><input type="password" id="cp-confirm" placeholder="Confirm new password"></div>
+    <div class="form-actions"><button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-submit" onclick="submitChangePasswordProfile()">Update Password</button></div>`);
+}
+
+async function submitChangePasswordProfile() {
+  const current = document.getElementById('cp-current').value;
+  const newPw = document.getElementById('cp-new').value;
+  const confirm = document.getElementById('cp-confirm').value;
+  if (!current || !newPw) { showToast('All fields required','error'); return; }
+  if (newPw !== confirm) { showToast('New passwords do not match','error'); return; }
+  if (newPw.length < 6) { showToast('Password must be at least 6 characters','error'); return; }
+  try {
+    const res = await fetch('/api/user/change-password', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({current_password:current, new_password:newPw, confirm_password:confirm}) });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error||'Failed');
+    closeModal(); showToast('Password updated');
+  } catch(e) { showToast('Failed: '+e.message,'error'); }
+}
+
+async function saveUserPreference(key, value) {
+  try {
+    const res = await fetch('/api/user/preferences', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({preferences:{[key]:value}}) });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error||'Failed');
+    showToast('Preference saved');
   } catch(e) { showToast('Failed: '+e.message,'error'); }
 }
 
@@ -2696,6 +3140,178 @@ async function submitNewOwner() {
 
 // ══════════════════════════════════════════
 // ══════════════════════════════════════════
+// SUBMISSIONS — Tenant portal & referencing inbox
+// ══════════════════════════════════════════
+let subState = { items: [], counts: {}, filter: 'all' };
+
+function subKindMeta(kind) {
+  const m = {
+    referencing: { label: 'Referencing', icon: '📋', color: '#6366f1', bg: '#eef2ff' },
+    maintenance: { label: 'Maintenance', icon: '🔧', color: '#d97706', bg: '#fffbeb' },
+    message:     { label: 'Message',     icon: '✉',  color: '#2563eb', bg: '#eff6ff' },
+    document:    { label: 'Document',    icon: '📎', color: '#0d9488', bg: '#f0fdfa' }
+  };
+  return m[kind] || { label: kind, icon: '•', color: '#64748b', bg: '#f1f5f9' };
+}
+
+async function renderSubmissions(resourceId) {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading submissions...</div>';
+  try {
+    const res = await api('/submissions?limit=100');
+    subState.items = res.data.items || [];
+    subState.counts = res.data.counts || {};
+    if (resourceId && ['all','referencing','maintenance','message','document','new'].includes(resourceId)) {
+      subState.filter = resourceId;
+    }
+    drawSubmissions();
+  } catch (e) {
+    el.innerHTML = '<div class="empty-state" style="padding:40px"><div class="icon">📥</div><h3>Failed to load submissions</h3><p>'+escHtml(e.message)+'</p></div>';
+  }
+}
+
+function drawSubmissions() {
+  const c = subState.counts;
+  const f = subState.filter;
+  const tabs = [
+    { key:'all',         label:'All',            n:(subState.items.length) },
+    { key:'new',         label:'Needs attention', n:(c.needs_attention||0) },
+    { key:'referencing', label:'Referencing',    n:(c.referencing||0) },
+    { key:'maintenance', label:'Maintenance',    n:(c.maintenance||0) },
+    { key:'message',     label:'Messages',       n:(c.message||0) },
+    { key:'document',    label:'Documents',      n:(c.document||0) }
+  ];
+  let list = subState.items.slice();
+  if (f === 'new') list = list.filter(i => i.needs_attention);
+  else if (f !== 'all') list = list.filter(i => i.kind === f);
+
+  const tabsHtml = tabs.map(t => {
+    const active = f === t.key;
+    const attn = t.key === 'new' && t.n > 0;
+    return `<button onclick="subSetFilter('${t.key}')" class="btn btn-sm ${active?'btn-primary':'btn-ghost'}" style="margin-right:6px${attn&&!active?';color:#dc2626':''}">${t.label} <span style="opacity:.7">(${t.n})</span></button>`;
+  }).join('');
+
+  const rows = list.length ? list.map(i => {
+    const meta = subKindMeta(i.kind);
+    const attn = i.needs_attention ? '<span class="badge badge-new" style="margin-left:8px">NEW</span>' : '';
+    return `<tr onclick="openSubmission(${i.id},'${i.kind}')" style="cursor:pointer">
+      <td><span class="kpi-icon" style="background:${meta.bg};color:${meta.color};font-size:13px">${meta.icon}</span></td>
+      <td><div style="font-weight:600;color:#1e293b">${escHtml(i.title)}${attn}</div><div style="font-size:12px;color:#64748b">${escHtml(i.subtitle||'')}</div></td>
+      <td><span style="font-size:11px;color:#64748b;font-weight:600">${meta.label}</span></td>
+      <td>${statusBadge(i.status)}</td>
+      <td style="font-size:12px;color:#64748b">${i.ref||''}</td>
+      <td style="font-size:12px;color:#64748b">${fmtDateISO(i.timestamp)}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="6"><div class="empty-state" style="padding:40px"><div class="icon">✓</div><h3>Nothing here</h3><p>No ${f==='all'?'':(f+' ')}submissions to show.</p></div></td></tr>`;
+
+  document.getElementById('page-content').innerHTML = `
+    <div style="margin-bottom:16px">${tabsHtml}</div>
+    <div class="table-wrap">
+      <div class="table-toolbar"><span class="ttl">Submissions Inbox</span><span class="ttl-sub">Everything sent in via the tenant portal & referencing portal</span></div>
+      <table class="data-table">
+        <thead><tr><th style="width:44px"></th><th>Item</th><th>Type</th><th>Status</th><th>Reference</th><th>Received</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function subSetFilter(k) { subState.filter = k; drawSubmissions(); }
+
+function openSubmission(id, kind) {
+  const item = subState.items.find(i => i.id === id && i.kind === kind);
+  if (!item) return;
+  if (kind === 'referencing') {
+    // Deep-link straight to this applicant in the referencing review panel
+    window.location.href = '/banksia-os/referencing?form=' + item.link_id;
+  } else if (kind === 'message') {
+    navigate('messages', item.link_id);
+  } else if (kind === 'maintenance') {
+    openMaintenanceSubmission(item.link_id);
+  } else if (kind === 'document') {
+    openDocumentSubmission(item);
+  }
+}
+
+function openDocumentSubmission(item) {
+  const dl = '/api/referencing/documents/' + item.link_id + '?download=1';
+  const view = '/api/referencing/documents/' + item.link_id;
+  openDetail('Document · ' + (item.ref || ''), `
+    <div style="padding:4px">
+      <h3 style="margin:0 0 4px;color:#1e293b;word-break:break-all">${escHtml(item.title||'Uploaded document')}</h3>
+      <div style="margin-bottom:14px">${statusBadge(item.status||'awaiting review')}</div>
+      <table style="width:100%;font-size:13px;color:#475569">
+        <tr><td style="padding:4px 0;color:#94a3b8">Uploaded by</td><td>${escHtml(item.subtitle||'Applicant')}</td></tr>
+        <tr><td style="padding:4px 0;color:#94a3b8">Received</td><td>${fmtDateISO(item.timestamp)}</td></tr>
+      </table>
+      <div style="margin-top:18px;display:flex;gap:8px">
+        <a class="btn btn-primary btn-sm" href="${dl}" target="_blank" rel="noopener">Download</a>
+        <a class="btn btn-ghost btn-sm" href="${view}" target="_blank" rel="noopener">Open metadata</a>
+      </div>
+      <div style="margin-top:14px;font-size:12px;color:#94a3b8">Verify this document from the applicant's referencing file.</div>
+    </div>`);
+}
+
+async function openMaintenanceSubmission(reqId) {
+  openDetail('Maintenance Request', '<div class="loading"><div class="spinner"></div>Loading...</div>');
+  try {
+    const res = await fetch('/api/referencing/maintenance/requests', {headers:{'Accept':'application/json'}});
+    let r = null;
+    if (res.ok) {
+      const j = await res.json();
+      const arr = (j.data && j.data.requests) || [];
+      r = arr.find(x => x.id === reqId);
+    }
+    if (!r) { r = subState.items.find(i => i.kind==='maintenance' && i.link_id===reqId) || {}; }
+    const statuses = ['open','in_progress','resolved','closed','rejected'];
+    const cur = (r.status||'open').toLowerCase();
+    const btns = statuses.map(s => `<button class="btn btn-sm ${s===cur?'btn-primary':'btn-ghost'}" onclick="setMaintenanceStatus(${reqId},'${s}')" style="margin:2px">${s.replace('_',' ')}</button>`).join('');
+    openDetail('Maintenance · ' + (r.reference || ('MR-'+reqId)), `
+      <div style="padding:4px">
+        <h3 style="margin:0 0 4px;color:#1e293b">${escHtml(r.title||'Maintenance request')}</h3>
+        <div style="margin-bottom:12px">${statusBadge(r.status||'open')} <span class="badge badge-pending">${escHtml(r.priority||'normal')}</span></div>
+        <div style="font-size:13px;color:#475569;line-height:1.6;white-space:pre-wrap;margin-bottom:16px">${escHtml(r.description||'No description provided.')}</div>
+        <table style="width:100%;font-size:13px;color:#475569">
+          <tr><td style="padding:4px 0;color:#94a3b8">Reported by</td><td>${escHtml(r.reporter_name||'Tenant')}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8">Email</td><td>${escHtml(r.reporter_email||'—')}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8">Category</td><td>${escHtml(r.category||'General')}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8">Location</td><td>${escHtml(r.location||'—')}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8">Received</td><td>${fmtDateISO(r.created)}</td></tr>
+        </table>
+        <div style="margin-top:18px;border-top:1px solid #e2e8f0;padding-top:14px">
+          <div style="font-size:12px;font-weight:600;color:#64748b;margin-bottom:8px">Update status</div>
+          <div>${btns}</div>
+        </div>
+      </div>`);
+  } catch (e) {
+    document.getElementById('detail-body').innerHTML = '<div class="empty-state" style="padding:30px"><p>'+escHtml(e.message)+'</p></div>';
+  }
+}
+
+async function setMaintenanceStatus(reqId, status) {
+  try {
+    const res = await fetch('/api/referencing/maintenance/requests/' + reqId, {
+      method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status})
+    });
+    const j = await res.json();
+    if (!j.success) throw new Error(j.error||'Update failed');
+    closeDetail();
+    renderSubmissions(subState.filter);
+    updateSubmissionsBadge();
+  } catch (e) { alert('Could not update: ' + e.message); }
+}
+
+async function updateSubmissionsBadge() {
+  try {
+    const res = await api('/submissions?new=1&limit=1');
+    const n = (res.data.counts && res.data.counts.needs_attention) || 0;
+    const badge = document.getElementById('nav-badge-submissions');
+    if (!badge) return;
+    if (n > 0) { badge.textContent = n; badge.style.display = ''; badge.style.background = '#dc2626'; badge.style.color = '#fff'; }
+    else { badge.style.display = 'none'; }
+  } catch (e) { /* silent */ }
+}
+
+// ══════════════════════════════════════════
 // MESSAGES — Threaded conversations
 // ══════════════════════════════════════════
 let msgState = { threads:[], selectedThread:null, messages:[], search:'', taskDetails:null };
@@ -2713,7 +3329,24 @@ function fmtTimeDate(d) {
   } catch(e) { return d; }
 }
 async function renderMessages() { try { const res = await api('/threads'); msgState.threads = res.data || []; const el = document.getElementById('page-content'); el.innerHTML = buildMessagesLayout(); renderThreadList(); } catch(e) { document.getElementById('page-content').innerHTML = '<div class="empty-state" style="padding:40px"><div class="icon">✉</div><h3>Failed to load threads</h3><p>'+escHtml(e.message)+'</p></div>'; } }
-function buildMessagesLayout() { return '<div class="msg-layout"><div class="msg-threads"><div class="msg-toolbar"><button onclick="showNewThreadForm()">+ New Thread</button><span class="spacer"></span><button onclick="document.getElementById(\'msg-thread-search-input\').focus()">🔍</button></div><div class="thread-search"><input placeholder="Search threads..." id="msg-thread-search-input" value="'+escHtml(msgState.search)+'" onkeyup="if(event.key===\'Enter\'){msgState.search=this.value;renderThreadList()}"></div><div class="msg-thread-list" id="msg-thread-list"></div></div><div class="msg-conversation" id="msg-conversation"><div class="msg-header" id="msg-conv-header">Select a thread</div><div class="msg-body" id="msg-conv-body"><div class="empty-state" style="padding:40px"><div class="icon">✉</div><h3>Select a conversation</h3></div></div><div class="msg-input-area" id="msg-input-area" style="display:none"><button class="attach-btn" onclick="document.getElementById(\'msg-file-input\').click()" title="Attach file">📎</button><input type="file" id="msg-file-input" style="display:none" onchange="attachFile(this)"><input type="text" id="msg-reply-input" placeholder="Type a message..." onkeyup="if(event.key===\'Enter\')sendMessage()" autocomplete="off"><button class="btn btn-primary btn-sm" onclick="sendMessage()">Send</button></div></div><div class="msg-task-panel" id="msg-task-panel"><div class="empty-state" style="padding:20px"><div class="icon">☰</div><h3>Task Details</h3><p style="font-size:11px;color:#555">Select a thread to view</p></div></div></div>'; }
+async function refreshThreads() {
+  try {
+    const res = await api('/threads');
+    msgState.threads = res.data || [];
+    renderThreadList();
+    if (msgState.selectedThread) {
+      const tid = msgState.selectedThread.id||msgState.selectedThread.thread_id;
+      const msgRes = await api('/threads/'+tid);
+      msgState.messages = msgRes.data?.messages||[];
+      renderMessagesToBody(document.getElementById('msg-conv-body'));
+      renderTaskPanel(msgState.selectedThread);
+    }
+    showToast('Threads refreshed');
+  } catch(e) {
+    showToast('Failed to refresh: '+e.message,'error');
+  }
+}
+function buildMessagesLayout() { return '<div class="msg-layout"><div class="msg-threads"><div class="msg-toolbar"><button onclick="showNewThreadForm()">+ New Thread</button><span class="spacer"></span><button onclick="document.getElementById(\'msg-thread-search-input\').focus()">🔍</button><button onclick="refreshThreads()" title="Refresh threads">🔄</button></div><div class="thread-search"><input placeholder="Search threads..." id="msg-thread-search-input" value="'+escHtml(msgState.search)+'" onkeyup="if(event.key===\'Enter\'){msgState.search=this.value;renderThreadList()}"></div><div class="msg-thread-list" id="msg-thread-list"></div></div><div class="msg-conversation" id="msg-conversation"><div class="msg-header" id="msg-conv-header">Select a thread</div><div class="msg-body" id="msg-conv-body"><div class="empty-state" style="padding:40px"><div class="icon">✉</div><h3>Select a conversation</h3></div></div><div class="msg-input-area" id="msg-input-area" style="display:none"><button class="attach-btn" onclick="document.getElementById(\'msg-file-input\').click()" title="Attach file">📎</button><input type="file" id="msg-file-input" style="display:none" onchange="attachFile(this)"><input type="text" id="msg-reply-input" placeholder="Type a message..." onkeyup="if(event.key===\'Enter\')sendMessage()" autocomplete="off"><button class="btn btn-primary btn-sm" onclick="sendMessage()">Send</button></div></div><div class="msg-task-panel" id="msg-task-panel"><div class="empty-state" style="padding:20px"><div class="icon">☰</div><h3>Task Details</h3><p style="font-size:11px;color:#555">Select a thread to view</p></div></div></div>'; }
 function renderThreadList() { const list = document.getElementById('msg-thread-list'); if (!list) return; const search = msgState.search.toLowerCase(); const filtered = msgState.threads.filter(t => (t.subject||t.title||'').toLowerCase().includes(search) || (t.participants||[]).some(p => (p||'').toLowerCase().includes(search))); if (filtered.length === 0) { list.innerHTML = '<div style="padding:20px;text-align:center;color:#555;font-size:12px">No threads found</div>'; return; } list.innerHTML = filtered.map(t => { const id = t.id||t.thread_id; const isActive = msgState.selectedThread && (msgState.selectedThread.id === id); const lm = t.last_message||{}; const preview = lm.body||t.preview||''; const lmAuthor = lm.author ? (lm.author+': ') : ''; return '<div class="msg-thread-item '+(isActive?'active':'')+'" onclick="selectThread(\''+id+'\')"><div class="thread-name">'+escHtml(t.subject||t.title||'Untitled')+'</div><div class="thread-preview">'+escHtml(lmAuthor+preview)+'</div><div class="thread-meta"><span>'+escHtml((t.participants||[]).join(', '))+'</span><span>'+fmtTimeDate(t.last_updated||t.updated_at)+'</span></div></div>'; }).join(''); }
 async function selectThread(id) { const t = msgState.threads.find(t => (t.id||t.thread_id) == id); if (!t) return; msgState.selectedThread = t; renderThreadList(); const header = document.getElementById('msg-conv-header'); const body = document.getElementById('msg-conv-body'); const inputArea = document.getElementById('msg-input-area'); if (header) header.textContent = escHtml(t.subject||t.title||'Conversation'); if (body) body.innerHTML = '<div class="loading"><div class="spinner"></div>Loading messages...</div>'; if (inputArea) inputArea.style.display = 'flex'; try { const res = await api('/threads/'+id); const msgs = res.data?.messages||[]; msgState.messages = msgs; renderMessagesToBody(body); renderTaskPanel(t); } catch(e) { if(body) body.innerHTML = '<div class="empty-state" style="padding:20px"><div class="icon">⚠</div><h3>Failed to load messages</h3></div>'; } }
 function renderMessagesToBody(body) { if(!body) return; if(msgState.messages.length===0) { body.innerHTML = '<div class="empty-state" style="padding:20px"><p style="color:#555;font-size:13px">No messages yet. Start the conversation.</p></div>'; return; } const currentUser = (user?.username||user?.name||'').toLowerCase(); body.innerHTML = msgState.messages.map(m => { const msgAuthor = (m.author||m.sender||m.from||'').toLowerCase(); const isSent = msgAuthor===currentUser||msgAuthor==='me'||m.is_me||m.author_role==='team'; const isDeleted = m.is_deleted==1; const isEdited = m.edited==1; const msgId = m.id; if(isDeleted) return '<div class="msg-deleted">[This message was deleted]</div>'; return '<div class="msg-bubble '+(isSent?'sent':'received')+'" style="position:relative">'+(isSent?'<div class="msg-actions"><button onclick="editMessage('+msgId+',event)" title="Edit">✏️</button><button class="danger" onclick="deleteMessage('+msgId+',event)" title="Delete">🗑️</button></div>':'')+'<div class="msg-text" id="msg-text-'+msgId+'">'+escHtml(m.body||m.message||m.content||'')+(isEdited?'<span class="msg-edited">(edited)</span>':'')+'</div><div class="msg-time">'+(isSent?'You':escHtml(m.author||m.sender||m.from||'Unknown'))+' · '+fmtTimeDate(m.created_at||m.timestamp||m.created)+'</div></div>'; }).join(''); body.scrollTop = body.scrollHeight; }
@@ -2722,7 +3355,29 @@ async function saveEdit(id) { const input = document.getElementById('edit-input-
 function cancelEdit(id, originalText) { const textEl = document.getElementById('msg-text-'+id); if(textEl) textEl.innerHTML = escHtml(originalText); }
 async function deleteMessage(id, event) { if(event) event.stopPropagation(); if(!confirm('Delete this message?')) return; try { await api('/messages/'+id, {method:'DELETE'}); const tid = msgState.selectedThread?.id||msgState.selectedThread?.thread_id; if(tid) { const res = await api('/threads/'+tid); msgState.messages = res.data?.messages||[]; renderMessagesToBody(document.getElementById('msg-conv-body')); } showToast('Message deleted'); } catch(e) { showToast('Failed to delete: '+e.message,'error'); } }
 async function sendMessage() { const input = document.getElementById('msg-reply-input'); if(!input||!input.value.trim()||!msgState.selectedThread) return; const text = input.value.trim(); input.value = ''; const id = msgState.selectedThread.id||msgState.selectedThread.thread_id; try { await api('/messages', {method:'POST', body:JSON.stringify({thread_id: id, body: text, author: user?.username||user?.name||'User', author_role: 'team'})}); const res = await api('/threads/'+id); msgState.messages = res.data?.messages||[]; renderMessagesToBody(document.getElementById('msg-conv-body')); } catch(e) { showToast('Failed to send: '+e.message,'error'); } }
-function attachFile(input) { if(!input||!input.files||!input.files[0]) return; showToast('Attached: '+input.files[0].name); input.value = ''; }
+async function attachFile(input) {
+  if(!input||!input.files||!input.files[0]) return;
+  const file = input.files[0];
+  const tid = msgState.selectedThread?.id||msgState.selectedThread?.thread_id;
+  if (!tid) { showToast('Select a thread first','error'); input.value = ''; return; }
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('author', user?.username||user?.name||'User');
+  try {
+    const res = await fetch(API+'/threads/'+tid+'/attachments', { method:'POST', body:fd });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error||'Upload failed');
+    showToast('File attached: '+file.name);
+    input.value = '';
+    // Refresh messages
+    const msgRes = await api('/threads/'+tid);
+    msgState.messages = msgRes.data?.messages||[];
+    renderMessagesToBody(document.getElementById('msg-conv-body'));
+  } catch(e) {
+    showToast('Failed to attach: '+e.message,'error');
+    input.value = '';
+  }
+}
 function renderTaskPanel(thread) { const panel = document.getElementById('msg-task-panel'); if(!panel) return; let html = '<div class="task-label">Subject</div><div class="task-value">'+escHtml(thread.subject||thread.title||'—')+'</div>'; html += '<div class="task-label">Participants</div><div class="task-value">'+escHtml((thread.participants||[]).join(', ')||'—')+'</div>'; html += '<div class="task-label">Status</div><div class="task-value">'+statusBadge(thread.status||'active')+'</div>'; html += '<div class="task-label">Priority</div><div class="task-value">'+escHtml(thread.priority||'Normal')+'</div>'; html += '<div class="task-label">Messages</div><div class="task-value">'+(thread.message_count||0)+'</div>'; html += '<div class="task-label">Last Updated</div><div class="task-value">'+fmtTimeDate(thread.last_updated||thread.updated_at)+'</div>'; html += '<div class="task-label">Notes</div><div class="task-value">'+escHtml(thread.notes||'—')+'</div>'; if(thread.assigned_to) html += '<div class="task-label">Assigned To</div><div class="task-value">'+escHtml(thread.assigned_to)+'</div>'; panel.innerHTML = html; }
 function showNewThreadForm() { openModal('<h2>New Thread</h2><div class="sub">Start a new conversation</div><div class="form-group"><label>Subject</label><input type="text" id="newthread-title" placeholder="Thread subject..."></div><div class="form-group"><label>Participants</label><input type="text" id="newthread-participants" placeholder="Comma-separated names"></div><div class="form-row"><div class="form-group" style="flex:1"><label>Priority</label><select id="newthread-priority"><option value="low">Low</option><option value="normal" selected>Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></div><div class="form-group" style="flex:1"><label>Status</label><select id="newthread-status"><option value="open" selected>Open</option><option value="in-progress">In Progress</option><option value="resolved">Resolved</option></select></div></div><div class="form-group"><label>First Message</label><textarea id="newthread-body" rows="3" placeholder="Write your first message..."></textarea></div><div class="form-actions"><button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button><button class="btn btn-submit" onclick="submitNewThread()">Create Thread</button></div>'); }
 async function submitNewThread() { const title = document.getElementById('newthread-title')?.value?.trim(); if(!title) { showToast('Subject required','error'); return; } const participants = document.getElementById('newthread-participants')?.value?.split(',').map(s=>s.trim()).filter(Boolean)||[]; const priority = document.getElementById('newthread-priority')?.value||'normal'; const status = document.getElementById('newthread-status')?.value||'open'; const body = document.getElementById('newthread-body')?.value?.trim()||''; try { await api('/threads', {method:'POST', body:JSON.stringify({title, status, priority, participants: JSON.stringify(participants), raised_by: user?.username||user?.name||'User', body, author: user?.username||user?.name||'User'})}); closeModal(null); showToast('Thread created'); renderMessages(); } catch(e) { showToast('Failed: '+e.message,'error'); } }
@@ -2946,6 +3601,638 @@ async function submitTenancyFromApplicant(applicantId) {
     closeModal(null); showToast('Tenancy created'); navigate('tenancies');
   } catch(e) { showToast('Failed: '+e.message,'error'); }
 }
+
+// ══════════════════════════════════════════
+// MAINTENANCE — Job management
+// ══════════════════════════════════════════
+let maintState = { page:1, perPage:50, total:0, filter:'', search:'', jobs:[], detailJobs:{}, counts:{}, viewMode:(localStorage.getItem('maintViewMode')||'table'), boardJobs:[] };
+function maintSetView(mode){ maintState.viewMode = mode; localStorage.setItem('maintViewMode', mode); if(mode==='board' && !maintState.boardJobs.length){ loadMaintBoard(); } else { drawMaintenance(); } }
+async function loadMaintBoard(){
+  const el = document.getElementById('page-content');
+  if(el) el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading board...</div>';
+  try {
+    const res = await api('/maintenance/jobs?per_page=500');
+    maintState.boardJobs = res.data || [];
+    const counts = {}; maintState.boardJobs.forEach(j=>{ const s=j.status||'PENDING'; counts[s]=(counts[s]||0)+1; });
+    maintState.counts = counts;
+    drawMaintenance();
+  } catch(e){
+    if(el) el.innerHTML = '<div class="empty-state" style="padding:40px"><div class="icon">🔧</div><h3>Failed to load board</h3><p>'+escHtml(e.message)+'</p></div>';
+  }
+}
+
+async function renderMaintenance(resourceId) {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading maintenance jobs...</div>';
+  if (maintState.viewMode === 'board') { maintState.boardJobs = []; return loadMaintBoard(); }
+  try {
+    const params = new URLSearchParams({ page: maintState.page, per_page: maintState.perPage });
+    if (maintState.filter) params.set('status', maintState.filter);
+    if (maintState.search) params.set('search', maintState.search);
+    // Also get counts — need separate request since backend returns counts only once per page
+    let countsData = {};
+    try {
+      const countRes = await api('/maintenance/jobs?per_page=200');
+      const allJobs = countRes.data || [];
+      allJobs.forEach(j => { const s = j.status || 'PENDING'; countsData[s] = (countsData[s]||0) + 1; });
+    } catch(e){}
+    const listRes = await api('/maintenance/jobs?' + params.toString());
+    maintState.jobs = listRes.data || [];
+    maintState.total = listRes.total || maintState.jobs.length;
+    maintState.counts = countsData;
+    drawMaintenance();
+  } catch (e) {
+    el.innerHTML = '<div class="empty-state" style="padding:40px"><div class="icon">🔧</div><h3>Failed to load maintenance jobs</h3><p>'+escHtml(e.message)+'</p></div>';
+  }
+}
+
+function drawMaintenance() {
+  if (maintState.viewMode === 'board') { drawMaintenanceBoard(); return; }
+  const jobs = maintState.jobs;
+  const counts = maintState.counts;
+  const filter = maintState.filter;
+
+  const allStatuses = ['PENDING','IN PROGRESS','LIVE','ON HOLD','CANCELLED','COMPLETED','ACKNOWLEDGED','WAITING INVOICE','No Invoice Found','Invoice Uploaded'];
+  const pills = allStatuses.map(s => {
+    const active = filter === s;
+    const cnt = counts[s] || 0;
+    return `<button class="btn btn-sm ${active?'btn-primary':'btn-ghost'}" onclick="maintSetFilter('${s===''?'':s}')" style="margin:2px">${escHtml(s)} (${cnt})</button>`;
+  }).join('');
+
+  const rows = jobs.length ? jobs.map(j => {
+    const priColor = j.priority === 'Emergency' ? '#dc2626' :
+      j.priority === 'Critical' ? '#d97706' :
+      j.priority === 'High' ? '#ea580c' :
+      j.priority === 'Low' ? '#64748b' : '#1e293b';
+    const billLl = j.bill_ll ? '<span style="color:#16a34a;font-size:11px">✓ Bill LL</span>' : '';
+    const llBadge = j.ll_informed ? '<span style="color:#16a34a;font-size:11px">Informed</span>' : (j.bill_ll ? '<span style="color:#d97706;font-size:11px">Uninformed</span>' : '');
+    return `<tr onclick="openMaintenanceJob(${j.id})" style="cursor:pointer">
+      <td><strong style="font-size:12px">${escHtml(j.reference||'#'+j.id)}</strong></td>
+      <td><div style="font-weight:600;color:#1e293b">${escHtml(j.title||'')}</div></td>
+      <td><span class="badge" style="background:${priColor}20;color:${priColor};font-weight:600">${escHtml(j.priority||'Medium')}</span></td>
+      <td>${statusBadge(j.status)}</td>
+      <td style="font-size:12px;color:#475569">${escHtml(j.address||j.property_name||'—')}</td>
+      <td style="font-size:12px;color:#475569">${escHtml(j.contractor||'—')}</td>
+      <td style="font-size:12px;color:#475569">${fmtMoney(j.labour_cost)}</td>
+      <td style="font-size:12px;color:#475569">${fmtMoney(j.materials_cost)}</td>
+      <td style="font-size:11px">${billLl} ${llBadge}</td>
+      <td style="font-size:12px;color:#475569;text-align:center">${j.order_count||0}</td>
+      <td style="font-size:12px;color:#64748b">${fmtDateISO(j.created)}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="11"><div class="empty-state" style="padding:40px"><div class="icon">🔧</div><h3>No jobs found</h3><p>'+escHtml(filter?'No jobs match the current filter.':'Create your first maintenance job.')+'</p></div></td></tr>';
+
+  const totalCost = jobs.reduce((s,j) => s + (j.labour_cost||0) + (j.materials_cost||0), 0);
+
+  document.getElementById('page-content').innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <input placeholder="Search jobs..." value="${escHtml(maintState.search)}" onkeyup="if(event.key==='Enter'){maintState.search=this.value;maintState.page=1;drawMaintenance()}" style="width:200px">
+        ${maintState.filter ? '<button class="btn btn-ghost btn-sm" onclick="maintSetFilter(\'\')">✕ Clear filter</button>' : ''}
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="ttl-sub">${maintState.total} jobs · £${Number(totalCost).toLocaleString('en-GB',{minimumFractionDigits:0})} total cost</span>
+        <div class="mv-toggle"><button class="mv-btn active" onclick="maintSetView('table')">☰ Table</button><button class="mv-btn" onclick="maintSetView('board')">▦ Board</button></div>
+        <button class="btn btn-primary" onclick="showNewMaintenanceJob()">+ Create Job</button>
+      </div>
+    </div>
+    <div style="margin-bottom:12px;display:flex;flex-wrap:wrap;gap:2px">${pills}</div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr>
+          <th>Reference</th><th>Title</th><th>Priority</th><th>Status</th><th>Property</th><th>Contractor</th>
+          <th>Labour</th><th>Materials</th><th>Bill LL</th><th style="text-align:center">Orders</th><th>Created</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="pagination">
+        <div style="display:flex;gap:6px">
+          <button class="page-btn" onclick="maintPage(1)" ${maintState.page<=1?'disabled':''}>First</button>
+          <button class="page-btn" onclick="maintPage(${maintState.page-1})" ${maintState.page<=1?'disabled':''}>‹ Prev</button>
+        </div>
+        <span>Page ${maintState.page} of ${Math.max(1,Math.ceil(maintState.total/maintState.perPage))}</span>
+        <div style="display:flex;gap:6px">
+          <button class="page-btn" onclick="maintPage(${maintState.page+1})" ${maintState.page>=Math.ceil(maintState.total/maintState.perPage)?'disabled':''}>Next ›</button>
+          <button class="page-btn" onclick="maintPage(${Math.ceil(maintState.total/maintState.perPage)})" ${maintState.page>=Math.ceil(maintState.total/maintState.perPage)?'disabled':''}>Last</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function maintSetFilter(s) { maintState.filter = s; maintState.page = 1; drawMaintenance(); }
+function maintPage(p) { if(p<1)return; maintState.page = p; drawMaintenance(); }
+
+// ── Monday-style board view ──
+function maintPriColor(p){ return p==='Emergency'?'#dc2626':p==='Critical'?'#d97706':p==='High'?'#8b5cf6':p==='Low'?'#64748b':'#f59e0b'; }
+function maintTypeColor(t){
+  const s=(t||'').toLowerCase();
+  if(s.includes('plumb')||s.includes('leak')||s.includes('water')) return '#0ea5e9';
+  if(s.includes('electric')) return '#eab308';
+  if(s.includes('clean')) return '#22c55e';
+  if(s.includes('boiler')||s.includes('heat')||s.includes('gas')) return '#f97316';
+  if(s.includes('lock')||s.includes('key')||s.includes('door')) return '#a855f7';
+  if(s.includes('appliance')) return '#ec4899';
+  if(s.includes('pest')) return '#84cc16';
+  return '#64748b';
+}
+function maintStatusColor(s){
+  const map={'LIVE':'#0ea5e9','IN PROGRESS':'#3b82f6','PENDING':'#f59e0b','ON HOLD':'#f97316','ACKNOWLEDGED':'#8b5cf6',
+    'COMPLETED':'#22c55e','CANCELLED':'#64748b','WAITING INVOICE':'#eab308','No Invoice Found':'#ef4444','Invoice Uploaded':'#14b8a6'};
+  return map[s]||'#64748b';
+}
+function drawMaintenanceBoard(){
+  let jobs = maintState.boardJobs || [];
+  const q = (maintState.search||'').toLowerCase();
+  if(q) jobs = jobs.filter(j => (j.title||'').toLowerCase().includes(q) || (j.address||'').toLowerCase().includes(q) || (j.reference||'').toLowerCase().includes(q) || (j.contractor||'').toLowerCase().includes(q));
+  // group by status, ordered
+  const order = ['LIVE','IN PROGRESS','PENDING','ACKNOWLEDGED','ON HOLD','WAITING INVOICE','No Invoice Found','Invoice Uploaded','COMPLETED','CANCELLED'];
+  const groups = {};
+  jobs.forEach(j => { const s = j.status||'PENDING'; (groups[s]=groups[s]||[]).push(j); });
+  const statusKeys = order.filter(s=>groups[s]).concat(Object.keys(groups).filter(s=>!order.includes(s)));
+  const totalCost = jobs.reduce((s,j)=>s+(j.labour_cost||0)+(j.materials_cost||0),0);
+
+  const swimlanes = statusKeys.map(status => {
+    const list = groups[status];
+    const col = maintStatusColor(status);
+    const rows = list.map(j => {
+      const pc = maintPriColor(j.priority);
+      const tc = maintTypeColor(j.type||j.title);
+      const billLl = j.bill_ll ? `<span class="mb-flag" style="background:#16a34a22;color:#16a34a">£ Bill LL</span>` : '';
+      const inf = j.bill_ll ? (j.ll_informed ? `<span class="mb-flag" style="background:#16a34a22;color:#16a34a">✓ LL informed</span>` : `<span class="mb-flag" style="background:#d9770622;color:#f59e0b">⚠ LL not informed</span>`) : '';
+      const orders = (j.order_count||0) > 0 ? `<span class="mb-flag" style="background:#6366f122;color:#818cf8">📦 ${j.order_count}</span>` : '';
+      const cost = (j.labour_cost||j.materials_cost) ? `<span class="mb-cost">${fmtMoney((j.labour_cost||0)+(j.materials_cost||0))}</span>` : '';
+      return `<div class="mb-card" onclick="openMaintenanceJob(${j.id})">
+        <div class="mb-priline" style="background:${pc}"></div>
+        <div class="mb-body">
+          <div class="mb-top">
+            <span class="mb-ref">${escHtml(j.reference||'#'+j.id)}</span>
+            ${j.priority?`<span class="mb-pill" style="background:${pc}22;color:${pc}">${escHtml(j.priority)}</span>`:''}
+            ${j.type?`<span class="mb-pill" style="background:${tc}22;color:${tc}">${escHtml(j.type)}</span>`:''}
+          </div>
+          <div class="mb-title">${escHtml(j.title||'Untitled job')}</div>
+          <div class="mb-meta">
+            ${j.address||j.property_name?`<span>📍 ${escHtml(j.address||j.property_name)}</span>`:''}
+            ${j.contractor?`<span>🔧 ${escHtml(j.contractor)}</span>`:''}
+            ${j.created?`<span>📅 ${fmtDate(j.created)}</span>`:''}
+          </div>
+          <div class="mb-flags">${cost}${billLl}${inf}${orders}</div>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div class="mb-lane">
+      <div class="mb-lane-head" style="border-left:4px solid ${col}">
+        <span class="mb-lane-title" style="color:${col}">${escHtml(status)}</span>
+        <span class="mb-lane-count">${list.length}</span>
+      </div>
+      <div class="mb-lane-body">${rows}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('page-content').innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <input placeholder="Search jobs..." value="${escHtml(maintState.search)}" onkeyup="if(event.key==='Enter'){maintState.search=this.value;drawMaintenanceBoard()}" style="width:200px">
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="ttl-sub">${jobs.length} jobs · £${Number(totalCost).toLocaleString('en-GB',{minimumFractionDigits:0})} total</span>
+        <div class="mv-toggle"><button class="mv-btn" onclick="maintSetView('table')">☰ Table</button><button class="mv-btn active" onclick="maintSetView('board')">▦ Board</button></div>
+        <button class="btn btn-primary" onclick="showNewMaintenanceJob()">+ Create Job</button>
+      </div>
+    </div>
+    <div class="mb-board">${swimlanes || '<div class="empty-state" style="padding:40px"><div class="icon">🔧</div><h3>No jobs</h3></div>'}</div>`;
+}
+
+// ── Open maintenance job detail panel ──
+async function openMaintenanceJob(jobId) {
+  openDetail('Maintenance Job', '<div class="loading"><div class="spinner"></div>Loading job details...</div>');
+  try {
+    const res = await api('/maintenance/jobs/' + jobId);
+    const job = res.data;
+    drawMaintenanceDetail(job);
+  } catch (e) {
+    document.getElementById('detail-body').innerHTML = '<div class="empty-state" style="padding:30px"><p>'+escHtml(e.message)+'</p></div>';
+  }
+}
+
+function drawMaintenanceDetail(job) {
+  const priColor = job.priority === 'Emergency' ? '#dc2626' :
+    job.priority === 'Critical' ? '#d97706' :
+    job.priority === 'High' ? '#ea580c' :
+    job.priority === 'Low' ? '#64748b' : '#1e293b';
+
+  const orders = job.orders || [];
+  const llComms = job.ll_comms || [];
+
+  const orderRows = orders.length ? orders.map(o => `
+    <tr>
+      <td style="font-weight:600;color:#1e293b">${escHtml(o.item_name||'—')}</td>
+      <td>${escHtml(o.supplier||'—')}</td>
+      <td>${escHtml(o.order_ref||'—')}</td>
+      <td style="font-weight:600">${fmtMoney(o.cost)}</td>
+      <td>${statusBadge(o.status||'ordered')}</td>
+      <td style="font-size:11px">${o.tracking_url ? '<a href="'+escHtml(o.tracking_url)+'" target="_blank" rel="noopener">Track</a>' : '—'}</td>
+      <td>${fmtDate(o.estimated_delivery)}</td>
+    </tr>
+  `).join('') : '<tr><td colspan="7"><div class="empty-state" style="padding:20px"><div class="icon">📦</div><h3>No orders</h3></div></td></tr>';
+
+  const llRows = llComms.length ? llComms.map(c => `
+    <tr>
+      <td><span class="badge badge-pending">${escHtml(c.contact_method||'—')}</span></td>
+      <td>${fmtDateISO(c.sent_at)}</td>
+      <td style="max-width:200px;word-break:break-word">${escHtml(c.summary||'—')}</td>
+      <td style="max-width:200px;word-break:break-word">${escHtml(c.ll_response||'—')}</td>
+    </tr>
+  `).join('') : '<tr><td colspan="4"><div class="empty-state" style="padding:20px"><div class="icon">💬</div><h3>No communications</h3></div></td></tr>';
+
+  const allStatuses = ['PENDING','IN PROGRESS','LIVE','ON HOLD','CANCELLED','COMPLETED','ACKNOWLEDGED','WAITING INVOICE','No Invoice Found','Invoice Uploaded'];
+  const statusOpts = allStatuses.map(s => `<option value="${s}" ${job.status===s?'selected':''}>${s}</option>`).join('');
+
+  const allPriorities = ['Emergency','Critical','High','Medium','Low'];
+  const priOpts = allPriorities.map(p => `<option value="${p}" ${job.priority===p?'selected':''}>${p}</option>`).join('');
+
+  const allTypes = ['Heating','Plumbing','Electrical','Utilities','Furniture','NA','Cleaning','Structural','Appliances','Refurbishment','Certificate','Orders','Wall Repairs','Painting','Removal','Locksmith','Pest Control','Small Repair','Licenses','Inspection','Gardening'];
+  const typeOpts = allTypes.map(t => `<option value="${t}" ${job.type===t?'selected':''}>${t}</option>`).join('');
+
+  document.getElementById('detail-title').textContent = 'MJ-' + (job.reference||'#'+job.id) + ' · ' + escHtml(job.title||'');
+  document.getElementById('detail-body').innerHTML = `
+    <div class="detail-section">
+      <h3>Job Details</h3>
+      <div class="detail-grid">
+        <div class="detail-field" style="grid-column:1/-1">
+          <div class="label">Title</div>
+          <input type="text" id="maint-title" value="${escHtml(job.title||'')}">
+        </div>
+        <div class="detail-field" style="grid-column:1/-1">
+          <div class="label">Description</div>
+          <textarea id="maint-desc" rows="2" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid #e2e8f0;font-family:Inter,sans-serif;font-size:12px;resize:vertical">${escHtml(job.description||'')}</textarea>
+        </div>
+        <div class="detail-field"><div class="label">Type</div><select id="maint-type">${typeOpts}</select></div>
+        <div class="detail-field"><div class="label">Priority</div><select id="maint-priority">${priOpts}</select></div>
+        <div class="detail-field"><div class="label">Status</div><select id="maint-status">${statusOpts}</select></div>
+        <div class="detail-field"><div class="label">Contractor</div><input type="text" id="maint-contractor" value="${escHtml(job.contractor||'')}"></div>
+        <div class="detail-field"><div class="label">Labour Cost (£)</div><input type="number" step="0.01" id="maint-labour" value="${job.labour_cost||0}"></div>
+        <div class="detail-field"><div class="label">Materials Cost (£)</div><input type="number" step="0.01" id="maint-materials" value="${job.materials_cost||0}"></div>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <h3>Landlord Settings</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;padding:8px 0">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="maint-bill-ll" ${job.bill_ll?'checked':''} style="width:18px;height:18px"> Bill to Landlord
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="maint-ll-informed" ${job.ll_informed?'checked':''} style="width:18px;height:18px"> LL Informed
+        </label>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:12px;color:#64748b">Informed via:</span>
+          <select id="maint-ll-via" style="padding:4px 8px;border-radius:6px;border:1px solid #e2e8f0;font-size:12px">
+            <option value="" ${!job.ll_informed_via?'selected':''}>—</option>
+            <option value="email" ${job.ll_informed_via==='email'?'selected':''}>Email</option>
+            <option value="whatsapp" ${job.ll_informed_via==='whatsapp'?'selected':''}>WhatsApp</option>
+            <option value="phone" ${job.ll_informed_via==='phone'?'selected':''}>Phone</option>
+            <option value="sms" ${job.ll_informed_via==='sms'?'selected':''}>SMS</option>
+            <option value="post" ${job.ll_informed_via==='post'?'selected':''}>Post</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <h3>Orders <span class="ttl-sub">(${orders.length})</span></h3>
+      <div style="overflow-x:auto">
+        <table style="width:100%;font-size:12px">
+          <thead><tr><th>Item</th><th>Supplier</th><th>Order Ref</th><th>Cost</th><th>Status</th><th>Tracking</th><th>Est. Delivery</th></tr></thead>
+          <tbody>${orderRows}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:8px">
+        <button class="btn btn-primary btn-sm" onclick="showAddOrder(${job.id})">+ Add Order</button>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <h3>LL Communications <span class="ttl-sub">(${llComms.length})</span></h3>
+      <div style="overflow-x:auto">
+        <table style="width:100%;font-size:12px">
+          <thead><tr><th>Method</th><th>Sent Date</th><th>Summary</th><th>Response</th></tr></thead>
+          <tbody>${llRows}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:8px">
+        <button class="btn btn-primary btn-sm" onclick="showLogComm(${job.id})">+ Log Communication</button>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <h3>Team Notes</h3>
+      <textarea id="maint-notes" rows="3" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid #e2e8f0;font-family:Inter,sans-serif;font-size:13px;resize:vertical">${escHtml(job.team_notes||'')}</textarea>
+    </div>
+
+    <div style="display:flex;gap:8px;padding-top:8px;border-top:1px solid #e2e8f0">
+      <button class="btn btn-primary" onclick="saveMaintenanceJob(${job.id})">💾 Save Changes</button>
+      <button class="btn btn-ghost" onclick="closeDetail()">Cancel</button>
+    </div>
+  `;
+}
+
+// ── Save maintenance job ──
+async function saveMaintenanceJob(jobId) {
+  const payload = {
+    title: document.getElementById('maint-title')?.value || '',
+    description: document.getElementById('maint-desc')?.value || '',
+    type: document.getElementById('maint-type')?.value || '',
+    priority: document.getElementById('maint-priority')?.value || 'Medium',
+    status: document.getElementById('maint-status')?.value || 'PENDING',
+    contractor: document.getElementById('maint-contractor')?.value || '',
+    labour_cost: parseFloat(document.getElementById('maint-labour')?.value) || 0,
+    materials_cost: parseFloat(document.getElementById('maint-materials')?.value) || 0,
+    bill_ll: document.getElementById('maint-bill-ll')?.checked || false,
+    ll_informed: document.getElementById('maint-ll-informed')?.checked || false,
+    ll_informed_via: document.getElementById('maint-ll-via')?.value || '',
+    team_notes: document.getElementById('maint-notes')?.value || ''
+  };
+  try {
+    await api('/maintenance/jobs/' + jobId, { method:'PATCH', body:JSON.stringify(payload) });
+    showToast('Job updated ✓');
+    closeDetail();
+    drawMaintenance();
+    updateMaintenanceBadge();
+  } catch (e) {
+    showToast('Failed to save: '+e.message, 'error');
+  }
+}
+
+// ── Add Order Modal ──
+function showAddOrder(jobId) {
+  openModal(`<h2>Add Order</h2><div class="sub">Record a purchase order for this job</div>
+    <div class="form-group"><label>Item Name</label><input type="text" id="ord-item" placeholder="e.g. Boiler part"></div>
+    <div class="form-group"><label>Supplier</label><input type="text" id="ord-supplier" placeholder="Supplier name"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Order Reference</label><input type="text" id="ord-ref" placeholder="PO-12345"></div>
+      <div class="form-group"><label>Cost (£)</label><input type="number" step="0.01" id="ord-cost" placeholder="0.00"></div>
+    </div>
+    <div class="form-group"><label>Status</label>
+      <select id="ord-status">
+        <option value="ordered">Ordered</option>
+        <option value="dispatched">Dispatched</option>
+        <option value="delivered">Delivered</option>
+        <option value="received">Received</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Tracking URL</label><input type="url" id="ord-tracking" placeholder="https://..."></div>
+    <div class="form-group"><label>Estimated Delivery</label><input type="date" id="ord-delivery"></div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button>
+      <button class="btn btn-submit" onclick="submitAddOrder(${jobId})">Add Order</button>
+    </div>`);
+}
+
+async function submitAddOrder(jobId) {
+  const payload = {
+    job_id: jobId,
+    item_name: document.getElementById('ord-item')?.value?.trim() || '',
+    supplier: document.getElementById('ord-supplier')?.value?.trim() || '',
+    order_ref: document.getElementById('ord-ref')?.value?.trim() || '',
+    cost: parseFloat(document.getElementById('ord-cost')?.value) || 0,
+    status: document.getElementById('ord-status')?.value || 'ordered',
+    tracking_url: document.getElementById('ord-tracking')?.value?.trim() || '',
+    estimated_delivery: document.getElementById('ord-delivery')?.value || ''
+  };
+  if (!payload.item_name) { showToast('Item name is required','error'); return; }
+  try {
+    await api('/maintenance/orders', { method:'POST', body:JSON.stringify(payload) });
+    closeModal(null);
+    showToast('Order added ✓');
+    openMaintenanceJob(jobId);
+  } catch (e) {
+    showToast('Failed: '+e.message,'error');
+  }
+}
+
+// ── Log Communication Modal ──
+function showLogComm(jobId) {
+  openModal(`<h2>Log LL Communication</h2><div class="sub">Record landlord contact about this job</div>
+    <div class="form-group"><label>Contact Method</label>
+      <select id="comm-method">
+        <option value="email">Email</option>
+        <option value="whatsapp">WhatsApp</option>
+        <option value="phone">Phone</option>
+        <option value="sms">SMS</option>
+        <option value="post">Post</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Sent Date & Time</label><input type="datetime-local" id="comm-date"></div>
+    <div class="form-group"><label>Summary</label><textarea id="comm-summary" rows="2" placeholder="What was communicated?"></textarea></div>
+    <div class="form-group"><label>Landlord Response</label><textarea id="comm-response" rows="2" placeholder="Any reply from landlord (optional)"></textarea></div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button>
+      <button class="btn btn-submit" onclick="submitLogComm(${jobId})">Log Communication</button>
+    </div>`);
+  // Set current datetime as default
+  const dt = document.getElementById('comm-date');
+  if (dt) dt.value = new Date().toISOString().slice(0,16);
+}
+
+async function submitLogComm(jobId) {
+  const payload = {
+    job_id: jobId,
+    contact_method: document.getElementById('comm-method')?.value || 'email',
+    contact_ref: '',
+    sent_at: document.getElementById('comm-date')?.value || new Date().toISOString(),
+    summary: document.getElementById('comm-summary')?.value?.trim() || '',
+    ll_response: document.getElementById('comm-response')?.value?.trim() || ''
+  };
+  if (!payload.summary) { showToast('Summary is required','error'); return; }
+  try {
+    await api('/maintenance/ll-comms', { method:'POST', body:JSON.stringify(payload) });
+    closeModal(null);
+    showToast('Communication logged ✓');
+    openMaintenanceJob(jobId);
+  } catch (e) {
+    showToast('Failed: '+e.message,'error');
+  }
+}
+
+// ── Create Job Modal ──
+function showNewMaintenanceJob() {
+  openModal(`<h2>Create Maintenance Job</h2><div class="sub">Add a new job to the board</div>
+    <div class="form-group"><label>Title *</label><input type="text" id="newmaint-title" placeholder="Job title"></div>
+    <div class="form-group"><label>Description</label><textarea id="newmaint-desc" rows="2" placeholder="Brief description"></textarea></div>
+    <div class="form-row">
+      <div class="form-group"><label>Type</label>
+        <select id="newmaint-type">
+          <option value="">Select type</option>
+          <option>Heating</option><option>Plumbing</option><option>Electrical</option>
+          <option>Utilities</option><option>Furniture</option><option>Cleaning</option>
+          <option>Structural</option><option>Appliances</option><option>Refurbishment</option>
+          <option>Certificate</option><option>Orders</option><option>Small Repair</option>
+          <option>Locksmith</option><option>Pest Control</option><option>Gardening</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Priority</label>
+        <select id="newmaint-priority">
+          <option value="Medium">Medium</option>
+          <option value="Low">Low</option>
+          <option value="High">High</option>
+          <option value="Critical">Critical</option>
+          <option value="Emergency">Emergency</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label>Contractor</label><input type="text" id="newmaint-contractor" placeholder="Contractor name"></div>
+    <div class="form-group"><label>Address / Property</label><input type="text" id="newmaint-address" placeholder="e.g. 123 High Street, Room 4"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Labour Cost (£)</label><input type="number" step="0.01" id="newmaint-labour" placeholder="0.00"></div>
+      <div class="form-group"><label>Materials Cost (£)</label><input type="number" step="0.01" id="newmaint-materials" placeholder="0.00"></div>
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:8px">
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px">
+        <input type="checkbox" id="newmaint-bill-ll" style="width:18px;height:18px"> Bill to Landlord
+      </label>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button>
+      <button class="btn btn-submit" onclick="submitNewMaintenanceJob()">Create Job</button>
+    </div>`);
+}
+
+async function submitNewMaintenanceJob() {
+  const title = document.getElementById('newmaint-title')?.value?.trim();
+  if (!title) { showToast('Title is required','error'); return; }
+  const payload = {
+    title,
+    description: document.getElementById('newmaint-desc')?.value?.trim() || '',
+    type: document.getElementById('newmaint-type')?.value || null,
+    priority: document.getElementById('newmaint-priority')?.value || 'Medium',
+    contractor: document.getElementById('newmaint-contractor')?.value?.trim() || '',
+    address: document.getElementById('newmaint-address')?.value?.trim() || '',
+    labour_cost: parseFloat(document.getElementById('newmaint-labour')?.value) || 0,
+    materials_cost: parseFloat(document.getElementById('newmaint-materials')?.value) || 0,
+    bill_ll: document.getElementById('newmaint-bill-ll')?.checked || false
+  };
+  try {
+    const res = await api('/maintenance/jobs', { method:'POST', body:JSON.stringify(payload) });
+    closeModal(null);
+    showToast('Job created ✓');
+    drawMaintenance();
+    updateMaintenanceBadge();
+  } catch (e) {
+    showToast('Failed: '+e.message,'error');
+  }
+}
+
+// ── Maintenance nav badge ──
+async function updateMaintenanceBadge() {
+  try {
+    const res = await api('/maintenance/jobs?per_page=200');
+    const jobs = res.data || [];
+    const open = jobs.filter(j => ['PENDING','IN PROGRESS','LIVE'].includes(j.status)).length;
+    const badge = document.getElementById('nav-badge-maintenance');
+    if (!badge) return;
+    if (open > 0) { badge.textContent = open; badge.style.display = ''; badge.style.background = '#d97706'; badge.style.color = '#fff'; }
+    else { badge.style.display = 'none'; }
+  } catch (e) { /* silent */ }
+}
+
+// ═══ BOARD VIEW (Monday.com-style) ═══
+
+const MAINT_TYPE_COLORS = {
+  'Small Repair': { bg:'#d4edda', fg:'#155724', icon:'🔧' },
+  'Plumbing':     { bg:'#d1ecf1', fg:'#0c5460', icon:'🔩' },
+  'Electrical':   { bg:'#fff3cd', fg:'#856404', icon:'⚡' },
+  'Gas':          { bg:'#f8d7da', fg:'#721c24', icon:'🔥' },
+  'Cleaning':     { bg:'#cce5ff', fg:'#004085', icon:'🧹' },
+  'Appliances':   { bg:'#fff8e1', fg:'#795548', icon:'📺' },
+  'Furniture':    { bg:'#e8f5e9', fg:'#2e7d32', icon:'🪑' },
+  'Orders':       { bg:'#e1bee7', fg:'#4a148c', icon:'📦' },
+  'Keys/Access':  { bg:'#ffe0b2', fg:'#e65100', icon:'🔑' },
+  'Inspection':   { bg:'#b2ebf2', fg:'#006064', icon:'🔍' },
+  'Pest Control': { bg:'#efebe9', fg:'#4e342e', icon:'🐜' },
+  'Structural':   { bg:'#ffcdd2', fg:'#b71c1c', icon:'🏗️' },
+};
+const MAINT_DFT_TYPE = { bg:'#e2e8f0', fg:'#475569', icon:'📋' };
+const MAINT_PRI_COL = {
+  Emergency:{bg:'#dc2626',fg:'#fff'},Critical:{bg:'#dc2626',fg:'#fff'},
+  High:{bg:'#7c3aed',fg:'#fff'},Medium:{bg:'#ea580c',fg:'#fff'},Low:{bg:'#64748b',fg:'#fff'},
+};
+const STAT_ORDER = ['LIVE','IN PROGRESS','ON HOLD','WAITING INVOICE','No Invoice Found','Invoice Uploaded','PENDING','ACKNOWLEDGED','CANCELLED','COMPLETED'];
+
+function renderBoardView() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = `<div class="board-header"><div class="board-filters">
+    <input type="text" id="board-s" placeholder="Search jobs..." style="width:260px" oninput="debBoard()">
+    <select id="board-p" onchange="renderBoardView()"><option value="">All priority</option>${Object.keys(MAINT_PRI_COL).map(k => `<option value="${k}">${k}</option>`).join('')}</select>
+    <select id="board-c" onchange="renderBoardView()"><option value="">All contractor</option></select>
+    <div class="board-vt"><button class="btn btn-ghost btn-sm active" onclick="swMV('board')">📋 Board</button><button class="btn btn-ghost btn-sm" onclick="swMV('table')">📄 Table</button></div>
+  </div></div><div class="board-sc"><div class="board-cn">${STAT_ORDER.map(s => `<div class="board-col"><div class="board-ch" data-st="${s}"><span>${s.replace(/_/g,' ')}</span><span class="board-cn" id="bc-${s.replace(/\s+/g,'_')}">0</span></div><div class="board-cb" id="bb-${s.replace(/\s+/g,'_')}"></div></div>`).join('')}</div></div>`;
+  boardLoad();
+}
+
+function boardLoad() {
+  const s = (document.getElementById('board-s')?.value||'').trim();
+  const p = document.getElementById('board-p')?.value||'';
+  const c = document.getElementById('board-c')?.value||'';
+  let u = '/api/banksia_os/maintenance/jobs?per_page=200'; if(s) u+='&search='+encodeURIComponent(s); if(p) u+='&priority='+encodeURIComponent(p); if(c) u+='&contractor='+encodeURIComponent(c);
+  api(u).then(r => {
+    const jobs = r.data||[]; const cf = document.getElementById('board-c');
+    if(cf && !cf.dl){ cf.dl=1; [...new Set(jobs.map(j=>j.contractor).filter(Boolean))].sort().forEach(x=>{const o=document.createElement('option');o.value=x;o.textContent=x;cf.appendChild(o)})}
+    const grp={}; STAT_ORDER.forEach(x=>grp[x]=[]); jobs.forEach(j=>{ const st=(j.status||'PENDING').toUpperCase(); (grp[st]||grp['PENDING']).push(j) });
+    STAT_ORDER.forEach(st => {
+      const k=st.replace(/\s+/g,'_'); const e=document.getElementById(`bb-${k}`); if(!e) return;
+      const items=grp[st]||[]; const ce=document.getElementById(`bc-${k}`); if(ce) ce.textContent=items.length;
+      if(!items.length){ e.innerHTML='<div class="be">No jobs</div>'; return; }
+      e.innerHTML = items.map(j => `<div class="bc" onclick="openMaintenanceJob(${j.id})">
+        <div class="bcc"><input type="checkbox" onclick="event.stopPropagation()"></div>
+        <div class="bcb"><div class="bcr">${escHtml(j.reference||'#N/A')}</div><div class="bct">${escHtml(j.title||'')}</div>
+        <div class="bcm">${j.when_raised?`<span>📅 ${fmtDate(j.when_raised)}</span>`:''}${j.start_date?`<span>🗓️ ${fmtDate(j.start_date)}</span>`:''}</div>
+        <div class="bca">${escHtml(j.address||j.property_name||'')}</div></div>
+        <div class="bctg">${j.priority?`<span class="bp" style="background:${(MAINT_PRI_COL[j.priority]||{}).bg||'#64748b'};color:${(MAINT_PRI_COL[j.priority]||{}).fg||'#fff'}">${j.priority}</span>`:''}${j.type?(()=>{const tc=MAINT_TYPE_COLORS[j.type]||MAINT_DFT_TYPE;return `<span class="bp" style="background:${tc.bg};color:${tc.fg}">${tc.icon} ${j.type}</span>`})():''}${j.bill_ll?'<span class="bp" style="background:#fef3c7;color:#92400e">💰 LL</span>':''}</div>
+        <div class="bcev">${j.photo_paths?'📷':''}${j.invoice_paths?'📄':''}${j.order_count>0?`📦${j.order_count}`:''}</div>
+        ${j.contractor?`<div class="bcf">👤 ${escHtml(j.contractor)}</div>`:''}</div>`).join('');
+    });
+  }).catch(() => {});
+}
+let bst; function debBoard(){ clearTimeout(bst); bst=setTimeout(boardLoad,300); }
+function swMV(v){ document.querySelectorAll('.board-vt button').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase().includes(v))); if(v==='board')renderBoardView(); else renderMaintenance(); }
+
+// Inject board CSS
+(function(){const s=document.createElement('style');s.textContent=`
+.board-header{padding:0 0 16px 0}
+.board-filters{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.board-vt{display:flex;background:#f1f5f9;border-radius:8px;padding:3px;margin-left:auto}
+.board-vt button{border:none;border-radius:6px;font-size:11px;font-weight:500;cursor:pointer;}
+.board-sc{overflow-x:auto;padding-bottom:16px;margin:-4px}
+.board-cn{display:flex;gap:16px;min-width:max-content;padding:4px}
+.board-col{min-width:320px;max-width:380px;flex-shrink:0}
+.board-ch{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:10px 10px 0 0;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
+.board-ch[data-st="LIVE"]{background:#000;color:#60a5fa}
+.board-ch[data-st="IN PROGRESS"]{background:#000;color:#34d399}
+.board-ch[data-st="ON HOLD"]{background:#000;color:#fb923c}
+.board-ch[data-st="COMPLETED"]{background:#000;color:#94a3b8}
+.board-ch[data-st="WAITING INVOICE"]{background:#000;color:#fbbf24}
+.board-ch[data-st="PENDING"]{background:#000;color:#94a3b8}
+.board-ch[data-st="ACKNOWLEDGED"]{background:#000;color:#818cf8}
+.board-ch[data-st="CANCELLED"]{background:#000;color:#fca5a5}
+.board-ch[data-st="No Invoice Found"]{background:#000;color:#fb923c}
+.board-ch[data-st="Invoice Uploaded"]{background:#000;color:#34d399}
+.board-cn{background:rgba(255,255,255,.1);padding:2px 10px;border-radius:8px;font-size:11px}
+.board-cb{background:#1a1d23;border-radius:0 0 10px 10px;padding:8px;min-height:200px;max-height:calc(100vh - 320px);overflow-y:auto}
+.be{padding:32px;text-align:center;color:#4a5568;font-size:13px}
+.bc{background:#23272e;border:1px solid #2d3139;border-radius:10px;padding:14px;margin-bottom:8px;cursor:pointer;transition:all .15s;display:grid;grid-template-columns:auto 1fr;gap:10px;position:relative}
+.bc:hover{border-color:#4a5568;background:#2d3139;transform:translateY(-1px)}
+.bcc{padding-top:2px}
+.bcc input{width:16px;height:16px;cursor:pointer;accent-color:#6366f1}
+.bcb{min-width:0}
+.bcr{font-size:10px;color:#6b7280;font-weight:500;margin-bottom:2px}
+.bct{font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:4px;line-height:1.3}
+.bcm{display:flex;gap:10px;font-size:10px;color:#6b7280;margin-bottom:4px}
+.bca{font-size:11px;color:#9ca3af;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bctg{grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
+.bp{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:500;line-height:1.3}
+.bcev{position:absolute;top:14px;right:14px;display:flex;gap:4px;font-size:12px;opacity:.6}
+.bcf{grid-column:1/-1;font-size:10px;color:#6b7280;padding-top:6px;border-top:1px solid #2d3139;margin-top:2px}
+`;document.head.appendChild(s)})();
 
 </script>
 </body>

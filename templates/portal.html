@@ -23,6 +23,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:
 .btn{width:100%;padding:13px;border-radius:11px;background:var(--brand);color:#fff;font-size:14px;font-weight:700;border:none;cursor:pointer;font-family:inherit;transition:transform .1s,background .15s}
 .btn:hover{background:#000}.btn:active{transform:scale(.99)}
 .btn.accent{background:var(--accent)}.btn.accent:hover{background:#4338ca}
+.btn.outline{background:transparent;color:var(--accent);border:2px solid var(--accent)}.btn.outline:hover{background:var(--accent);color:#fff}
 .err{background:#fee2e2;color:#b91c1c;padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:14px;display:none}
 .ok{background:#dcfce7;color:#15803d;padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:14px}
 .topbar{background:var(--brand);color:#fff;padding:15px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:20}
@@ -71,6 +72,21 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:
 .sheet h2{font-size:18px;font-weight:800;margin-bottom:4px}
 .sheet .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
 .sheet .x{float:right;font-size:22px;color:#94a3b8;cursor:pointer;line-height:1}
+.pref-row{display:flex;align-items:center;justify-content:space-between;padding:13px 0;border-bottom:1px solid var(--line)}
+.pref-row:last-child{border-bottom:none}
+.pref-row .lbl{font-size:14px;font-weight:600}
+.pref-row .sbl{font-size:12px;color:var(--muted)}
+.toggle{position:relative;width:44px;height:24px;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0}
+.toggle .sl{position:absolute;cursor:pointer;inset:0;background:#cbd5e1;border-radius:12px;transition:.2s}
+.toggle .sl::before{content:'';position:absolute;height:18px;width:18px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s}
+.toggle input:checked+.sl{background:var(--accent)}
+.toggle input:checked+.sl::before{transform:translateX(20px)}
+.msg-row{cursor:pointer;transition:background .1s;border-radius:12px;margin:0 -4px;padding:12px 4px}
+.msg-row:hover{background:#f8fafc}
+.msg-row .t{font-size:14px;font-weight:600;margin-bottom:2px}
+.msg-row .preview{font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msg-row .date{font-size:11px;color:#94a3b8;margin-top:4px}
 @media(min-width:620px){.modal{align-items:center}.sheet{border-radius:20px}}
 </style>
 </head>
@@ -81,7 +97,7 @@ const API='/api/referencing';
 let TOKEN=localStorage.getItem('portal_token')||'';
 let ME=null, TAB='overview';
 
-function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function esc(s){return (s==null?'':String(s)).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));}
 function money(n){return '£'+Number(n||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function money0(n){return '£'+Number(n||0).toLocaleString('en-GB',{maximumFractionDigits:0});}
 function getParam(n){return new URLSearchParams(location.search).get(n)||'';}
@@ -93,6 +109,7 @@ async function api(path,opts){
   if(!r.ok||!j.success)throw new Error(j.error||'Request failed');
   return j.data;
 }
+function closeModal(id){const m=document.getElementById(id);if(m)m.remove();}
 
 function renderLogin(msg){
   document.getElementById('app').innerHTML=`
@@ -155,7 +172,9 @@ function renderShell(){
     <button class="tab" data-t="overview" onclick="go('overview')"><span class="ic">🏠</span>Home</button>
     ${isTenant?`<button class="tab" data-t="rent" onclick="go('rent')"><span class="ic">💷</span>Rent</button>
     <button class="tab" data-t="maintenance" onclick="go('maintenance')"><span class="ic">🔧</span>Repairs</button>`:''}
+    <button class="tab" data-t="messages" onclick="go('messages')"><span class="ic">💬</span>Messages</button>
     <button class="tab" data-t="documents" onclick="go('documents')"><span class="ic">📄</span>Docs</button>
+    <button class="tab" data-t="profile" onclick="go('profile')"><span class="ic">👤</span>Profile</button>
   </div>`;
   go('overview');
 }
@@ -164,7 +183,9 @@ function go(tab){TAB=tab;setActive();
   if(tab==='overview')viewOverview();
   else if(tab==='rent')viewRent();
   else if(tab==='maintenance')viewMaintenance();
+  else if(tab==='messages')viewMessages();
   else if(tab==='documents')viewDocuments();
+  else if(tab==='profile')viewProfile();
 }
 
 function viewOverview(){
@@ -226,7 +247,7 @@ async function viewMaintenance(){
 }
 function openMaint(){
   const m=document.createElement('div');m.className='modal';m.id='maintModal';
-  m.innerHTML=`<div class="sheet"><span class="x" onclick="closeMaint()">×</span>
+  m.innerHTML=`<div class="sheet"><span class="x" onclick="closeModal('maintModal')">×</span>
     <h2>Report an issue</h2><div class="sub">Give us as much detail as you can so we can fix it quickly.</div>
     <div class="err" id="merr"></div>
     <div class="fg"><label>What's the problem?</label><input id="m_title" placeholder="e.g. Boiler not heating"></div>
@@ -243,15 +264,32 @@ function openMaint(){
     <button class="btn accent" onclick="submitMaint()">Submit request</button></div>`;
   document.body.appendChild(m);
 }
-function closeMaint(){const m=document.getElementById('maintModal');if(m)m.remove();}
 async function submitMaint(){
   const title=document.getElementById('m_title').value.trim();
   if(!title){document.getElementById('merr').textContent='Please describe the problem';document.getElementById('merr').style.display='block';return;}
   const body={title,category:document.getElementById('m_cat').value,location:document.getElementById('m_loc').value.trim(),
     priority:document.getElementById('m_pri').value,description:document.getElementById('m_desc').value.trim()};
   try{await api('/portal/maintenance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    closeMaint();viewMaintenance();}
+    closeModal('maintModal');viewMaintenance();}
   catch(e){document.getElementById('merr').textContent=e.message;document.getElementById('merr').style.display='block';}
+}
+
+async function viewMessages(){
+  document.getElementById('view').innerHTML='<div class="empty">Loading messages…</div>';
+  let d;try{d=await api('/portal/messages');}catch(e){document.getElementById('view').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>';return;}
+  const msgs=d.messages||[];
+  document.getElementById('view').innerHTML=`
+    <div class="hi">Messages</div><div class="hi-sub">Notifications and updates from your lettings team</div>
+    <div class="card"><h3>💬 Inbox</h3>
+      ${msgs.length?msgs.map(m=>`<div class="row msg-row" onclick="openMessage(${m.id},'${esc(m.subject)}','${esc(m.body.replace(/'/g,"\\'"))}','${esc(m.created)}')"><div style="flex:1;min-width:0"><div class="t">${esc(m.subject)}</div><div class="preview">${esc(m.preview||'')}</div><div class="date">${esc((m.created||'').slice(0,10))}</div></div></div>`).join(''):'<div class="empty">No messages yet.</div>'}
+    </div>`;
+}
+function openMessage(id,subject,body,created){
+  const m=document.createElement('div');m.className='modal';m.id='msgModal';
+  m.innerHTML=`<div class="sheet"><span class="x" onclick="closeModal('msgModal')">×</span>
+    <h2>${esc(subject)}</h2><div class="sub">${esc((created||'').slice(0,10))}</div>
+    <div style="font-size:14px;line-height:1.7;white-space:pre-wrap">${esc(body||'(No content)')}</div></div>`;
+  document.body.appendChild(m);
 }
 
 async function viewDocuments(){
@@ -267,7 +305,94 @@ async function viewDocuments(){
     <div class="card"><h3>📎 Documents you've provided</h3>
       ${up.length?up.map(u=>`<div class="row"><div><div class="t">${esc((u.category||'document').replace(/_/g,' '))}</div><div class="s">${esc(u.original_filename||'')} · ${esc((u.uploaded_at||'').slice(0,10))}</div></div>
         <span class="pill ${u.is_verified?'approved':'draft'}">${u.is_verified?'verified':'received'}</span></div>`).join(''):'<div class="empty">No documents uploaded yet.</div>'}
+    </div>
+    <button class="fab" onclick="openDocUpload()">＋ Upload document</button>`;
+}
+function openDocUpload(){
+  const m=document.createElement('div');m.className='modal';m.id='docUploadModal';
+  m.innerHTML=`<div class="sheet"><span class="x" onclick="closeModal('docUploadModal')">×</span>
+    <h2>Upload a document</h2><div class="sub">Share a supporting document with the lettings team.</div>
+    <div class="err" id="duerr"></div>
+    <div class="ok" id="duok" style="display:none"></div>
+    <div class="fg"><label>Choose a file (PDF, image, or document)</label><input id="du_file" type="file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"></div>
+    <button class="btn accent" onclick="submitDocUpload()">Upload</button></div>`;
+  document.body.appendChild(m);
+}
+async function submitDocUpload(){
+  const fileInput=document.getElementById('du_file');
+  if(!fileInput||!fileInput.files||!fileInput.files[0]){document.getElementById('duerr').textContent='Please select a file';document.getElementById('duerr').style.display='block';return;}
+  const fd=new FormData();fd.append('file',fileInput.files[0]);
+  try{const r=await fetch(API+'/portal/upload-document',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN},body:fd});
+    const j=await r.json();if(!r.ok||!j.success)throw new Error(j.error||'Upload failed');
+    document.getElementById('duerr').style.display='none';
+    const ok=document.getElementById('duok');ok.textContent='Document uploaded successfully!';ok.style.display='block';
+    setTimeout(()=>{closeModal('docUploadModal');viewDocuments();},1200);
+  }catch(e){document.getElementById('duerr').textContent=e.message;document.getElementById('duerr').style.display='block';}
+}
+
+function viewProfile(){
+  const p=ME.profile;
+  document.getElementById('view').innerHTML=`
+    <div class="hi">Your profile</div><div class="hi-sub">Manage your account details and preferences</div>
+    <div class="card"><h3>👤 Personal details</h3>
+      <div class="row"><div><div class="t">${esc(p.first_name+' '+p.last_name)}</div><div class="s">Name</div></div></div>
+      <div class="row"><div><div class="t">${esc(p.email)}</div><div class="s">Email</div></div></div>
+      <div class="row"><div><div class="t">${esc(p.phone||'Not set')}</div><div class="s">Phone</div></div></div>
+      <div style="margin-top:14px"><button class="btn outline" onclick="openEditProfile()">✏️ Edit details</button></div>
+    </div>
+    <div class="card"><h3>🔒 Security</h3>
+      <div class="row"><div><div class="t">Password</div><div class="s">Change your login password</div></div>
+      <button class="signbtn" onclick="openChangePassword()">Change</button></div>
+    </div>
+    <div class="card"><h3>🔔 Notifications</h3>
+      <div class="pref-row"><div><div class="lbl">Email notifications</div><div class="sbl">Receive updates about your tenancy</div></div>
+      <label class="toggle"><input type="checkbox" id="pref_email" ${(p.preferences&&(JSON.parse(p.preferences)||{}).email_notifications!==false)?'checked':''} onchange="savePreferences()"><span class="sl"></span></label></div>
+      <div class="pref-row"><div><div class="lbl">Maintenance updates</div><div class="sbl">Get notified when repairs are updated</div></div>
+      <label class="toggle"><input type="checkbox" id="pref_maint" ${(p.preferences&&(JSON.parse(p.preferences)||{}).maintenance_updates!==false)?'checked':''} onchange="savePreferences()"><span class="sl"></span></label></div>
     </div>`;
+}
+async function savePreferences(){
+  const prefs={email_notifications:document.getElementById('pref_email').checked,maintenance_updates:document.getElementById('pref_maint').checked};
+  try{await api('/portal/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({preferences:prefs})});}catch(e){}
+}
+function openEditProfile(){
+  const p=ME.profile;
+  const m=document.createElement('div');m.className='modal';m.id='editProfileModal';
+  m.innerHTML=`<div class="sheet"><span class="x" onclick="closeModal('editProfileModal')">×</span>
+    <h2>Edit details</h2><div class="sub">Update your personal information.</div>
+    <div class="err" id="eperr"></div>
+    <div class="fg"><label>Phone number</label><input id="ep_phone" value="${esc(p.phone||'')}" placeholder="+44 7XXX XXXXXX"></div>
+    <button class="btn accent" onclick="submitEditProfile()">Save changes</button></div>`;
+  document.body.appendChild(m);
+}
+async function submitEditProfile(){
+  const phone=document.getElementById('ep_phone').value.trim();
+  try{
+    const data=await api('/portal/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone})});
+    ME.profile.phone=data.phone;
+    closeModal('editProfileModal');viewProfile();
+  }catch(e){document.getElementById('eperr').textContent=e.message;document.getElementById('eperr').style.display='block';}
+}
+function openChangePassword(){
+  const m=document.createElement('div');m.className='modal';m.id='pwModal';
+  m.innerHTML=`<div class="sheet"><span class="x" onclick="closeModal('pwModal')">×</span>
+    <h2>Change password</h2><div class="sub">Your new password must be at least 8 characters.</div>
+    <div class="err" id="pwerr"></div>
+    <div class="fg"><label>Current password</label><input id="pw_cur" type="password"></div>
+    <div class="fg"><label>New password</label><input id="pw_new" type="password" placeholder="At least 8 characters"></div>
+    <div class="fg"><label>Confirm new password</label><input id="pw_con" type="password" onkeydown="if(event.key==='Enter')submitChangePassword()"></div>
+    <button class="btn accent" onclick="submitChangePassword()">Update password</button></div>`;
+  document.body.appendChild(m);
+}
+async function submitChangePassword(){
+  const cur=document.getElementById('pw_cur').value, newPw=document.getElementById('pw_new').value, con=document.getElementById('pw_con').value;
+  if(!cur||!newPw){document.getElementById('pwerr').textContent='Please fill in all fields';document.getElementById('pwerr').style.display='block';return;}
+  if(newPw!==con){document.getElementById('pwerr').textContent='New passwords do not match';document.getElementById('pwerr').style.display='block';return;}
+  if(newPw.length<8){document.getElementById('pwerr').textContent='New password must be at least 8 characters';document.getElementById('pwerr').style.display='block';return;}
+  try{
+    await api('/portal/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_password:cur,new_password:newPw})});
+    closeModal('pwModal');viewProfile();
+  }catch(e){document.getElementById('pwerr').textContent=e.message;document.getElementById('pwerr').style.display='block';}
 }
 
 const SETUP=getParam('setup')||getParam('form_token');

@@ -228,6 +228,34 @@ def api_dashboard():
         # Unit occupancy rate
         unit_occupancy_rate = round((occupied_units / total_units * 100) if total_units > 0 else 0, 1)
 
+        # ── Portal / referencing submissions awaiting the team ──
+        # Referencing forms the applicant has actually submitted but nobody has reviewed
+        pending_referencing_submissions = db.execute(
+            "SELECT COUNT(*) AS cnt FROM referencing_forms "
+            "WHERE submitted_at IS NOT NULL AND reviewed_at IS NULL "
+            "AND status IN ('submitted', 'Submitted')"
+        ).fetchone()["cnt"]
+        # Tenant-portal maintenance requests still open
+        open_maintenance_requests = db.execute(
+            "SELECT COUNT(*) AS cnt FROM maintenance_requests "
+            "WHERE LOWER(COALESCE(status, 'open')) IN ('open', 'new', '')"
+        ).fetchone()["cnt"]
+        # Portal message threads still open
+        open_message_threads = db.execute(
+            "SELECT COUNT(*) AS cnt FROM message_threads "
+            "WHERE LOWER(COALESCE(status, 'open')) IN ('open', 'new', '')"
+        ).fetchone()["cnt"]
+        # Applicant-uploaded documents awaiting the team to verify
+        pending_document_uploads = db.execute(
+            "SELECT COUNT(*) AS cnt FROM referencing_documents "
+            "WHERE LOWER(COALESCE(uploaded_by, '')) = 'applicant' "
+            "AND COALESCE(is_verified, 0) = 0"
+        ).fetchone()["cnt"]
+        new_submissions_total = (
+            pending_referencing_submissions + open_maintenance_requests
+            + open_message_threads + pending_document_uploads
+        )
+
         # Leading property (highest total rent)
         leading = db.execute(
             "SELECT p.name, SUM(t.rent_amount) AS total_rent FROM tenancies t "
@@ -259,7 +287,775 @@ def api_dashboard():
             "tenants_moving_out_this_month": tenants_moving_out_this_month,
             "deposits_unregistered": deposits_unregistered,
             "leading_property": ({"name": leading["name"], "total_rent": round(leading["total_rent"], 2)} if leading and leading["name"] else None),
+            "pending_referencing_submissions": pending_referencing_submissions,
+            "open_maintenance_requests": open_maintenance_requests,
+            "open_message_threads": open_message_threads,
+            "pending_document_uploads": pending_document_uploads,
+            "new_submissions_total": new_submissions_total,
         })
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 1b. SUBMISSIONS INBOX
+#     Unified feed of everything submitted via the tenant portal and the
+#     referencing portal, so the team can find it all from one screen.
+# ═══════════════════════════════════════════════
+@banksia_os_bp.route("/submissions")
+def api_submissions():
+    db = get_dict_db()
+    try:
+        limit = int_param(request.args.get("limit", 60), 60)
+        stype = (request.args.get("type") or "all").lower()      # all|referencing|maintenance|message
+        only_new = str(request.args.get("new", "")).lower() in ("1", "true", "yes")
+        items = []
+
+        # 1. Referencing form submissions — only those the applicant actually submitted
+        if stype in ("all", "referencing"):
+            rows = db.execute(
+                "SELECT id, applicant_id, status, submitted_at, reviewed_at, reviewed_by, "
+                "first_name, last_name, email, mobile_phone, preferred_move_in_date "
+                "FROM referencing_forms WHERE submitted_at IS NOT NULL "
+                "ORDER BY submitted_at DESC"
+            ).fetchall()
+            for r in rows:
+                st = (r["status"] or "").lower()
+                needs = (r["reviewed_at"] is None) and st == "submitted"
+                name = f"{(r['first_name'] or '').strip()} {(r['last_name'] or '').strip()}".strip()
+                items.append({
+                    "kind": "referencing",
+                    "kind_label": "Referencing",
+                    "id": r["id"],
+                    "ref": "REF-%05d" % r["id"],
+                    "title": name or "Applicant referencing",
+                    "subtitle": r["email"] or r["mobile_phone"] or "",
+                    "status": r["status"] or "submitted",
+                    "needs_attention": needs,
+                    "timestamp": r["submitted_at"],
+                    "link_type": "referencing_form",
+                    "link_id": r["id"],
+                    "applicant_id": r["applicant_id"],
+                })
+
+        # 2. Maintenance requests raised from the tenant portal
+        if stype in ("all", "maintenance"):
+            rows = db.execute(
+                "SELECT id, reference, tenancy_id, property_id, reporter_name, reporter_email, "
+                "category, title, priority, status, created "
+                "FROM maintenance_requests ORDER BY created DESC"
+            ).fetchall()
+            for r in rows:
+                needs = (r["status"] or "open").lower() in ("open", "new", "")
+                items.append({
+                    "kind": "maintenance",
+                    "kind_label": "Maintenance",
+                    "id": r["id"],
+                    "ref": r["reference"] or ("MR-%05d" % r["id"]),
+                    "title": r["title"] or "Maintenance request",
+                    "subtitle": "%s · %s" % ((r["reporter_name"] or "Tenant"), (r["category"] or "General")),
+                    "status": r["status"] or "open",
+                    "priority": r["priority"],
+                    "needs_attention": needs,
+                    "timestamp": r["created"],
+                    "link_type": "maintenance_request",
+                    "link_id": r["id"],
+                    "property_id": r["property_id"],
+                    "tenancy_id": r["tenancy_id"],
+                })
+
+        # 3. Portal message threads
+        if stype in ("all", "message"):
+            rows = db.execute(
+                "SELECT t.id, t.title, t.status, t.property_id, t.tenancy_id, t.created, "
+                "COUNT(m.id) AS msg_count, MAX(m.created) AS last_message "
+                "FROM message_threads t "
+                "LEFT JOIN messages m ON m.thread_id = t.id "
+                "AND (m.is_deleted IS NULL OR m.is_deleted = 0) "
+                "GROUP BY t.id ORDER BY COALESCE(MAX(m.created), t.created) DESC"
+            ).fetchall()
+            for r in rows:
+                needs = (r["status"] or "open").lower() in ("open", "new", "")
+                cnt = r["msg_count"] or 0
+                items.append({
+                    "kind": "message",
+                    "kind_label": "Message",
+                    "id": r["id"],
+                    "ref": "MSG-%05d" % r["id"],
+                    "title": r["title"] or "Message thread",
+                    "subtitle": "%d message%s" % (cnt, "" if cnt == 1 else "s"),
+                    "status": r["status"] or "open",
+                    "needs_attention": needs,
+                    "timestamp": r["last_message"] or r["created"],
+                    "link_type": "message_thread",
+                    "link_id": r["id"],
+                    "property_id": r["property_id"],
+                    "tenancy_id": r["tenancy_id"],
+                })
+
+        # 4. Documents uploaded by the applicant via the tenant / referencing portal
+        if stype in ("all", "document"):
+            rows = db.execute(
+                "SELECT d.id, d.form_id, d.category, d.original_filename, d.file_size, "
+                "d.mime_type, d.uploaded_at, d.is_verified, "
+                "f.first_name, f.last_name, f.email "
+                "FROM referencing_documents d "
+                "LEFT JOIN referencing_forms f ON f.id = d.form_id "
+                "WHERE LOWER(COALESCE(d.uploaded_by, '')) = 'applicant' "
+                "ORDER BY d.uploaded_at DESC"
+            ).fetchall()
+            for r in rows:
+                needs = not bool(r["is_verified"])
+                name = f"{(r['first_name'] or '').strip()} {(r['last_name'] or '').strip()}".strip()
+                cat = (r["category"] or "document").replace("_", " ")
+                items.append({
+                    "kind": "document",
+                    "kind_label": "Document",
+                    "id": r["id"],
+                    "ref": "DOC-%05d" % r["id"],
+                    "title": r["original_filename"] or "Uploaded document",
+                    "subtitle": "%s · %s" % ((name or r["email"] or "Applicant"), cat),
+                    "status": "verified" if r["is_verified"] else "awaiting review",
+                    "needs_attention": needs,
+                    "timestamp": r["uploaded_at"],
+                    "link_type": "referencing_document",
+                    "link_id": r["id"],
+                    "form_id": r["form_id"],
+                })
+
+        # Unified feed — newest first (rows with no timestamp fall to the bottom)
+        items.sort(key=lambda x: (x["timestamp"] or ""), reverse=True)
+        if only_new:
+            items = [i for i in items if i["needs_attention"]]
+        counts = {
+            "referencing": sum(1 for i in items if i["kind"] == "referencing"),
+            "maintenance": sum(1 for i in items if i["kind"] == "maintenance"),
+            "message": sum(1 for i in items if i["kind"] == "message"),
+            "document": sum(1 for i in items if i["kind"] == "document"),
+            "needs_attention": sum(1 for i in items if i["needs_attention"]),
+        }
+        items = items[:limit]
+        return json_success({"items": items, "counts": counts}, total=len(items))
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 3. MAINTENANCE OPERATIONS PORTAL
+# ═══════════════════════════════════════════════
+
+MAINT_STATUSES = [
+    "PENDING", "IN PROGRESS", "LIVE", "ON HOLD", "CANCELLED",
+    "COMPLETED", "ACKNOWLEDGED", "WAITING INVOICE", "No Invoice Found", "Invoice Uploaded"
+]
+
+MAINT_TYPES = [
+    "Heating", "Plumbing", "Electrical", "Utilities", "Furniture", "NA", "Cleaning",
+    "Structural", "Appliances", "Refurbishment", "Certificate", "Orders",
+    "Wall Repairs", "Painting", "Removal", "Locksmith", "Pest Control",
+    "Small Repair", "Licenses", "Inspection", "Gardening"
+]
+
+MAINT_PRIORITIES = ["Emergency", "Critical", "High", "Medium", "Low"]
+
+
+@banksia_os_bp.route("/maintenance/jobs", methods=["GET", "POST"])
+def api_maintenance_jobs():
+    if request.method == "POST":
+        return api_create_maintenance_job()
+    db = get_dict_db()
+    try:
+        page = int_param(request.args.get("page"))
+        per_page = int_param(request.args.get("per_page"), 50)
+        search = (request.args.get("search") or "").strip()
+        status_filter = request.args.get("status", "")
+        type_filter = request.args.get("type", "")
+        priority_filter = request.args.get("priority", "")
+        contractor_filter = request.args.get("contractor", "")
+        bill_ll_only = request.args.get("bill_ll", "") == "1"
+        ll_not_informed = request.args.get("ll_uninformed", "") == "1"
+
+        where = ["1=1"]
+        params = []
+
+        if status_filter:
+            where.append("mj.status = ?")
+            params.append(status_filter)
+        if type_filter:
+            where.append("mj.type = ?")
+            params.append(type_filter)
+        if priority_filter:
+            where.append("mj.priority = ?")
+            params.append(priority_filter)
+        if contractor_filter:
+            where.append("mj.contractor = ?")
+            params.append(contractor_filter)
+        if bill_ll_only:
+            where.append("mj.bill_ll = 1")
+        if ll_not_informed:
+            where.append("mj.bill_ll = 1 AND mj.ll_informed = 0")
+        if search:
+            where.append("(mj.title LIKE ? OR mj.description LIKE ? OR mj.address LIKE ? OR mj.reference LIKE ?)")
+            s = f"%{search}%"
+            params.extend([s, s, s, s])
+
+        where_clause = " AND ".join(where)
+
+        total = db.execute(
+            f"SELECT COUNT(*) AS cnt FROM maintenance_jobs mj WHERE {where_clause}",
+            params
+        ).fetchone()["cnt"]
+
+        offset = (page - 1) * per_page
+        rows = db.execute(
+            f"""SELECT mj.*, p.name AS property_name
+                FROM maintenance_jobs mj
+                LEFT JOIN properties p ON mj.property_id = p.id
+                WHERE {where_clause}
+                ORDER BY
+                    CASE mj.priority
+                        WHEN 'Emergency' THEN 0 WHEN 'Critical' THEN 1
+                        WHEN 'High' THEN 2 WHEN 'Medium' THEN 3 WHEN 'Low' THEN 4
+                    END,
+                    mj.created DESC
+                LIMIT ? OFFSET ?""",
+            params + [per_page, offset]
+        ).fetchall()
+
+        for r in rows:
+            r["bill_ll"] = bool(r["bill_ll"])
+            r["emergency"] = bool(r["emergency"])
+            r["ll_informed"] = bool(r["ll_informed"])
+            # Fetch order count
+            o = db.execute(
+                "SELECT COUNT(*) AS cnt FROM maintenance_orders WHERE job_id = ?",
+                [r["id"]]
+            ).fetchone()
+            r["order_count"] = o["cnt"] if o else 0
+
+        counts = {}
+        for s in MAINT_STATUSES:
+            c = db.execute("SELECT COUNT(*) AS cnt FROM maintenance_jobs WHERE status = ?", [s]).fetchone()
+            counts[s] = c["cnt"] if c else 0
+
+        return json_success(rows, total=total, page=page, per_page=per_page)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+def api_create_maintenance_job():
+    data = request.get_json(force=True, silent=True) or {}
+    required = ["title"]
+    for f in required:
+        if not data.get(f):
+            return json_error(f"'{f}' is required")
+    db = get_dict_db()
+    try:
+        ref_prefix = "MJ"
+        count = db.execute("SELECT COUNT(*) AS cnt FROM maintenance_jobs").fetchone()["cnt"]
+        reference = f"{ref_prefix}-{str(count + 1).zfill(4)}"
+
+        cur = db.execute(
+            """INSERT INTO maintenance_jobs
+               (reference, title, description, type, priority, status, location,
+                property_id, address, contractor, labour_cost, materials_cost,
+                bill_ll, emergency, reporter_name, reporter_email, team_notes, source)
+               VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                reference,
+                data.get("title"),
+                data.get("description", ""),
+                data.get("type"),
+                data.get("priority", "Medium"),
+                data.get("location"),
+                data.get("property_id"),
+                data.get("address"),
+                data.get("contractor"),
+                float(data.get("labour_cost", 0)),
+                float(data.get("materials_cost", 0)),
+                1 if data.get("bill_ll") else 0,
+                1 if data.get("emergency") else 0,
+                data.get("reporter_name", ""),
+                data.get("reporter_email", ""),
+                data.get("team_notes", ""),
+                data.get("source", "board"),
+            ]
+        )
+        db.commit()
+        job_id = cur.lastrowid
+        job = db.execute(
+            """SELECT mj.*, p.name AS property_name
+               FROM maintenance_jobs mj
+               LEFT JOIN properties p ON mj.property_id = p.id
+               WHERE mj.id = ?""",
+            [job_id]
+        ).fetchone()
+        return json_success(dict(job)), 201
+    except Exception as e:
+        db.rollback()
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/maintenance/jobs/<int:job_id>", methods=["GET", "PATCH"])
+def api_maintenance_job(job_id):
+    db = get_dict_db()
+    try:
+        if request.method == "GET":
+            job = db.execute(
+                """SELECT mj.*, p.name AS property_name
+                   FROM maintenance_jobs mj
+                   LEFT JOIN properties p ON mj.property_id = p.id
+                   WHERE mj.id = ?""",
+                [job_id]
+            ).fetchone()
+            if not job:
+                return json_error("Job not found", 404)
+            # Get orders for this job
+            orders = db.execute(
+                "SELECT * FROM maintenance_orders WHERE job_id = ? ORDER BY created DESC",
+                [job_id]
+            ).fetchall()
+            # Get LL communications
+            ll_comms = db.execute(
+                "SELECT * FROM ll_communications WHERE job_id = ? ORDER BY sent_at DESC",
+                [job_id]
+            ).fetchall()
+            result = dict(job)
+            result["orders"] = [dict(o) for o in orders]
+            result["ll_comms"] = [dict(c) for c in ll_comms]
+            result["bill_ll"] = bool(result["bill_ll"])
+            result["emergency"] = bool(result["emergency"])
+            result["ll_informed"] = bool(result["ll_informed"])
+            return json_success(result)
+
+        # PATCH
+        data = request.get_json(force=True, silent=True) or {}
+        allowed = [
+            "title", "description", "type", "priority", "status", "location",
+            "address", "contractor", "labour_cost", "materials_cost",
+            "bill_ll", "ll_informed", "ll_informed_via", "ll_notes",
+            "emergency", "reporter_name", "reporter_email", "photo_paths",
+            "invoice_paths", "team_notes", "start_date", "completed_date"
+        ]
+        updates = []
+        params = []
+        for field in allowed:
+            if field in data:
+                val = data[field]
+                if field in ("bill_ll", "emergency", "ll_informed"):
+                    val = 1 if val else 0
+                updates.append(f"{field} = ?")
+                params.append(val)
+        if not updates:
+            return json_error("No valid fields to update")
+        updates.append("modified = datetime('now')")
+        params.append(job_id)
+        db.execute(
+            f"UPDATE maintenance_jobs SET {', '.join(updates)} WHERE id = ?",
+            params
+        )
+        db.commit()
+
+        # If status changed to COMPLETED, set completed_date
+        if data.get("status") == "COMPLETED":
+            db.execute(
+                "UPDATE maintenance_jobs SET completed_date = datetime('now') WHERE id = ? AND completed_date IS NULL",
+                [job_id]
+            )
+            db.commit()
+
+        job = db.execute("SELECT * FROM maintenance_jobs WHERE id = ?", [job_id]).fetchone()
+        return json_success(dict(job))
+    except Exception as e:
+        db.rollback()
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ── Maintenance Orders ──
+
+@banksia_os_bp.route("/maintenance/orders", methods=["GET", "POST"])
+def api_maintenance_orders():
+    db = get_dict_db()
+    try:
+        if request.method == "POST":
+            data = request.get_json(force=True, silent=True) or {}
+            if not data.get("job_id"):
+                return json_error("job_id is required")
+            cur = db.execute(
+                """INSERT INTO maintenance_orders
+                   (job_id, item_name, supplier, order_ref, cost, status,
+                    tracking_url, estimated_delivery, notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    data["job_id"], data.get("item_name"),
+                    data.get("supplier"), data.get("order_ref"),
+                    float(data.get("cost", 0)),
+                    data.get("status", "ordered"),
+                    data.get("tracking_url"),
+                    data.get("estimated_delivery"),
+                    data.get("notes", ""),
+                ]
+            )
+            db.commit()
+            return json_success({"id": cur.lastrowid}), 201
+
+        # GET — list orders, optionally filtered by job_id
+        job_id = request.args.get("job_id")
+        if job_id:
+            orders = db.execute(
+                "SELECT * FROM maintenance_orders WHERE job_id = ? ORDER BY created DESC",
+                [job_id]
+            ).fetchall()
+        else:
+            orders = db.execute(
+                """SELECT mo.*, mj.title AS job_title
+                   FROM maintenance_orders mo
+                   JOIN maintenance_jobs mj ON mo.job_id = mj.id
+                   ORDER BY mo.created DESC LIMIT 100"""
+            ).fetchall()
+        return json_success([dict(o) for o in orders])
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/maintenance/orders/<int:order_id>", methods=["PATCH"])
+def api_maintenance_order(order_id):
+    data = request.get_json(force=True, silent=True) or {}
+    allowed = ["item_name", "supplier", "order_ref", "cost", "status",
+               "tracking_url", "estimated_delivery", "delivered_at",
+               "received_by", "notes"]
+    updates = []
+    params = []
+    for field in allowed:
+        if field in data:
+            val = data[field]
+            if field == "cost":
+                val = float(val)
+            updates.append(f"{field} = ?")
+            params.append(val)
+    if not updates:
+        return json_error("No valid fields")
+    updates.append("modified = datetime('now')")
+    params.append(order_id)
+    db = get_dict_db()
+    try:
+        db.execute(
+            f"UPDATE maintenance_orders SET {', '.join(updates)} WHERE id = ?",
+            params
+        )
+        db.commit()
+        order = db.execute("SELECT * FROM maintenance_orders WHERE id = ?", [order_id]).fetchone()
+        return json_success(dict(order))
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ── LL Communications ──
+
+@banksia_os_bp.route("/maintenance/ll-comms", methods=["GET", "POST"])
+def api_ll_comms():
+    db = get_dict_db()
+    try:
+        if request.method == "POST":
+            data = request.get_json(force=True, silent=True) or {}
+            if not data.get("job_id"):
+                return json_error("job_id is required")
+            cur = db.execute(
+                """INSERT INTO ll_communications
+                   (job_id, contact_method, contact_ref, summary, ll_response, sent_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                [
+                    data["job_id"], data.get("contact_method"),
+                    data.get("contact_ref"), data.get("summary", ""),
+                    data.get("ll_response", ""), data.get("sent_at"),
+                ]
+            )
+            # Mark job as ll_informed
+            db.execute(
+                "UPDATE maintenance_jobs SET ll_informed = 1, ll_informed_via = ? WHERE id = ?",
+                [data.get("contact_method"), data["job_id"]]
+            )
+            db.commit()
+            return json_success({"id": cur.lastrowid}), 201
+
+        job_id = request.args.get("job_id")
+        if not job_id:
+            return json_error("job_id is required")
+        comms = db.execute(
+            "SELECT * FROM ll_communications WHERE job_id = ? ORDER BY sent_at DESC",
+            [job_id]
+        ).fetchall()
+        return json_success([dict(c) for c in comms])
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ── Maintenance lookup data ──
+
+@banksia_os_bp.route("/maintenance/lookup")
+def api_maintenance_lookup():
+    return json_success({
+        "statuses": MAINT_STATUSES,
+        "types": MAINT_TYPES,
+        "priorities": MAINT_PRIORITIES,
+    })
+
+
+# ── Monday.com sync endpoint ──
+
+def _monday_graphql(mtok, query):
+    """Execute a Monday.com GraphQL query and return the parsed result."""
+    import urllib.request
+    req = urllib.request.Request(
+        "https://api.monday.com/v2",
+        data=json.dumps({"query": query}).encode(),
+        headers={"Authorization": mtok, "Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read())
+
+
+def _parse_monday_cols(column_values):
+    """Build a flat dict of {column_id: text} from Monday column_values list."""
+    cols = {}
+    for cv in column_values:
+        cols[cv["id"]] = cv.get("text") or ""
+    return cols
+
+
+def _safe_status(val):
+    if val not in MAINT_STATUSES:
+        return "PENDING"
+    return val
+
+
+def _safe_priority(val):
+    if val not in MAINT_PRIORITIES:
+        return "Medium"
+    return val
+
+
+def _parse_photo_paths(cols):
+    """Extract photo evidence URLs (comma-separated)."""
+    val = cols.get("file_mm0v10xk", "")
+    if not val:
+        return ""
+    # Multiple URLs are comma-separated in the text field
+    return val
+
+
+def _parse_invoice_paths(cols):
+    """Extract contractor invoice URLs."""
+    val = cols.get("file_mm0pryh", "")
+    return val
+
+
+@banksia_os_bp.route("/maintenance/sync-from-monday", methods=["POST"])
+def api_sync_from_monday():
+    """Pull jobs from Monday.com Maintenance Reports board into local DB.
+
+    Performs a full re-sync:
+      - Inserts new items (monday_id not seen before)
+      - Updates existing items whose data has changed on Monday
+      - Handles pagination (cursor-based) for boards with 200+ items
+      - Maps the full set of columns to DB fields
+    """
+    mtok = None
+    try:
+        mtok = open("/root/.hermes/secrets/monday_token.txt").read().strip()
+    except Exception:
+        pass
+    if not mtok:
+        return json_error("Monday token not found")
+
+    db = get_dict_db()
+    try:
+        # ── Fetch ALL items with cursor-based pagination ──
+        all_items = []
+        cursor = None
+        page = 0
+
+        while True:
+            page_ql = f"items_page(limit:200" + (f',cursor:"{cursor}"' if cursor else "") + ")"
+            q = (
+                "{ boards(ids: [18401159622]) { id name "
+                + page_ql
+                + """ { cursor items {
+                        id name column_values { id text value }
+                    } } } }"""
+            )
+            data = _monday_graphql(mtok, q)
+            page_data = (
+                data.get("data", {})
+                .get("boards", [{}])[0]
+                .get("items_page", {})
+            )
+            items = page_data.get("items", [])
+            cursor = page_data.get("cursor")
+            all_items.extend(items)
+            page += 1
+
+            if not cursor or len(items) < 200:
+                break
+
+        # ── Process every item (INSERT or UPDATE) ──
+        inserted = 0
+        updated = 0
+        unchanged = 0
+
+        for item in all_items:
+            cols = _parse_monday_cols(item.get("column_values", []))
+            monday_id = item["id"]
+            title = item.get("name", "")
+
+            # Map Monday column IDs → DB fields
+            status = _safe_status(cols.get("status", "PENDING"))
+            priority = _safe_priority(cols.get("color_mm0p8qna", "Medium"))
+            maint_type = cols.get("color_mm0vfxmq", "")
+            address = (
+                cols.get("short_text041ydfbp", "")
+                or cols.get("long_text_mm50g0j6", "")
+                or cols.get("board_relation_mm0p7cv6", "")
+            )
+            contractor = cols.get("color_mm0p4947", "")
+            location = cols.get("dropdown_mm0p6nzm", "")
+
+            # Labour & materials costs
+            labour_raw = cols.get("numeric_mm0pndmj", "") or "0"
+            materials_raw = cols.get("numeric_mm0p7jdn", "") or "0"
+            try:
+                labour_cost = float(labour_raw.replace("£", "").replace(",", "").strip())
+            except (ValueError, AttributeError):
+                labour_cost = 0.0
+            try:
+                materials_cost = float(materials_raw.replace("£", "").replace(",", "").strip())
+            except (ValueError, AttributeError):
+                materials_cost = 0.0
+
+            # Boolean toggles
+            bill_ll = 1 if cols.get("boolean_mm0phkaq", "") == "checked" else 0
+            emergency = 1 if cols.get("boolean2hbqq7ey", "") == "checked" else 0
+
+            # Reporter info
+            reporter_name = cols.get("short_textcvckh2h3", "")
+            reporter_email = cols.get("emailzit7svgb", "")
+
+            # File paths (photo evidence + contractor invoices)
+            photo_paths = _parse_photo_paths(cols)
+            invoice_paths = _parse_invoice_paths(cols)
+
+            # Check if this item already exists in local DB
+            existing = db.execute(
+                "SELECT id, status, priority, type, address, contractor, "
+                "labour_cost, materials_cost, bill_ll, emergency, "
+                "reporter_name, reporter_email, photo_paths, invoice_paths, "
+                "location, description, team_notes "
+                "FROM maintenance_jobs WHERE monday_id = ?",
+                [monday_id],
+            ).fetchone()
+
+            if existing:
+                # ── UPDATE existing row ──
+                # Compare key fields to decide if an update is needed
+                changed = False
+                updates = {}
+                compare_map = {
+                    "title": title,
+                    "status": status,
+                    "priority": priority,
+                    "type": maint_type,
+                    "address": address,
+                    "contractor": contractor,
+                    "location": location,
+                    "labour_cost": labour_cost,
+                    "materials_cost": materials_cost,
+                    "bill_ll": bill_ll,
+                    "emergency": emergency,
+                    "reporter_name": reporter_name,
+                    "reporter_email": reporter_email,
+                    "photo_paths": photo_paths,
+                    "invoice_paths": invoice_paths,
+                }
+                for field, new_val in compare_map.items():
+                    old_val = existing[field]
+                    if old_val is None:
+                        old_val = ""
+                    # Normalise types for comparison
+                    if isinstance(old_val, float) or isinstance(new_val, float):
+                        if abs(float(old_val or 0) - float(new_val or 0)) > 0.001:
+                            updates[field] = new_val
+                            changed = True
+                    elif str(old_val).strip() != str(new_val).strip():
+                        updates[field] = new_val
+                        changed = True
+
+                if changed:
+                    updates["modified"] = "datetime('now')"
+                    set_clause = ", ".join(f"{k} = ?" for k in updates)
+                    values = list(updates.values())
+                    values.append(existing["id"])
+                    db.execute(
+                        f"UPDATE maintenance_jobs SET {set_clause} WHERE id = ?",
+                        values,
+                    )
+                    updated += 1
+                else:
+                    unchanged += 1
+            else:
+                # ── INSERT new row ──
+                db.execute(
+                    """INSERT INTO maintenance_jobs
+                       (monday_id, title, status, priority, type, address,
+                        contractor, location, labour_cost, materials_cost,
+                        bill_ll, emergency, reporter_name, reporter_email,
+                        photo_paths, invoice_paths, source)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'monday')""",
+                    [
+                        monday_id,
+                        title,
+                        status,
+                        priority,
+                        maint_type,
+                        address,
+                        contractor,
+                        location,
+                        labour_cost,
+                        materials_cost,
+                        bill_ll,
+                        emergency,
+                        reporter_name,
+                        reporter_email,
+                        photo_paths,
+                        invoice_paths,
+                    ],
+                )
+                inserted += 1
+
+        db.commit()
+        return json_success(
+            {
+                "inserted": inserted,
+                "updated": updated,
+                "unchanged": unchanged,
+                "total_on_monday": len(all_items),
+            }
+        )
     except Exception as e:
         return json_error(str(e), 500)
     finally:
@@ -2685,6 +3481,46 @@ def api_update_thread_status(thread_id):
         return json_error(str(e), 500)
     finally:
         db.close()
+
+@banksia_os_bp.route("/threads/<int:thread_id>/attachments", methods=["POST"])
+def api_upload_thread_attachment(thread_id):
+    """Upload a file attachment to a message thread."""
+    if "file" not in request.files:
+        return json_error("No file provided")
+    file = request.files["file"]
+    if file.filename == "":
+        return json_error("Empty filename")
+    docs_dir = os.path.join(os.path.dirname(__file__), "documents")
+    os.makedirs(docs_dir, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    safe_name = f"thread_{thread_id}_{ts}_{file.filename}"
+    save_path = os.path.join(docs_dir, safe_name)
+    file.save(save_path)
+    author = request.form.get("author", session.get("user", {}).get("username", "User"))
+    db = get_dict_db()
+    try:
+        t = db.execute("SELECT id FROM message_threads WHERE id=?", (thread_id,)).fetchone()
+        if not t:
+            return json_error("Thread not found", 404)
+        attachment_url = f"/api/banksia-os/threads/{thread_id}/attachments/{safe_name}"
+        body = f"[File attached: {file.filename}]({attachment_url})"
+        db.execute("INSERT INTO messages (thread_id, author, author_role, body) VALUES (?,?,?,?)",
+                   (thread_id, author, "team", body))
+        db.execute("UPDATE message_threads SET modified=? WHERE id=?",
+                   (datetime.now(timezone.utc).isoformat(), thread_id))
+        db.commit()
+        return json_success({"filename": file.filename, "path": save_path, "url": attachment_url, "message_id": db.lastrowid}), 201
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+@banksia_os_bp.route("/threads/<int:thread_id>/attachments/<path:filename>")
+def api_serve_thread_attachment(thread_id, filename):
+    """Serve a file attachment from the documents folder."""
+    from flask import send_from_directory
+    docs_dir = os.path.join(os.path.dirname(__file__), "documents")
+    return send_from_directory(docs_dir, f"thread_{thread_id}_{filename}", as_attachment=True)
 
 @banksia_os_bp.route("/messages", methods=["POST"])
 def api_post_message():

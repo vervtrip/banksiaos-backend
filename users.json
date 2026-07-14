@@ -55,11 +55,6 @@
     "role": "admin",
     "email": ""
   },
-  "Alex": {
-    "password": "Alexops123@",
-    "role": "admin",
-    "email": ""
-  },
   "Hafiza": {
     "password": "Hafizaops123@",
     "role": "admin",

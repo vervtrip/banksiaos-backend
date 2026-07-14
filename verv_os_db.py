@@ -330,8 +330,74 @@ CREATE INDEX IF NOT EXISTS idx_access_records_property_id ON access_records(prop
 CREATE INDEX IF NOT EXISTS idx_access_records_unit_id     ON access_records(unit_id);
 CREATE INDEX IF NOT EXISTS idx_property_images_property_id ON property_images(property_id);
 CREATE INDEX IF NOT EXISTS idx_property_images_unit_id     ON property_images(unit_id);
-"""
 
+-- ── 9. MAINTENANCE JOBS (Operations Board) ──────────────────
+CREATE TABLE IF NOT EXISTS maintenance_jobs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    monday_id       TEXT UNIQUE,
+    reference       TEXT,
+    property_id     INTEGER REFERENCES properties(id) ON DELETE SET NULL,
+    address         TEXT,
+    title           TEXT NOT NULL,
+    description     TEXT,
+    type            TEXT,
+    priority        TEXT DEFAULT 'Medium',
+    status          TEXT DEFAULT 'PENDING',
+    location        TEXT,
+    contractor      TEXT,
+    labour_cost     REAL DEFAULT 0,
+    materials_cost  REAL DEFAULT 0,
+    total_cost      REAL DEFAULT 0,
+    bill_ll         INTEGER DEFAULT 0,
+    ll_informed     INTEGER DEFAULT 0,
+    ll_informed_via TEXT,
+    ll_notes        TEXT,
+    reporter_name   TEXT,
+    reporter_email  TEXT,
+    emergency       INTEGER DEFAULT 0,
+    source          TEXT DEFAULT 'board',
+    photo_paths     TEXT,
+    invoice_paths   TEXT,
+    team_notes      TEXT,
+    tenant_id       INTEGER REFERENCES tenants(id) ON DELETE SET NULL,
+    created         TEXT DEFAULT (datetime('now')),
+    modified        TEXT DEFAULT (datetime('now')),
+    start_date      TEXT,
+    completed_date  TEXT
+);
+
+-- ── 10. MAINTENANCE ORDERS ───────────────────────────────────
+CREATE TABLE IF NOT EXISTS maintenance_orders (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id          INTEGER REFERENCES maintenance_jobs(id) ON DELETE CASCADE,
+    item_name       TEXT NOT NULL,
+    supplier        TEXT,
+    order_ref       TEXT,
+    cost            REAL DEFAULT 0,
+    status          TEXT DEFAULT 'ordered',
+    tracking_url    TEXT,
+    estimated_delivery TEXT,
+    delivered_at    TEXT,
+    received_by     TEXT,
+    notes           TEXT,
+    created         TEXT DEFAULT (datetime('now')),
+    modified        TEXT DEFAULT (datetime('now'))
+);
+
+-- ── 11. LANDLORD COMMUNICATIONS ──────────────────────────────
+CREATE TABLE IF NOT EXISTS ll_communications (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id          INTEGER REFERENCES maintenance_jobs(id) ON DELETE CASCADE,
+    contact_method  TEXT NOT NULL,
+    contact_ref     TEXT,
+    summary         TEXT,
+    ll_response     TEXT,
+    sent_at         TEXT,
+    responded_at    TEXT,
+    created         TEXT DEFAULT (datetime('now'))
+);
+
+"""
 
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=30)

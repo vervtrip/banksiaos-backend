@@ -535,7 +535,12 @@ async function markPaid(tid,cid,amt){
 
 // close on overlay click
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('show');}));
-loadForms();
+// Deep-link: open a specific applicant when arriving from the Submissions inbox (?form=<id>)
+(async()=>{
+  await loadForms();
+  const fid=new URLSearchParams(location.search).get('form');
+  if(fid && /^\d+$/.test(fid)){ openDetail(parseInt(fid,10)); }
+})();
 </script>
 </body>
 </html>

@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Tenant Portal — Banksia OS</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f4f6fb;--card:#fff;--ink:#0b1220;--muted:#6b7688;--line:#eef1f6;--brand:#111827;--accent:#4f46e5;--accent2:#6366f1}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;min-height:100vh}
+.center{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.login{background:var(--card);border-radius:20px;box-shadow:0 20px 60px rgba(15,23,42,.12);width:100%;max-width:400px;padding:36px}
+.login .brand{text-align:center;margin-bottom:26px}
+.login .brand .logo{width:52px;height:52px;border-radius:14px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:22px;margin:0 auto 14px}
+.login .brand h1{font-size:22px;font-weight:800;letter-spacing:-.4px}
+.login .brand p{color:var(--muted);font-size:13px;margin-top:3px}
+.fg{margin-bottom:15px}
+.fg label{display:block;font-size:12px;font-weight:600;color:#475569;margin-bottom:6px}
+.fg input,.fg select,.fg textarea{width:100%;padding:12px 14px;border-radius:11px;border:1px solid #e2e8f0;font-size:14px;font-family:inherit;outline:none;background:#fff;transition:border .15s}
+.fg input:focus,.fg select:focus,.fg textarea:focus{border-color:var(--accent2);box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+.fg textarea{resize:vertical;min-height:84px}
+.btn{width:100%;padding:13px;border-radius:11px;background:var(--brand);color:#fff;font-size:14px;font-weight:700;border:none;cursor:pointer;font-family:inherit;transition:transform .1s,background .15s}
+.btn:hover{background:#000}.btn:active{transform:scale(.99)}
+.btn.accent{background:var(--accent)}.btn.accent:hover{background:#4338ca}
+.err{background:#fee2e2;color:#b91c1c;padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:14px;display:none}
+.ok{background:#dcfce7;color:#15803d;padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:14px}
+.topbar{background:var(--brand);color:#fff;padding:15px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:20}
+.topbar .l{display:flex;align-items:center;gap:11px}
+.topbar .logo{width:34px;height:34px;border-radius:9px;background:#fff;color:var(--brand);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:16px}
+.topbar h1{font-size:16px;font-weight:800;letter-spacing:-.3px}
+.topbar .out{font-size:13px;color:#c7cdd9;cursor:pointer;font-weight:600}
+.topbar .out:hover{color:#fff}
+.wrap{max-width:820px;margin:0 auto;padding:22px 18px 110px}
+.hi{font-size:22px;font-weight:800;letter-spacing:-.5px;margin-bottom:2px}
+.hi-sub{color:var(--muted);font-size:13px;margin-bottom:20px}
+.tabs{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:8px 0 max(8px,env(safe-area-inset-bottom));z-index:30;box-shadow:0 -4px 20px rgba(15,23,42,.05)}
+.tab{flex:1;text-align:center;padding:6px 0;cursor:pointer;color:var(--muted);font-size:11px;font-weight:600;border:none;background:none;font-family:inherit}
+.tab .ic{font-size:20px;display:block;margin-bottom:2px;line-height:1}
+.tab.active{color:var(--accent)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;margin-bottom:15px}
+.card h3{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--accent);font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:7px}
+.row{display:flex;align-items:center;justify-content:space-between;padding:13px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:none}
+.row .t{font-size:14px;font-weight:600}.row .s{font-size:12px;color:var(--muted);margin-top:2px}
+.pill{display:inline-block;padding:3px 11px;border-radius:20px;font-size:11px;font-weight:700;text-transform:capitalize}
+.pill.approved,.pill.completed,.pill.resolved,.pill.paid{background:#dcfce7;color:#15803d}
+.pill.submitted,.pill.sent{background:#dbeafe;color:#1d4ed8}
+.pill.under_review,.pill.viewed,.pill.in_progress{background:#e0e7ff;color:#4338ca}
+.pill.open,.pill.draft{background:#fef3c7;color:#b45309}
+.pill.rejected,.pill.emergency,.pill.arrears{background:#fee2e2;color:#b91c1c}
+.pill.high{background:#ffedd5;color:#c2410c}.pill.normal{background:#f1f5f9;color:#475569}.pill.low{background:#f1f5f9;color:#64748b}
+.empty{color:#94a3b8;font-size:13px;padding:12px 0;text-align:center}
+.signbtn{background:var(--accent);color:#fff;padding:8px 15px;border-radius:9px;font-size:12px;font-weight:700;border:none;cursor:pointer}
+.hero{background:linear-gradient(135deg,#111827,#312e81);color:#fff;border-radius:18px;padding:24px;margin-bottom:16px}
+.hero .lbl{font-size:12px;color:#c7cdd9;font-weight:600;text-transform:uppercase;letter-spacing:.6px}
+.hero .amt{font-size:34px;font-weight:900;letter-spacing:-1px;margin:6px 0 3px}
+.hero .st{font-size:13px;font-weight:600}
+.hero .st.owe{color:#fca5a5}.hero .st.clear{color:#86efac}
+.mini{display:flex;gap:10px;margin-top:16px}
+.mini div{flex:1;background:rgba(255,255,255,.08);border-radius:12px;padding:11px 13px}
+.mini .k{font-size:11px;color:#c7cdd9}.mini .v{font-size:16px;font-weight:800;margin-top:2px}
+.led{display:flex;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--line);font-size:13px}
+.led:last-child{border-bottom:none}
+.led .d{color:var(--muted);font-size:11px;margin-top:2px}
+.led .amt{font-weight:700;white-space:nowrap}
+.led .amt.charge{color:#b91c1c}.led .amt.payment{color:#15803d}
+.fab{position:fixed;right:18px;bottom:78px;background:var(--accent);color:#fff;border:none;border-radius:30px;padding:14px 20px;font-size:14px;font-weight:700;box-shadow:0 8px 24px rgba(79,70,229,.4);cursor:pointer;z-index:25;font-family:inherit}
+.modal{position:fixed;inset:0;background:rgba(15,23,42,.5);display:flex;align-items:flex-end;justify-content:center;z-index:50;padding:0}
+.sheet{background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:560px;padding:24px 20px 30px;max-height:90vh;overflow:auto}
+.sheet h2{font-size:18px;font-weight:800;margin-bottom:4px}
+.sheet .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+.sheet .x{float:right;font-size:22px;color:#94a3b8;cursor:pointer;line-height:1}
+@media(min-width:620px){.modal{align-items:center}.sheet{border-radius:20px}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const API='/api/referencing';
+let TOKEN=localStorage.getItem('portal_token')||'';
+let ME=null, TAB='overview';
+
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function money(n){return '£'+Number(n||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function money0(n){return '£'+Number(n||0).toLocaleString('en-GB',{maximumFractionDigits:0});}
+function getParam(n){return new URLSearchParams(location.search).get(n)||'';}
+function showErr(m){const e=document.getElementById('err');if(e){e.textContent=m;e.style.display='block';}}
+async function api(path,opts){
+  opts=opts||{};opts.headers=Object.assign({'Authorization':'Bearer '+TOKEN},opts.headers||{});
+  const r=await fetch(API+path,opts);const j=await r.json();
+  if(r.status===401){localStorage.removeItem('portal_token');TOKEN='';renderLogin('Your session expired. Please sign in again.');throw new Error('401');}
+  if(!r.ok||!j.success)throw new Error(j.error||'Request failed');
+  return j.data;
+}
+
+function renderLogin(msg){
+  document.getElementById('app').innerHTML=`
+  <div class="center"><div class="login">
+    <div class="brand"><div class="logo">B</div><h1>Banksia OS</h1><p>Tenant &amp; Applicant Portal</p></div>
+    <div class="err" id="err" style="${msg?'display:block':''}">${esc(msg||'')}</div>
+    <div class="fg"><label>Email</label><input id="email" type="email" autocomplete="username"></div>
+    <div class="fg"><label>Password</label><input id="pw" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
+    <button class="btn" onclick="doLogin()">Sign In</button>
+    <p style="font-size:12px;color:#94a3b8;margin-top:16px;text-align:center;line-height:1.5">
+      First time here? Use the <strong>Set up your account</strong> link in your Banksia email.</p>
+  </div></div>`;
+}
+function renderRegister(formToken,msg){
+  document.getElementById('app').innerHTML=`
+  <div class="center"><div class="login">
+    <div class="brand"><div class="logo">B</div><h1>Banksia OS</h1><p>Set up your portal account</p></div>
+    <div class="err" id="err" style="${msg?'display:block':''}">${esc(msg||'')}</div>
+    <div class="fg"><label>Choose a password</label><input id="pw" type="password" autocomplete="new-password" placeholder="At least 8 characters"></div>
+    <div class="fg"><label>Confirm password</label><input id="pw2" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')doRegister('${esc(formToken)}')"></div>
+    <button class="btn" onclick="doRegister('${esc(formToken)}')">Create account</button>
+    <p style="font-size:12px;color:#94a3b8;margin-top:16px;text-align:center">Already have an account? <a href="/portal" style="color:var(--accent);font-weight:600">Sign in</a></p>
+  </div></div>`;
+}
+async function doRegister(formToken){
+  const pw=document.getElementById('pw').value, pw2=document.getElementById('pw2').value;
+  if(!pw||pw.length<8){showErr('Password must be at least 8 characters');return;}
+  if(pw!==pw2){showErr('Passwords do not match');return;}
+  try{
+    const r=await fetch(API+'/portal/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({form_token:formToken,password:pw})});
+    const j=await r.json();if(!r.ok||!j.success)throw new Error(j.error||'Could not create your account');
+    TOKEN=j.data.token;localStorage.setItem('portal_token',TOKEN);history.replaceState({},'','/portal');loadDash();
+  }catch(e){showErr(e.message);}
+}
+async function doLogin(){
+  const email=document.getElementById('email').value.trim(), pw=document.getElementById('pw').value;
+  if(!email||!pw){showErr('Please enter your email and password');return;}
+  try{
+    const r=await fetch(API+'/portal/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw})});
+    const j=await r.json();if(!r.ok||!j.success)throw new Error(j.error||'Login failed');
+    TOKEN=j.data.token;localStorage.setItem('portal_token',TOKEN);loadDash();
+  }catch(e){showErr(e.message);}
+}
+async function doLogout(){
+  try{await fetch(API+'/portal/logout',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}});}catch(e){}
+  localStorage.removeItem('portal_token');TOKEN='';renderLogin();
+}
+
+async function loadDash(){
+  try{ME=await api('/portal/me');}
+  catch(e){if(e.message!=='401')renderLogin('Unable to load your portal. Please sign in.');return;}
+  renderShell();
+}
+function renderShell(){
+  const p=ME.profile, isTenant=(p.portal_type==='tenant')||(ME.tenancies&&ME.tenancies.length);
+  document.getElementById('app').innerHTML=`
+  <div class="topbar"><div class="l"><div class="logo">B</div><h1>Banksia OS</h1></div><span class="out" onclick="doLogout()">Sign out</span></div>
+  <div class="wrap" id="view"></div>
+  <div class="tabs">
+    <button class="tab" data-t="overview" onclick="go('overview')"><span class="ic">🏠</span>Home</button>
+    ${isTenant?`<button class="tab" data-t="rent" onclick="go('rent')"><span class="ic">💷</span>Rent</button>
+    <button class="tab" data-t="maintenance" onclick="go('maintenance')"><span class="ic">🔧</span>Repairs</button>`:''}
+    <button class="tab" data-t="documents" onclick="go('documents')"><span class="ic">📄</span>Docs</button>
+  </div>`;
+  go('overview');
+}
+function setActive(){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.t===TAB));}
+function go(tab){TAB=tab;setActive();
+  if(tab==='overview')viewOverview();
+  else if(tab==='rent')viewRent();
+  else if(tab==='maintenance')viewMaintenance();
+  else if(tab==='documents')viewDocuments();
+}
+
+function viewOverview(){
+  const p=ME.profile, apps=ME.applications||[], sign=ME.documents_to_sign||[], ten=ME.tenancies||[];
+  document.getElementById('view').innerHTML=`
+    <div class="hi">Hello, ${esc(p.first_name)} 👋</div>
+    <div class="hi-sub">${esc(p.email)}</div>
+    ${sign.length?`<div class="card"><h3>✍️ Action needed — documents to sign</h3>
+      ${sign.map(s=>`<div class="row"><div><div class="t">${esc(s.document_title)}</div><div class="s">${esc((s.document_type||'').replace(/_/g,' '))}</div></div>
+      <button class="signbtn" onclick="location.href='/sign/${esc(s.signer_token)}'">Review &amp; Sign</button></div>`).join('')}</div>`:''}
+    <div class="card"><h3>📋 My applications</h3>
+      ${apps.length?apps.map(a=>`<div class="row"><div><div class="t">Referencing application</div><div class="s">${a.submitted_at?'Submitted '+esc(a.submitted_at.slice(0,10)):'Started '+esc((a.created||'').slice(0,10))}</div></div>
+        <span class="pill ${esc(a.status)}">${esc((a.status||'').replace(/_/g,' '))}</span></div>`).join(''):'<div class="empty">No applications on file.</div>'}
+    </div>
+    <div class="card"><h3>🏡 My tenancies</h3>
+      ${ten.length?ten.map(t=>`<div class="row"><div><div class="t">${esc(t.full_address||('Property #'+t.property_id))}</div><div class="s">${esc(t.start_date||'')} → ${esc(t.end_date||'ongoing')}</div></div>
+        <div style="text-align:right"><div class="t">${money0(t.rent_amount)}</div><div class="s">${esc(t.rent_frequency||'')}</div></div></div>`).join(''):'<div class="empty">No active tenancies linked to your account.</div>'}
+    </div>`;
+}
+
+async function viewRent(){
+  document.getElementById('view').innerHTML='<div class="empty">Loading your rent statement…</div>';
+  let d;try{d=await api('/portal/rent');}catch(e){document.getElementById('view').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>';return;}
+  if(!d.tenancy){document.getElementById('view').innerHTML='<div class="hi">Rent</div><div class="card"><div class="empty">'+esc(d.message||'No tenancy linked yet.')+'</div></div>';return;}
+  const s=d.summary, arrears=s.in_arrears;
+  document.getElementById('view').innerHTML=`
+    <div class="hi">Rent statement</div><div class="hi-sub">${esc(d.tenancy.full_address||'')}</div>
+    <div class="hero">
+      <div class="lbl">Current balance</div>
+      <div class="amt">${money(Math.abs(s.balance))}</div>
+      <div class="st ${arrears?'owe':'clear'}">${arrears?'⚠ In arrears — please settle this amount':'✓ Account up to date'}</div>
+      <div class="mini">
+        <div><div class="k">Total charged</div><div class="v">${money0(s.total_charged)}</div></div>
+        <div><div class="k">Total paid</div><div class="v">${money0(s.total_paid)}</div></div>
+        <div><div class="k">Rent</div><div class="v">${money0(d.tenancy.rent_amount)}</div></div>
+      </div>
+    </div>
+    <div class="card"><h3>📒 Transaction history</h3>
+      ${(d.ledger||[]).length?d.ledger.map(t=>{const isC=(t.payment_type||'').toLowerCase()==='charge';
+        return `<div class="led"><div><div>${esc(t.transaction_type||t.description||'Transaction')}</div><div class="d">${esc((t.date||'').slice(0,10))}${t.is_outstanding?' · <span style="color:#b91c1c">outstanding</span>':''}</div></div>
+        <div class="amt ${isC?'charge':'payment'}">${isC?'+':'−'}${money(t.amount)}</div></div>`;}).join(''):'<div class="empty">No transactions yet.</div>'}
+    </div>`;
+}
+
+async function viewMaintenance(){
+  document.getElementById('view').innerHTML='<div class="empty">Loading your requests…</div>';
+  let d;try{d=await api('/portal/maintenance');}catch(e){document.getElementById('view').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>';return;}
+  const reqs=d.requests||[];
+  document.getElementById('view').innerHTML=`
+    <div class="hi">Repairs &amp; maintenance</div><div class="hi-sub">Report an issue and track its progress</div>
+    <div class="card"><h3>🔧 My requests</h3>
+      ${reqs.length?reqs.map(r=>`<div class="row"><div><div class="t">${esc(r.title)}</div>
+        <div class="s">${esc(r.reference)} · ${esc(r.category||'general')}${r.location?' · '+esc(r.location):''} · ${esc((r.created||'').slice(0,10))}</div></div>
+        <div style="text-align:right;display:flex;flex-direction:column;gap:5px;align-items:flex-end">
+        <span class="pill ${esc(r.status)}">${esc((r.status||'').replace(/_/g,' '))}</span>
+        <span class="pill ${esc(r.priority)}">${esc(r.priority)}</span></div></div>`).join(''):'<div class="empty">No maintenance requests yet.</div>'}
+    </div>
+    <button class="fab" onclick="openMaint()">＋ Report an issue</button>`;
+}
+function openMaint(){
+  const m=document.createElement('div');m.className='modal';m.id='maintModal';
+  m.innerHTML=`<div class="sheet"><span class="x" onclick="closeMaint()">×</span>
+    <h2>Report an issue</h2><div class="sub">Give us as much detail as you can so we can fix it quickly.</div>
+    <div class="err" id="merr"></div>
+    <div class="fg"><label>What's the problem?</label><input id="m_title" placeholder="e.g. Boiler not heating"></div>
+    <div class="fg"><label>Category</label><select id="m_cat">
+      <option value="heating">Heating / hot water</option><option value="plumbing">Plumbing / leaks</option>
+      <option value="electrical">Electrical</option><option value="appliances">Appliances</option>
+      <option value="locks">Locks / keys / security</option><option value="damp">Damp / mould</option>
+      <option value="general" selected>General / other</option></select></div>
+    <div class="fg"><label>Where in the property?</label><input id="m_loc" placeholder="e.g. Kitchen, Bathroom"></div>
+    <div class="fg"><label>Priority</label><select id="m_pri">
+      <option value="low">Low — not urgent</option><option value="normal" selected>Normal</option>
+      <option value="high">High — affecting daily life</option><option value="emergency">Emergency — safety risk / flood / no heat</option></select></div>
+    <div class="fg"><label>Description</label><textarea id="m_desc" placeholder="Describe what's happening, when it started…"></textarea></div>
+    <button class="btn accent" onclick="submitMaint()">Submit request</button></div>`;
+  document.body.appendChild(m);
+}
+function closeMaint(){const m=document.getElementById('maintModal');if(m)m.remove();}
+async function submitMaint(){
+  const title=document.getElementById('m_title').value.trim();
+  if(!title){document.getElementById('merr').textContent='Please describe the problem';document.getElementById('merr').style.display='block';return;}
+  const body={title,category:document.getElementById('m_cat').value,location:document.getElementById('m_loc').value.trim(),
+    priority:document.getElementById('m_pri').value,description:document.getElementById('m_desc').value.trim()};
+  try{await api('/portal/maintenance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    closeMaint();viewMaintenance();}
+  catch(e){document.getElementById('merr').textContent=e.message;document.getElementById('merr').style.display='block';}
+}
+
+async function viewDocuments(){
+  document.getElementById('view').innerHTML='<div class="empty">Loading your documents…</div>';
+  let d;try{d=await api('/portal/documents');}catch(e){document.getElementById('view').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>';return;}
+  const up=d.uploaded||[], sg=d.signed||[];
+  document.getElementById('view').innerHTML=`
+    <div class="hi">My documents</div><div class="hi-sub">Documents you've provided and signed agreements</div>
+    <div class="card"><h3>✅ Signed agreements</h3>
+      ${sg.length?sg.map(s=>`<div class="row"><div><div class="t">${esc(s.document_title)}</div><div class="s">Signed ${esc((s.completed_at||s.signed_at||'').slice(0,10))}</div></div>
+        <span class="pill completed">completed</span></div>`).join(''):'<div class="empty">No signed agreements yet.</div>'}
+    </div>
+    <div class="card"><h3>📎 Documents you've provided</h3>
+      ${up.length?up.map(u=>`<div class="row"><div><div class="t">${esc((u.category||'document').replace(/_/g,' '))}</div><div class="s">${esc(u.original_filename||'')} · ${esc((u.uploaded_at||'').slice(0,10))}</div></div>
+        <span class="pill ${u.is_verified?'approved':'draft'}">${u.is_verified?'verified':'received'}</span></div>`).join(''):'<div class="empty">No documents uploaded yet.</div>'}
+    </div>`;
+}
+
+const SETUP=getParam('setup')||getParam('form_token');
+if(SETUP)renderRegister(SETUP);
+else if(TOKEN)loadDash();
+else renderLogin();
+</script>
+</body>
+</html>

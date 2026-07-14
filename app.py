@@ -565,7 +565,18 @@ def api_delete_comment(project, item_id, comment_id):
 @require_super_admin
 def api_list_users():
     users = _load_users()
-    safe = {u: {"role": d["role"]} for u, d in users.items()}
+    safe = {}
+    for uname, d in users.items():
+        safe[uname] = {
+            "role": d.get("role", "admin"),
+            "email": d.get("email", ""),
+            "phone": d.get("phone", ""),
+            "avatar": d.get("avatar", ""),
+            "date_of_birth": d.get("date_of_birth", ""),
+            "biography": d.get("biography", ""),
+            "department": d.get("department", ""),
+            "position": d.get("position", ""),
+        }
     return jsonify(safe)
 
 @app.route("/api/users", methods=["POST"])
@@ -584,6 +595,38 @@ def api_add_user():
     _save_users(users)
     return jsonify({"success": True, "user": {"username": username, "role": role}})
 
+@app.route("/api/users/<username>", methods=["GET", "PATCH"])
+@require_auth
+def api_update_user(username):
+    data = request.get_json()
+    if request.method == "GET":
+        users = _load_users()
+        if username not in users:
+            return jsonify({"error": "User not found"}), 404
+        return jsonify(users[username])
+    if not data:
+        return jsonify({"error": "No data"}), 400
+    users = _load_users()
+    if username not in users:
+        return jsonify({"error": "User not found"}), 404
+    current_user = session.get("user", {})
+    is_super = current_user.get("role") == "super_admin"
+    is_self = current_user.get("username") == username
+    if not is_super and not is_self:
+        return jsonify({"error": "Forbidden"}), 403
+    allowed_fields = ["email", "phone", "date_of_birth", "biography", "department", "position"]
+    for f in allowed_fields:
+        if f in data:
+            users[username][f] = data[f]
+    # Only super admin can change role
+    if is_super and "role" in data:
+        users[username]["role"] = data["role"]
+    # Password update handled separately by change-password endpoint
+    if "password" in data and data["password"]:
+        users[username]["password"] = data["password"]
+    _save_users(users)
+    return jsonify({"success": True, "user": {"username": username, "role": users[username].get("role")}})
+
 @app.route("/api/users/<username>", methods=["DELETE"])
 @require_super_admin
 def api_delete_user(username):
@@ -594,6 +637,81 @@ def api_delete_user(username):
         del users[username]
         _save_users(users)
     return jsonify({"success": True})
+
+# ── AVATAR UPLOAD ──
+import uuid
+AVATAR_DIR = os.path.join(os.path.dirname(__file__), "static", "avatars")
+os.makedirs(AVATAR_DIR, exist_ok=True)
+
+@app.route("/api/users/<username>/avatar", methods=["POST"])
+@require_auth
+def api_upload_avatar(username):
+    current_user = session.get("user", {})
+    is_super = current_user.get("role") == "super_admin"
+    is_self = current_user.get("username") == username
+    if not is_super and not is_self:
+        return jsonify({"error": "Forbidden"}), 403
+    if "avatar" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    file = request.files["avatar"]
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "png"
+    if ext not in ("png", "jpg", "jpeg", "gif", "webp"):
+        return jsonify({"error": "Invalid image format"}), 400
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    file.save(os.path.join(AVATAR_DIR, filename))
+    url = f"/static/avatars/{filename}"
+    users = _load_users()
+    users[username]["avatar"] = url
+    _save_users(users)
+    return jsonify({"success": True, "url": url})
+
+# ── USER PREFERENCES & PASSWORD ──
+@app.route("/api/user/preferences", methods=["POST"])
+@require_auth
+def api_user_preferences():
+    data = request.get_json()
+    if not data or "preferences" not in data:
+        return jsonify({"error": "preferences object required"}), 400
+    user = session.get("user", {})
+    username = user.get("username")
+    if not username:
+        return jsonify({"error": "Not authenticated"}), 401
+    users = _load_users()
+    if username not in users:
+        return jsonify({"error": "User not found"}), 404
+    if "preferences" not in users[username]:
+        users[username]["preferences"] = {}
+    users[username]["preferences"].update(data["preferences"])
+    _save_users(users)
+    return jsonify({"success": True, "preferences": users[username]["preferences"]})
+
+@app.route("/api/user/change-password", methods=["POST"])
+@require_auth
+def api_user_change_password():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data"}), 400
+    current_password = data.get("current_password", "")
+    new_password = data.get("new_password", "")
+    confirm_password = data.get("confirm_password", "")
+    if not current_password or not new_password:
+        return jsonify({"error": "current_password and new_password required"}), 400
+    if new_password != confirm_password:
+        return jsonify({"error": "Passwords do not match"}), 400
+    if len(new_password) < 6:
+        return jsonify({"error": "Password must be at least 6 characters"}), 400
+    user = session.get("user", {})
+    username = user.get("username")
+    if not username:
+        return jsonify({"error": "Not authenticated"}), 401
+    users = _load_users()
+    if username not in users:
+        return jsonify({"error": "User not found"}), 404
+    if users[username].get("password") != current_password:
+        return jsonify({"error": "Current password is incorrect"}), 403
+    users[username]["password"] = new_password
+    _save_users(users)
+    return jsonify({"success": True, "message": "Password updated"})
 
 # ── PROPERTIES OVERVIEW ──
 @app.route("/api/properties")
@@ -2306,6 +2424,39 @@ def api_form_by_token():
                 "documents": documents
             }
         })
+    finally:
+        db.close()
+
+
+# ── Thread File Attachments ──
+@app.route("/api/threads/<int:thread_id>/attachments", methods=["POST"])
+@require_auth
+def api_thread_attachment(thread_id):
+    if "file" not in request.files:
+        return jsonify({"success": False, "error": "No file provided"}), 400
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"success": False, "error": "Empty filename"}), 400
+    import uuid, os
+    ext = file.filename.rsplit(".", 1)[-1] if "." in file.filename else "bin"
+    safe_name = f"thread_{thread_id}_{uuid.uuid4().hex[:12]}.{ext}"
+    docs_dir = os.path.join(os.path.dirname(__file__), "documents")
+    os.makedirs(docs_dir, exist_ok=True)
+    save_path = os.path.join(docs_dir, safe_name)
+    file.save(save_path)
+    author = request.form.get("author", session.get("user", {}).get("username", "User"))
+    from verv_os_db import get_db
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO messages (thread_id, author, author_role, body, attachments, created) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+            [thread_id, author, "team", f"Attached: {file.filename}", json.dumps([{"filename": file.filename, "path": safe_name, "size": os.path.getsize(save_path)}])]
+        )
+        db.commit()
+        # Update thread modification time
+        db.execute("UPDATE message_threads SET modified = datetime('now') WHERE id = ?", [thread_id])
+        db.commit()
+        return jsonify({"success": True, "data": {"filename": file.filename, "path": safe_name}})
     finally:
         db.close()
 

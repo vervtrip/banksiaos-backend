@@ -1783,6 +1783,194 @@ def api_portal_documents():
         db.close()
 
 
+# ── Portal: update profile ──
+
+@referencing_bp.route("/portal/profile", methods=["POST"])
+@require_auth
+def api_portal_profile():
+    """Update portal user's profile (phone, notification preferences)."""
+    pu = request.portal_user
+    data = request.get_json() or {}
+    db = get_dict_db()
+    try:
+        # Ensure preferences column exists
+        try:
+            db.execute("ALTER TABLE portal_users ADD COLUMN preferences TEXT DEFAULT '{}'")
+        except Exception:
+            pass  # column already exists
+
+        sets, params = [], []
+        if "phone" in data:
+            sets.append("phone = ?"); params.append(data["phone"].strip())
+        if "preferences" in data:
+            sets.append("preferences = ?"); params.append(json.dumps(data["preferences"]))
+        if sets:
+            params.append(pu["pu_id"])
+            db.execute(f"UPDATE portal_users SET {', '.join(sets)}, modified = datetime('now') WHERE id = ?", params)
+            db.commit()
+
+        user = db.execute(
+            "SELECT id, email, first_name, last_name, phone, portal_type, preferences FROM portal_users WHERE id = ?",
+            [pu["pu_id"]]
+        ).fetchone()
+        return json_success(user)
+    finally:
+        db.close()
+
+
+# ── Portal: change password ──
+
+@referencing_bp.route("/portal/change-password", methods=["POST"])
+@require_auth
+def api_portal_change_password():
+    """Verify current password and set a new one."""
+    pu = request.portal_user
+    data = request.get_json() or {}
+    current = data.get("current_password", "")
+    new_pw = data.get("new_password", "")
+    if not current or not new_pw:
+        return json_error("Current password and new password are required")
+    if len(new_pw) < 8:
+        return json_error("New password must be at least 8 characters")
+    db = get_dict_db()
+    try:
+        user = db.execute("SELECT * FROM portal_users WHERE id = ?", [pu["pu_id"]]).fetchone()
+        if not user or not check_password(current, user["password_hash"]):
+            return json_error("Current password is incorrect", 403)
+        new_hash = hash_password(new_pw)
+        db.execute(
+            "UPDATE portal_users SET password_hash = ?, modified = datetime('now') WHERE id = ?",
+            [new_hash, pu["pu_id"]]
+        )
+        db.commit()
+        return json_success({"message": "Password updated successfully"})
+    finally:
+        db.close()
+
+
+# ── Portal: upload document ──
+
+@referencing_bp.route("/portal/upload-document", methods=["POST"])
+@require_auth
+def api_portal_upload_document():
+    """Upload a supporting document from the tenant portal."""
+    pu = request.portal_user
+    if "file" not in request.files:
+        return json_error("No file provided")
+    f = request.files["file"]
+    if not f.filename:
+        return json_error("Empty filename")
+    db = get_dict_db()
+    try:
+        # Find the referencing form for this user
+        applicant_id = pu.get("applicant_id")
+        email = pu.get("email", "").lower()
+        form = None
+        if applicant_id:
+            form = db.execute(
+                "SELECT id, form_token FROM referencing_forms WHERE applicant_id = ? ORDER BY created DESC LIMIT 1",
+                [applicant_id]
+            ).fetchone()
+        if not form:
+            form = db.execute(
+                "SELECT id, form_token FROM referencing_forms WHERE lower(email) = ? ORDER BY created DESC LIMIT 1",
+                [email]
+            ).fetchone()
+        if not form:
+            return json_error("No referencing form found for your account", 404)
+        # Save file
+        original_name = secure_filename(f.filename) or "document"
+        ext = os.path.splitext(original_name)[1] or ""
+        stored_name = f"{uuid.uuid4().hex}{ext}"
+        form_token_dir = os.path.join(UPLOAD_DIR, form["form_token"])
+        os.makedirs(form_token_dir, exist_ok=True)
+        file_path = os.path.join(form_token_dir, stored_name)
+        f.save(file_path)
+        file_size = os.path.getsize(file_path)
+        mime_type = f.content_type or "application/octet-stream"
+        db.execute(
+            "INSERT INTO referencing_documents (form_id, category, original_filename, stored_filename, file_path, file_size, mime_type, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'applicant')",
+            [form["id"], "other", original_name, stored_name, file_path, file_size, mime_type]
+        )
+        db.commit()
+        doc_id = db.execute("SELECT last_insert_rowid()").fetchone()["last_insert_rowid()"]
+        doc = db.execute(
+            "SELECT id, category, original_filename, file_size, uploaded_at, is_verified FROM referencing_documents WHERE id = ?",
+            [doc_id]
+        ).fetchone()
+        return json_success(doc, message="Document uploaded")
+    except Exception as e:
+        db.rollback()
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ── Portal: messages ──
+
+@referencing_bp.route("/portal/messages", methods=["GET"])
+@require_auth
+def api_portal_messages():
+    """Return team messages/notifications for the portal user.
+
+    Returns messages from message_threads where entity_type='portal' or
+    related to the tenant's property_id.
+    """
+    pu = request.portal_user
+    db = get_dict_db()
+    try:
+        # Collect property_ids from the user's tenancy / applicant links
+        property_ids = []
+        tenancy_id = pu.get("tenancy_id")
+        if tenancy_id:
+            ten = db.execute("SELECT property_id FROM tenancies WHERE id = ?", [tenancy_id]).fetchone()
+            if ten and ten.get("property_id"):
+                property_ids.append(ten["property_id"])
+        applicant_id = pu.get("applicant_id")
+        if applicant_id:
+            rows = db.execute(
+                "SELECT DISTINCT t.property_id FROM tenancies t JOIN referencing_forms f ON f.id = t.id WHERE f.applicant_id = ?",
+                [applicant_id]
+            ).fetchall()
+            for r in rows:
+                if r.get("property_id") and r["property_id"] not in property_ids:
+                    property_ids.append(r["property_id"])
+        # Build where clause: entity_type = 'portal' OR entity matches property_id
+        where_parts = ["mt.entity_type = 'portal'"]
+        params = []
+        if property_ids:
+            placeholders = ",".join(["?"] * len(property_ids))
+            where_parts.append(f"(mt.entity_type = 'property' AND mt.entity_id IN ({placeholders}))")
+            params.extend(property_ids)
+        where = "(" + " OR ".join(where_parts) + ")"
+        threads = db.execute(
+            f"SELECT mt.id, mt.title, mt.entity_type, mt.entity_id, mt.status, mt.created, mt.modified "
+            f"FROM message_threads mt WHERE {where} ORDER BY mt.modified DESC LIMIT 50",
+            params
+        ).fetchall()
+        out = []
+        for t in threads:
+            last_msg = db.execute(
+                "SELECT id, body, author, created FROM messages WHERE thread_id = ? ORDER BY id DESC LIMIT 1",
+                [t["id"]]
+            ).fetchone()
+            body_text = last_msg["body"] if last_msg else ""
+            preview = (body_text[:120] + "…") if len(body_text) > 120 else body_text
+            out.append({
+                "id": t["id"],
+                "subject": t["title"] or "Message",
+                "body": body_text,
+                "preview": preview,
+                "created": t["created"],
+                "modified": t["modified"],
+                "status": t["status"],
+                "read": True,
+            })
+        return json_success({"messages": out})
+    finally:
+        db.close()
+
+
 # ── Team: maintenance request management ──
 
 @referencing_bp.route("/maintenance/requests", methods=["GET"])
