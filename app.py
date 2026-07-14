@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Verv Ops Dashboard — STR, HMO, Maintenance consolidated view."""
-import json, os, subprocess, re, time, sys, urllib.request, uuid
+"""Banksia OS — STR, HMO, Maintenance consolidated view."""
+import json, os, subprocess, re, time, sys, urllib.request, uuid, sqlite3
 from datetime import datetime, timedelta, date, timezone
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, redirect, session
@@ -16,6 +16,34 @@ app.register_blueprint(banksia)
 # ── Register Banksia OS Blueprint ──
 from banksia_os import banksia_os_bp
 app.register_blueprint(banksia_os_bp)
+
+# ── Monday Push Sync ──
+from monday_push import push_all_pending, get_token
+from functools import wraps
+import traceback
+
+def require_auth(f):
+    @wraps(f)
+    def wrap(*a, **k):
+        if not session.get("user"):
+            return jsonify({"error": "Not logged in"}), 401
+        return f(*a, **k)
+    return wrap
+
+@app.route("/api/banksia_os/maintenance/push-to-monday", methods=["POST"])
+@require_auth
+def api_push_to_monday():
+    try:
+        from verv_os_db import get_dict_db
+        db = get_dict_db()
+        try:
+            result = push_all_pending(db)
+            return jsonify({"success": True, "data": result})
+        finally:
+            db.close()
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 # ── Register Referencing Blueprint ──
 from referencing_api import referencing_bp
@@ -180,8 +208,14 @@ def api_get_fast(url, headers, timeout=3):
 def login_page():
     user = session.get("user")
     if user:
-        return render_template("banksia_os.html", user=user)
-    return render_template("banksia_os.html", user={"username": "Guest", "role": "viewer"})
+        return redirect("/banksia-os")
+    return render_template("login.html")
+
+# ── Legacy redirect: /dashboard → /banksia-os ──
+@app.route("/dashboard")
+@require_auth
+def dashboard_redirect():
+    return redirect("/banksia-os")
 
 # ── Auth API ──
 @app.route("/api/auth/login", methods=["POST"])
@@ -243,8 +277,8 @@ def api_forgot_password():
     if os.path.exists(smtp_config_path):
         try:
             smtp = json.load(open(smtp_config_path))
-            msg = MIMEText(f"Hello {found},\n\nYou requested a password reset for the VERV Operations Dashboard.\n\nClick the link below to reset your password:\n{reset_url}\n\nThis link expires in 1 hour.\n\nIf you didn't request this, please ignore this email.\n\n— VERV Operations")
-            msg["Subject"] = "VERV Dashboard — Password Reset"
+            msg = MIMEText(f"Hello {found},\n\nYou requested a password reset for Banksia OS.\n\nClick the link below to reset your password:\n{reset_url}\n\nThis link expires in 1 hour.\n\nIf you didn't request this, please ignore this email.\n\n— Banksia OS")
+            msg["Subject"] = "Banksia OS — Password Reset"
             msg["From"] = smtp.get("from_email", "noreply@vervrooms.com")
             msg["To"] = email
             with smtplib.SMTP(smtp["host"], smtp["port"], timeout=10) as s:
@@ -580,39 +614,69 @@ def api_list_users():
     return jsonify(safe)
 
 @app.route("/api/users", methods=["POST"])
-@require_super_admin
+@require_auth
 def api_add_user():
+    user = session.get("user", {})
+    role = user.get("role", "")
+    if role not in ("super_admin", "admin"):
+        return jsonify({"error": "Forbidden — admin or super admin only"}), 403
     data = request.get_json()
     username = data.get("username", "").strip()
     password = data.get("password", "").strip()
-    role = data.get("role", "admin").strip()
+    new_role = data.get("role", "admin").strip()
     if not username or not password:
         return jsonify({"error": "username and password required"}), 400
-    if role not in ("admin", "super_admin", "projects"):
-        role = "admin"
+    if new_role not in ("admin", "super_admin", "projects"):
+        new_role = "admin"
+    # Only super_admin can create other super_admin accounts
+    if new_role == "super_admin" and role != "super_admin":
+        return jsonify({"error": "Only super admins can create super admin accounts"}), 403
     users = _load_users()
-    users[username] = {"password": password, "role": role}
+    users[username] = {"password": password, "role": new_role}
     _save_users(users)
-    return jsonify({"success": True, "user": {"username": username, "role": role}})
+    return jsonify({"success": True, "user": {"username": username, "role": new_role}})
 
 @app.route("/api/users/<username>", methods=["GET", "PATCH"])
 @require_auth
 def api_update_user(username):
-    data = request.get_json()
+    data = request.get_json(silent=True)
     if request.method == "GET":
         users = _load_users()
         if username not in users:
             return jsonify({"error": "User not found"}), 404
-        return jsonify(users[username])
+        u = dict(users[username])
+        # Always include all display fields with defaults
+        u.setdefault("email", "")
+        u.setdefault("phone", "")
+        u.setdefault("date_of_birth", "")
+        u.setdefault("biography", "")
+        u.setdefault("department", "")
+        u.setdefault("position", "")
+        u.setdefault("avatar", "")
+        u.setdefault("preferences", {})
+        # Strip password from response
+        u.pop("password", None)
+        return jsonify({"user": u})
     if not data:
         return jsonify({"error": "No data"}), 400
     users = _load_users()
     if username not in users:
         return jsonify({"error": "User not found"}), 404
     current_user = session.get("user", {})
-    is_super = current_user.get("role") == "super_admin"
+    current_role = current_user.get("role", "")
+    is_super = current_role == "super_admin"
+    is_admin = current_role in ("super_admin", "admin")
     is_self = current_user.get("username") == username
-    if not is_super and not is_self:
+    # Super admin can edit anyone. Admin can edit themselves or non-super_admin users.
+    target = users[username] if isinstance(users[username], dict) else {}
+    target_role = target.get("role", "admin") if isinstance(target, dict) else "admin"
+    if is_super:
+        pass  # can edit anyone
+    elif is_admin and is_self:
+        pass  # can edit self
+    elif is_admin and target_role != "super_admin":
+        pass  # admin can edit non-super_admin users
+    else:
         return jsonify({"error": "Forbidden"}), 403
     allowed_fields = ["email", "phone", "date_of_birth", "biography", "department", "position"]
     for f in allowed_fields:
@@ -628,11 +692,20 @@ def api_update_user(username):
     return jsonify({"success": True, "user": {"username": username, "role": users[username].get("role")}})
 
 @app.route("/api/users/<username>", methods=["DELETE"])
-@require_super_admin
+@require_auth
 def api_delete_user(username):
+    current = session.get("user", {})
+    current_role = current.get("role", "")
+    if current_role not in ("super_admin", "admin"):
+        return jsonify({"error": "Forbidden"}), 403
     if username == "Sami":
         return jsonify({"error": "Cannot delete super admin"}), 400
     users = _load_users()
+    target = users.get(username, {})
+    target_role = target.get("role", "admin") if isinstance(target, dict) else "admin"
+    # Admins can only delete non-super_admin users
+    if current_role == "admin" and target_role == "super_admin":
+        return jsonify({"error": "Admins cannot delete super admins"}), 403
     if username in users:
         del users[username]
         _save_users(users)
@@ -762,7 +835,8 @@ def api_properties():
             })
             try:
                 props[group_key]["max_guests"] += int(max_guests) if max_guests else 0
-            except:
+            except Exception as _mge:
+                print(f"[DASHBOARD-DEBUG] Max guests parse: {_mge}", flush=True)
                 pass
     
     # ── HMO from Arthur ──
@@ -1021,7 +1095,8 @@ def api_maintenance():
                                 "type": cols.get("color_mm0vfxmq","") or "",
                                 "property": ""
                             })
-            except: pass
+            except Exception as e:
+                print(f"[Dashboard-DEBUG] Maintenance query error: {e}", flush=True)
 
     return jsonify({"maintenance": maint, "count": len(maint)})
 
@@ -1073,7 +1148,8 @@ def _relative_time(ts_iso):
             return f"{secs // 3600}h ago"
         else:
             return f"{secs // 86400}d ago"
-    except:
+    except Exception as _tae:
+        print(f"[DASHBOARD-DEBUG] Timeago error: {_tae}", flush=True)
         return "unknown"
 
 @app.route("/api/connections/status")
@@ -1225,7 +1301,8 @@ def api_dashboard_data():
                 if ci:
                     try:
                         rev_by_day[ci] = rev_by_day.get(ci, 0) + float(r.get("totalPrice", 0) or 0)
-                    except: pass
+                    except Exception as _pe:
+                        print(f"[DASHBOARD-DEBUG] Revenue price parse: {_pe} on value {r.get('totalPrice','?')}", flush=True)
 
         for i in range(6, -1, -1):
             d = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
@@ -1268,15 +1345,26 @@ def api_dashboard_data():
             t_items = tn.get("data", []) if isinstance(tn, dict) else (tn if isinstance(tn, list) else [])
             hmo_tenants_count = len(t_items)
             for t in t_items:
-                try: total_rent += float(t.get("rent_amount", 0) or 0)
-                except: pass
+                try:
+                    total_rent += float(t.get("rent_amount", 0) or 0)
+                except Exception as _re:
+                    print(f"[DASHBOARD-DEBUG] Rent amount parse: {_re} on tenancy {t.get('id', '?')}", flush=True)
 
         data["kpi"]["hmo_occupancy"] = {
             "pct": round((hmo_tenants_count / max(hmo_units_count, 1)) * 100, 1),
             "total": hmo_units_count, "occupied": hmo_tenants_count
         }
-        data["finance"]["rent_arrears"] = round(total_rent * 0.05, 2)
-        data["finance"]["rent_arrears_count"] = max(1, int(hmo_tenants_count * 0.05))
+        # Rent arrears from DB rent_charges (past month, unpaid)
+        try:
+            _db = sqlite3.connect(os.path.join(os.path.dirname(__file__), "verv_os.db"))
+            _row = _db.execute("SELECT COUNT(*), COALESCE(SUM(rent_amount),0) FROM rent_charges WHERE status='due' AND month < strftime('%Y-%m','now')").fetchone()
+            data["finance"]["rent_arrears"] = round(_row[1], 2) if _row and _row[0] else 0
+            data["finance"]["rent_arrears_count"] = _row[0] if _row else 0
+            _db.close()
+        except Exception as _dre:
+            print(f"[DASHBOARD-DEBUG] Arrears DB query: {_dre}", flush=True)
+            data["finance"]["rent_arrears"] = 0
+            data["finance"]["rent_arrears_count"] = 0
     else:
         data["kpi"]["hmo_occupancy"] = {"pct": 0, "total": 0, "occupied": 0}
 
@@ -1333,7 +1421,8 @@ def api_dashboard_data():
                             "assignee": cols.get("people_mkkqy60v","") or "",
                             "due": ""
                         })
-        except: pass
+        except Exception as _te:
+            print(f"[DASHBOARD-DEBUG] Tasks query error: {_te}", flush=True)
 
     data["kpi"]["open_maintenance"] = maint_open
     data["kpi"]["maintenance_urgent"] = maint_urgent
@@ -1347,12 +1436,23 @@ def api_dashboard_data():
 
     # ── Finance metrics (from live data where available) ──
     data["finance"]["total_monthly_rent"] = round(total_rent, 2)
-    # Rent arrears
-    data["finance"]["rent_arrears"] = round(total_rent * 0.05, 2) if total_rent > 0 else 0
-    data["finance"]["rent_arrears_count"] = max(0, int(hmo_tenants_count * 0.05)) if hmo_tenants_count > 0 else 0
-    data["finance"]["invoices_overdue"] = max(1, int(hmo_units_count * 0.08))
+    # Rent arrears from DB
+    try:
+        _db2 = sqlite3.connect(os.path.join(os.path.dirname(__file__), "verv_os.db"))
+        _row2 = _db2.execute("SELECT COUNT(*), COALESCE(SUM(rent_amount),0) FROM rent_charges WHERE status='due' AND month < strftime('%Y-%m','now')").fetchone()
+        data["finance"]["rent_arrears"] = round(_row2[1], 2) if _row2 and _row2[0] else 0
+        data["finance"]["rent_arrears_count"] = _row2[0] if _row2 else 0
+        # Maintenance stats from DB
+        _open_maint = _db2.execute("SELECT COUNT(*) FROM maintenance_jobs WHERE status IN ('PENDING','IN PROGRESS','LIVE')").fetchone()
+        data["finance"]["open_maintenance"] = _open_maint[0] if _open_maint else maint_open
+        _db2.close()
+    except Exception as _dre2:
+        print(f"[DASHBOARD-DEBUG] Finance DB query: {_dre2}", flush=True)
+        data["finance"]["rent_arrears"] = 0
+        data["finance"]["rent_arrears_count"] = 0
+    data["finance"]["invoices_overdue"] = 0
     data["issues"]["guest_issues"] = 0
-    data["issues"]["tenant_issues"] = max(1, int(hmo_tenants_count * 0.03))
+    data["issues"]["tenant_issues"] = 0
 
     # ── Timeline ──
     for r in str_arrivals_today[:5]:
@@ -1414,8 +1514,10 @@ def api_finance_summary():
                         if cin and cin[:4] == str(today.year):
                             total_rev_ytd += p
                         invoices_paid += 1
-                    except: pass
-        except: pass
+                    except Exception as _hpe:
+                        print(f"[DASHBOARD-DEBUG] Hostaway rev parse: {_hpe}", flush=True)
+        except Exception as _hqe:
+            print(f"[DASHBOARD-DEBUG] Hostaway query error: {_hqe}", flush=True)
 
     # Arthur rent
     ar_tok = get_arthur_token()
@@ -1429,17 +1531,30 @@ def api_finance_summary():
                 for t in items:
                     try:
                         total_rent_monthly += float(t.get("rent_amount", 0) or 0)
-                    except: pass
-        except: pass
+                    except Exception as _are:
+                        print(f"[DASHBOARD-DEBUG] Arthur rent parse: {_are}", flush=True)
+        except Exception as _aqe:
+            print(f"[DASHBOARD-DEBUG] Arthur query error: {_aqe}", flush=True)
+
+    # Real arrears from DB
+    _arrears = 0
+    try:
+        _db3 = sqlite3.connect(os.path.join(os.path.dirname(__file__), "verv_os.db"))
+        _r3 = _db3.execute("SELECT COALESCE(SUM(rent_amount),0) FROM rent_charges WHERE status='due' AND month < strftime('%Y-%m','now')").fetchone()
+        _arrears = round(_r3[0], 2) if _r3 else 0
+        _db3.close()
+    except Exception as _dre3:
+        print(f"[DASHBOARD-DEBUG] Finance summary DB query: {_dre3}", flush=True)
+        pass
 
     return jsonify({
         "total_revenue_mtd": round(total_rev_mtd, 2),
         "total_revenue_ytd": round(total_rev_ytd, 2),
         "monthly_rent_income": round(total_rent_monthly, 2),
         "invoices_paid": invoices_paid,
-        "invoices_pending": max(0, invoices_paid - int(invoices_paid * 0.7)),
-        "invoices_overdue": max(1, int(invoices_paid * 0.05)),
-        "rent_arrears": round(total_rent_monthly * 0.05, 2),
+        "invoices_pending": 0,
+        "invoices_overdue": 0,
+        "rent_arrears": _arrears,
         "avg_daily_rate": round(total_rev_mtd / 30, 2) if total_rev_mtd > 0 else 0
     })
 
@@ -1479,7 +1594,8 @@ def api_hmo_arrears():
                     "status": "overdue"
                 })
                 total_arrears += rent
-        except: pass
+        except Exception as _ae:
+            print(f"[DASHBOARD-DEBUG] Arrear parsing: {_ae}", flush=True)
 
     return jsonify({
         "total_arrears": round(total_arrears, 2),
@@ -1525,7 +1641,8 @@ def api_str_bookings_today():
                     "status": r.get("status","")
                 })
         result["departure_count"] = len(result["departures"])
-    except: pass
+    except Exception as _de:
+        print(f"[DASHBOARD-DEBUG] Departures error: {_de}", flush=True)
 
     return jsonify(result)
 
@@ -1567,7 +1684,8 @@ def api_maintenance_summary():
                             stats["completed_this_week"] += 1
                     if "urgent" in status or "high" in status:
                         stats["urgent"] += 1
-        except: pass
+        except Exception as _mse:
+            print(f"[DASHBOARD-DEBUG] Maint stats: {_mse}", flush=True)
 
     return jsonify(stats)
 
@@ -1787,8 +1905,8 @@ def api_project_board(slug):
                         "assignee": cols.get("people_mkkqy60v","") or "Unassigned",
                         "source": "monday"
                     })
-        except:
-            pass
+        except Exception as _nte:
+            print(f"[DASHBOARD-DEBUG] Notifications tasks: {_nte}", flush=True)
 
     # Merge: Monday tasks + local tasks (deduplicate by title)
     seen_titles = set()
@@ -2057,8 +2175,9 @@ def api_global_search():
                             "status": res.get("status", ""),
                             "source": "hostaway",
                         })
-        except: pass
-        
+        except Exception as _hse:
+            print(f"[SEARCH-DEBUG] Hostaway reservations: {_hse}", flush=True)
+
         try:
             r = api_get("https://api.hostaway.com/v1/listings?limit=200",
                        {"Authorization": f"Bearer {ha_tok}"})
@@ -2075,8 +2194,9 @@ def api_global_search():
                             "status": lst.get("status", "active"),
                             "source": "hostaway",
                         })
-        except: pass
-    
+        except Exception as _hle:
+            print(f"[SEARCH-DEBUG] Hostaway listings: {_hle}", flush=True)
+
     # Search HMO from Arthur
     ar_tok = get_arthur_token()
     if ar_tok:
@@ -2100,8 +2220,9 @@ def api_global_search():
                             "status": t.get("status", ""),
                             "source": "arthur",
                         })
-        except: pass
-    
+        except Exception as _ase:
+            print(f"[SEARCH-DEBUG] Arthur search: {_ase}", flush=True)
+
     # Search Maintenance from Monday
     mtok = get_monday_token()
     if mtok:
@@ -2127,7 +2248,8 @@ def api_global_search():
                                 "status": cols.get("status","") or "Open",
                                 "source": "monday",
                             })
-            except: pass
+            except Exception as _mse:
+                print(f"[SEARCH-DEBUG] Monday search: {_mse}", flush=True)
     
     # Deduplicate by id+type
     seen = set()
@@ -2154,7 +2276,8 @@ def _load_notifications():
         return []
     try:
         return json.load(open(NOTIFICATIONS_FILE))
-    except:
+    except Exception as _nle:
+        print(f"[DASHBOARD-DEBUG] Notifications file: {_nle}", flush=True)
         return []
 
 def _save_notifications(notifs):

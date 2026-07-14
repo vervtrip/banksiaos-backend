@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>VERV Operations — Login</title>
+<title>Banksia OS — Login</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -114,9 +114,9 @@ margin-top:4px
 
 <div class="login-wrap">
 <div class="logo-area">
-<div class="logo">VERV<span>.</span></div>
-<div class="tagline">Operations Dashboard</div>
-<div class="welcome">Sign in to your account</div>
+<div class="logo">BANKSIA<span>.</span></div>
+<div class="tagline">Property OS</div>
+<div class="welcome">Login to the team dashboard for complete Banksia operations</div>
 </div>
 
 <div class="login-card">
@@ -152,7 +152,7 @@ margin-top:4px
 <div class="role-msg">Authorised personnel only</div>
 </div>
 
-<div class="login-footer">© VERV Operations</div>
+<div class="login-footer">© Banksia OS</div>
 </div>
 
 <script>
@@ -189,7 +189,7 @@ body: JSON.stringify({username, password})
 
 if(res.ok) {
 // Store session and redirect
-window.location.href = '/dashboard';
+window.location.href = '/banksia-os';
 } else if(res.status === 401) {
 errorMsg.textContent = 'Invalid username or password.';
 errorMsg.classList.add('show');

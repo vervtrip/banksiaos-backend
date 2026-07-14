@@ -16,6 +16,20 @@ from verv_os_db import get_db, count, dict_from_row, raw_query
 banksia_os_bp = Blueprint("banksia_os", __name__, url_prefix="/api/banksia-os")
 
 
+# ── Global auth for the entire blueprint ──
+@banksia_os_bp.before_request
+def _require_banksia_auth():
+    """All routes in this blueprint require a logged-in session."""
+    # Public routes that don't need auth
+    public_prefixes = ("/submissions/public", "/applicants/public", "/tenancies/public")
+    if request.path.startswith(public_prefixes):
+        return None
+    user = session.get("user")
+    if not user:
+        return jsonify({"success": False, "error": "Not logged in"}), 401
+    request.current_user = user
+
+
 # ── Dict row factory for direct dict results ──
 def dict_factory(cursor, row):
     d = {}
@@ -258,9 +272,10 @@ def api_dashboard():
 
         # Leading property (highest total rent)
         leading = db.execute(
-            "SELECT p.name, SUM(t.rent_amount) AS total_rent FROM tenancies t "
+            "SELECT p.id, COALESCE(NULLIF(p.ref, ''), NULLIF(p.address_line_1, ''), p.name) AS name, "
+            "SUM(t.rent_amount) AS total_rent FROM tenancies t "
             "JOIN properties p ON t.property_id = p.id "
-            "WHERE t.status IN ('Active', 'Periodic', 'active', 'periodic') "
+            "WHERE t.status IN ('Current', 'Active', 'Periodic', 'current', 'active', 'periodic') "
             "GROUP BY p.id ORDER BY total_rent DESC LIMIT 1"
         ).fetchone()
 
@@ -286,7 +301,7 @@ def api_dashboard():
             "tenants_moving_in_this_month": tenants_moving_in_this_month,
             "tenants_moving_out_this_month": tenants_moving_out_this_month,
             "deposits_unregistered": deposits_unregistered,
-            "leading_property": ({"name": leading["name"], "total_rent": round(leading["total_rent"], 2)} if leading and leading["name"] else None),
+            "leading_property": ({"id": leading["id"], "name": leading["name"], "total_rent": round(leading["total_rent"] or 0, 2)} if leading and leading["name"] else None),
             "pending_referencing_submissions": pending_referencing_submissions,
             "open_maintenance_requests": open_maintenance_requests,
             "open_message_threads": open_message_threads,
@@ -499,9 +514,9 @@ def api_maintenance_jobs():
         if ll_not_informed:
             where.append("mj.bill_ll = 1 AND mj.ll_informed = 0")
         if search:
-            where.append("(mj.title LIKE ? OR mj.description LIKE ? OR mj.address LIKE ? OR mj.reference LIKE ?)")
+            where.append("(mj.title LIKE ? OR mj.description LIKE ? OR mj.address LIKE ? OR mj.reference LIKE ? OR mj.contractor LIKE ? OR mj.type LIKE ? OR mj.reporter_name LIKE ? OR mj.team_notes LIKE ?)")
             s = f"%{search}%"
-            params.extend([s, s, s, s])
+            params.extend([s, s, s, s, s, s, s, s])
 
         where_clause = " AND ".join(where)
 
@@ -673,7 +688,79 @@ def api_maintenance_job(job_id):
             db.commit()
 
         job = db.execute("SELECT * FROM maintenance_jobs WHERE id = ?", [job_id]).fetchone()
+        # Mark for push-back to Monday (async sync will pick it up)
+        try:
+            db.execute(
+                "UPDATE maintenance_jobs SET sync_pending = 1 WHERE id = ?",
+                [job_id]
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
         return json_success(dict(job))
+    except Exception as e:
+        db.rollback()
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ── Promote portal maintenance request to tracked job ──
+@banksia_os_bp.route("/maintenance/promote-from-portal", methods=["POST"])
+def api_promote_portal_request():
+    """Copy a maintenance_requests row into maintenance_jobs so it becomes
+    visible on the team dashboard and can receive orders / LL comms / contractors."""
+    data = request.get_json(force=True, silent=True) or {}
+    req_id = data.get("request_id")
+    if not req_id:
+        return json_error("request_id is required")
+
+    db = get_dict_db()
+    try:
+        req = db.execute(
+            "SELECT * FROM maintenance_requests WHERE id = ?", [req_id]
+        ).fetchone()
+        if not req:
+            return json_error("Portal request not found", 404)
+
+        # Build reference
+        ref_prefix = "MJ"
+        count = db.execute("SELECT COUNT(*) AS cnt FROM maintenance_jobs").fetchone()["cnt"]
+        reference = f"{ref_prefix}-{str(count + 1).zfill(4)}"
+
+        cur = db.execute(
+            """INSERT INTO maintenance_jobs
+               (reference, title, description, type, priority, status, location,
+                property_id, address, reporter_name, reporter_email, source, team_notes)
+               VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, 'portal', ?)""",
+            [
+                reference,
+                req.get("title") or req.get("category", "Maintenance request"),
+                req.get("description", ""),
+                req.get("category"),
+                req.get("priority", "Medium"),
+                req.get("location"),
+                data.get("property_id") or req.get("property_id"),
+                data.get("address", ""),
+                req.get("reporter_name", ""),
+                req.get("reporter_email", ""),
+                data.get("notes", ""),
+            ]
+        )
+        db.commit()
+        job_id = cur.lastrowid
+
+        # Update original request status to 'promoted'
+        db.execute(
+            "UPDATE maintenance_requests SET status = 'promoted' WHERE id = ?",
+            [req_id]
+        )
+        db.commit()
+
+        job = db.execute(
+            "SELECT * FROM maintenance_jobs WHERE id = ?", [job_id]
+        ).fetchone()
+        return json_success(dict(job)), 201
     except Exception as e:
         db.rollback()
         return json_error(str(e), 500)
@@ -1085,7 +1172,10 @@ def api_properties():
         base_params = search_params
 
     rows, total = paginate(
-        f"SELECT * FROM properties WHERE {base_where} ORDER BY name ASC",
+        f"SELECT *, "
+        f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id) AS actual_units, "
+        f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id AND u.unit_vacant = 0) AS occupied_units "
+        f"FROM properties WHERE {base_where} ORDER BY ref ASC",
         f"SELECT COUNT(*) AS cnt FROM properties WHERE {base_where}",
         base_params, page, per_page
     )

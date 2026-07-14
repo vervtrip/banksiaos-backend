@@ -499,7 +499,9 @@ code{background:#f1f5f9;padding:2px 6px;border-radius:3px;font-size:12px;color:#
 .mv-btn:hover{color:#1e293b}
 .mv-btn.active{background:#fff;color:#4f46e5;box-shadow:0 1px 2px rgba(0,0,0,.08)}
 /* ── Monday-style maintenance board (dark) ── */
-.mb-board{display:flex;gap:16px;overflow-x:auto;padding-bottom:16px;-webkit-overflow-scrolling:touch}
+.mb-board{display:flex;gap:16px;overflow-x:auto;padding-bottom:16px;width:100%;max-width:100%;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+.mb-board::-webkit-scrollbar{height:6px}
+.mb-board::-webkit-scrollbar-thumb{background:#4a5568;border-radius:3px}
 .mb-lane{flex:0 0 300px;max-width:300px;background:#0f172a;border:1px solid #1e293b;border-radius:12px;display:flex;flex-direction:column;max-height:calc(100vh - 220px)}
 .mb-lane-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:#111c33;border-radius:12px 12px 0 0;position:sticky;top:0;z-index:1}
 .mb-lane-title{font-size:12px;font-weight:700;letter-spacing:.4px;text-transform:uppercase}
@@ -519,6 +521,38 @@ code{background:#f1f5f9;padding:2px 6px;border-radius:3px;font-size:12px;color:#
 .mb-flag{font-size:10px;font-weight:600;padding:2px 7px;border-radius:5px;white-space:nowrap}
 .mb-cost{font-size:11px;font-weight:700;color:#e2e8f0}
 @media(max-width:768px){.mb-lane{flex:0 0 260px;max-width:260px}}
+/* ── Referencing Admin (embedded) ── */
+.ref-wrap{max-width:1200px}
+.ref-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:22px}
+.ref-stats .card.stat{padding:18px 20px}
+.ref-stats .card.stat .n{font-size:28px;font-weight:800;letter-spacing:-1px}
+.ref-stats .card.stat .l{font-size:12px;color:#64748b;margin-top:2px;font-weight:500}
+.ref-tabs{display:flex;gap:4px;background:#e2e8f0;padding:4px;border-radius:10px;width:fit-content;margin-bottom:20px}
+.ref-tab{padding:8px 18px;border-radius:7px;font-size:13px;font-weight:600;color:#64748b;cursor:pointer;transition:all .12s}
+.ref-tab.active{background:#fff;color:#1e293b;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.ref-filters{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.ref-filters input,.ref-filters select{padding:9px 13px;border-radius:9px;border:1px solid #e2e8f0;background:#fff;font-size:13px;font-family:inherit;outline:none;min-height:auto}
+.ref-filters input{flex:1;min-width:200px}
+.ref-filters input:focus,.ref-filters select:focus{border-color:#6366f1}
+.ref-wrap table{width:100%;border-collapse:collapse}
+.ref-wrap thead th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#94a3b8;font-weight:600;padding:12px 16px;border-bottom:1px solid #eef2f7}
+.ref-wrap tbody td{padding:14px 16px;font-size:13px;border-bottom:1px solid #f4f7fa}
+.ref-wrap tbody tr{cursor:pointer;transition:background .1s}
+.ref-wrap tbody tr:hover{background:#f8fafc}
+.ref-wrap .flag{background:#fee2e2;color:#b91c1c;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700}
+.ref-wrap .linkbox{background:#f8fafc;border:1px dashed #cbd5e1;border-radius:9px;padding:12px;font-size:12px;word-break:break-all;font-family:ui-monospace,monospace;color:#475569;margin-top:8px}
+.ref-wrap .det-section{margin-bottom:22px}
+.ref-wrap .det-section h4{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:#6366f1;font-weight:700;margin-bottom:10px}
+.ref-wrap .det-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 20px}
+.ref-wrap .det-item .k{font-size:11px;color:#94a3b8;font-weight:500}
+.ref-wrap .det-item .v{font-size:13px;font-weight:500;margin-top:1px}
+.ref-wrap .doc-row{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border:1px solid #eef2f7;border-radius:10px;margin-bottom:8px}
+.ref-wrap .doc-row .dl{font-size:13px;font-weight:600}
+.ref-wrap .doc-row .dm{font-size:11px;color:#94a3b8}
+.ref-wrap .check-row{padding:12px 14px;border:1px solid #eef2f7;border-radius:10px;margin-bottom:8px}
+.ref-wrap .check-row .ct{font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+.ref-wrap .check-row .cs{font-size:12px;color:#64748b;margin-top:4px}
+@media(max-width:640px){.ref-wrap .det-grid,.ref-wrap .grid2{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -551,6 +585,9 @@ code{background:#f1f5f9;padding:2px 6px;border-radius:3px;font-size:12px;color:#
     <div class="nav-item" data-page="submissions" onclick="navigate('submissions')">
       <span class="icon">📥</span> Submissions
       <span class="badge" id="nav-badge-submissions" style="display:none"></span>
+    </div>
+    <div class="nav-item" data-page="referencing-admin" onclick="navigate('referencing-admin')">
+      <span class="icon">📋</span> Referencing
     </div>
     <div class="nav-item" data-page="maintenance" onclick="navigate('maintenance')">
       <span class="icon">🔧</span> Maintenance
@@ -630,6 +667,7 @@ code{background:#f1f5f9;padding:2px 6px;border-radius:3px;font-size:12px;color:#
         <div class="name">{{ user.username }}</div>
         <div class="role"><span id="topbar-user-role"></span></div>
       </div>
+      <button class="btn btn-ghost btn-sm" onclick="doLogout()" style="margin-left:8px" title="Sign out">Logout</button>
     </div>
   </div>
   <div class="content" id="page-content"></div>
@@ -663,6 +701,7 @@ const INITIAL_PAGE = '{{ initial_page }}' || '';
 const INITIAL_RESOURCE_ID = '{{ initial_resource_id }}' || '';
 
 // ── URL helpers ──
+function doLogout() { window.location.href = '/api/auth/logout'; }
 function pageUrl(page, resourceId) {
   if (!page || page === 'dashboard') return '/banksia-os';
   if (resourceId) return `/banksia-os/${page}/${resourceId}`;
@@ -702,6 +741,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ── NAV ──
 function navigate(page, resourceId) {
+  // Clean up any stale referencing modals left on document.body
+  document.querySelectorAll('#ref-createOverlay,#ref-detailOverlay,#ref-tenancyOverlay,#ref-tenDetailOverlay').forEach(el => el.remove());
+  document.querySelectorAll('.ref-wrap').forEach(el => el.remove());
+  document.querySelectorAll('.overlay').forEach(el => { if(el.id && el.id.startsWith('ref-')) el.remove(); });
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const nav = document.querySelector(`.nav-item[data-page="${page}"]`);
   if (nav) nav.classList.add('active');
@@ -1001,7 +1044,8 @@ function renderPage(page, resourceId) {
     tenancies: ['Tenancies', '150 active tenancies'],
     tenants: ['Tenants', '524 registered tenants'],
     applicants: ['Applicants', '672 applicants in pipeline'],
-    submissions: ['Submissions', 'Tenant portal & referencing submissions'],
+    submissions: ['Submissions', 'Tenant portal &amp; referencing submissions'],
+    'referencing-admin': ['Referencing Admin', 'Create forms, review documents &amp; send e-signatures'],
     maintenance: ['Maintenance', 'Job management & contractor orders'],
     finance: ['Finance', 'Rent roll, arrears & deposits'],
     search: ['Search', 'Find anything across all records'],
@@ -1022,6 +1066,7 @@ function renderPage(page, resourceId) {
     dashboard: renderDashboard, properties: renderProperties, units: renderUnits,
     tenancies: renderTenancies, tenants: renderTenants, applicants: renderApplicants,
     submissions: renderSubmissions,
+    'referencing-admin': renderReferencingAdmin,
     maintenance: renderMaintenance,
     finance: renderFinance, search: renderSearch, documents: renderDocuments,
     access: renderAccess, 'property-owners': renderPropertyOwners,
@@ -3151,9 +3196,322 @@ function subKindMeta(kind) {
     message:     { label: 'Message',     icon: '✉',  color: '#2563eb', bg: '#eff6ff' },
     document:    { label: 'Document',    icon: '📎', color: '#0d9488', bg: '#f0fdfa' }
   };
-  return m[kind] || { label: kind, icon: '•', color: '#64748b', bg: '#f1f5f9' };
+  return m[kind] || { label: kind, icon: '\u2022', color: '#64748b', bg: '#f1f5f9' };
 }
-
+function renderReferencingAdmin(resourceId) {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '\
+  <div class="ref-wrap">\
+    <div class="ref-stats" id="ref-stats"></div>\
+    <div class="ref-tabs">\
+      <div class="ref-tab active" data-ref-tab="apps" onclick="switchRefTab(\'apps\')">Applications</div>\
+      <div class="ref-tab" data-ref-tab="tenancies" onclick="switchRefTab(\'tenancies\')">Tenancies</div>\
+      <div class="ref-tab" data-ref-tab="esign" onclick="switchRefTab(\'esign\')">E-Signatures</div>\
+      <div class="ref-tab" data-ref-tab="fin" onclick="switchRefTab(\'fin\')">Financials</div>\
+    </div>\
+    <div id="ref-apps">\
+      <div class="ref-filters">\
+        <input id="ref-search" placeholder="Search by name or email..." oninput="debouncedRefLoad()">\
+        <select id="ref-statusFilter" onchange="loadRefForms()">\
+          <option value="">All statuses</option>\
+          <option value="draft">Draft</option>\
+          <option value="sent">Sent to applicant</option>\
+          <option value="submitted">Submitted</option>\
+          <option value="under_review">Under review</option>\
+          <option value="approved">Approved</option>\
+          <option value="rejected">Rejected</option>\
+        </select>\
+        <button class="btn btn-primary btn-sm" onclick="openRefCreate()">+ New Applicant</button>\
+      </div>\
+      <div class="card"><div class="tbl-wrap"><table>\
+        <thead><tr><th>Applicant</th><th>Email</th><th>Status</th><th>Docs</th><th>Created</th><th></th></tr></thead>\
+        <tbody id="ref-formsBody"><tr><td colspan="6" class="muted" style="padding:30px;text-align:center">Loading...</td></tr></tbody>\
+      </table></div></div>\
+    </div>\
+    <div id="ref-tenancies" style="display:none">\
+      <div class="ref-filters">\
+        <input id="ref-tsearch" placeholder="Search by tenant, ref or address..." oninput="debouncedRefTen()">\
+        <select id="ref-tstatusFilter" onchange="loadRefTenancies()">\
+          <option value="">All statuses</option>\
+          <option value="Current">Current</option>\
+          <option value="Periodic">Periodic</option>\
+          <option value="Past">Past</option>\
+        </select>\
+        <select id="ref-toriginFilter" onchange="loadRefTenancies()">\
+          <option value="all">All sources</option>\
+          <option value="banksia">Created in Banksia OS</option>\
+        </select>\
+      </div>\
+      <div class="card"><div class="tbl-wrap"><table>\
+        <thead><tr><th>Ref</th><th>Tenant</th><th>Address</th><th>Status</th><th>Rent</th><th>Term</th><th></th></tr></thead>\
+        <tbody id="ref-tenBody"><tr><td colspan="7" class="muted" style="padding:30px;text-align:center">Loading...</td></tr></tbody>\
+      </table></div></div>\
+    </div>\
+    <div id="ref-esign" style="display:none">\
+      <div class="card"><div class="tbl-wrap"><table>\
+        <thead><tr><th>Document</th><th>Signer</th><th>Status</th><th>Created</th><th></th></tr></thead>\
+        <tbody id="ref-esignBody"><tr><td colspan="5" class="muted" style="padding:30px;text-align:center">Loading...</td></tr></tbody>\
+      </table></div></div>\
+    </div>\
+    <div id="ref-fin" style="display:none">\
+      <div class="ref-stats" id="ref-finStats"></div>\
+      <div class="card"><div class="tbl-wrap"><table>\
+        <thead><tr><th>Property</th><th>Tenancies</th><th>Monthly Rent</th><th>Annual</th></tr></thead>\
+        <tbody id="ref-finBody"><tr><td colspan="4" class="muted" style="padding:30px;text-align:center">Loading...</td></tr></tbody>\
+      </table></div></div>\
+    </div>\
+  </div>';
+  // Add modal containers
+  document.body.insertAdjacentHTML('beforeend', '\
+    <div class="overlay" id="ref-createOverlay"><div class="modal"><div class="modal-head"><h3>New Applicant</h3><span class="x" onclick="closeRefModal(\'ref-createOverlay\')">×</span></div>\
+      <div class="modal-body"><div class="grid2"><div class="fg"><label>First name *</label><input id="ref-c_first"></div>\
+        <div class="fg"><label>Last name *</label><input id="ref-c_last"></div></div>\
+        <div class="fg"><label>Email *</label><input id="ref-c_email" type="email"></div>\
+        <div class="fg"><label>Mobile (optional)</label><input id="ref-c_mobile"></div>\
+        <p class="muted" style="font-size:12px">A secure referencing link will be generated. Send it to the applicant to complete their form.</p>\
+      </div><div class="modal-foot">\
+        <button class="btn btn-ghost btn-sm" onclick="closeRefModal(\'ref-createOverlay\')">Cancel</button>\
+        <button class="btn btn-primary btn-sm" onclick="createRefForm()">Create &amp; Generate Link</button>\
+      </div></div></div>\
+    <div class="overlay" id="ref-detailOverlay"><div class="modal wide"><div class="modal-head"><h3 id="ref-d_title">Application</h3><span class="x" onclick="closeRefModal(\'ref-detailOverlay\')">×</span></div>\
+      <div class="modal-body" id="ref-detailBody"></div>\
+      <div class="modal-foot" id="ref-detailFoot"></div></div></div>\
+    <div class="overlay" id="ref-tenancyOverlay"><div class="modal wide"><div class="modal-head"><h3>Create Tenancy</h3><span class="x" onclick="closeRefModal(\'ref-tenancyOverlay\')">×</span></div>\
+      <div class="modal-body"><p class="muted" style="font-size:12px;margin-top:0">Converting approved applicant <b id="ref-t_applicant">&mdash;</b> into a live tenancy.</p>\
+        <div class="fg"><label>Property / Unit *</label><select id="ref-t_unit"><option value="">Loading...</option></select></div>\
+        <div class="grid2"><div class="fg"><label>Start date *</label><input id="ref-t_start" type="date"></div>\
+          <div class="fg"><label>End date (blank = periodic)</label><input id="ref-t_end" type="date"></div></div>\
+        <div class="grid2"><div class="fg"><label>Rent amount (&pound;) *</label><input id="ref-t_rent" type="number" step="0.01"></div>\
+          <div class="fg"><label>Frequency</label><select id="ref-t_freq"><option>Monthly</option><option>Biweekly</option><option>Weekly</option><option>Daily</option></select></div></div>\
+        <div class="grid2"><div class="fg"><label>Deposit (&pound;)</label><input id="ref-t_deposit" type="number" step="0.01"></div>\
+          <div class="fg"><label>Deposit scheme</label><select id="ref-t_scheme"><option value="">&mdash;</option><option>MyDeposits</option><option>DPS</option><option>TDS</option></select></div></div>\
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:6px;cursor:pointer">\
+          <input type="checkbox" id="ref-t_send" checked style="width:auto"> Email the tenancy agreement for e-signature now</label>\
+      </div><div class="modal-foot">\
+        <button class="btn btn-ghost btn-sm" onclick="closeRefModal(\'ref-tenancyOverlay\')">Cancel</button>\
+        <button class="btn btn-primary btn-sm" onclick="submitRefTenancy()">Create Tenancy</button>\
+      </div></div></div>\
+    <div class="overlay" id="ref-tenDetailOverlay"><div class="modal wide"><div class="modal-head"><h3 id="ref-td_title">Tenancy</h3><span class="x" onclick="closeRefModal(\'ref-tenDetailOverlay\')">×</span></div>\
+      <div class="modal-body" id="ref-tenDetailBody"></div>\
+      <div class="modal-foot" id="ref-tenDetailFoot"></div></div></div>');
+  // load data
+  loadRefForms();
+  const fid = resourceId && /^\d+$/.test(resourceId) ? parseInt(resourceId, 10) : null;
+  if (fid) setTimeout(() => openRefDetail(fid), 300);
+  // close overlays on bg click
+  document.querySelectorAll('#ref-createOverlay,#ref-detailOverlay,#ref-tenancyOverlay,#ref-tenDetailOverlay').forEach(o => {
+    o.addEventListener('click', e => { if (e.target === o) o.classList.remove('show'); });
+  });
+}
+// ── Referencing Admin Functions ──
+const RAPI='/api/referencing';
+let refCurrentForm=null, refForms=[];
+function refToast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
+function refFmtDate(s){if(!s)return'\u2014';const d=new Date(s.replace(' ','T'));return isNaN(d)?s:d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});}
+function refMoney(n){n=Number(n||0);return'\u00a3'+n.toLocaleString('en-GB',{maximumFractionDigits:0});}
+async function refApi(path,opts){const r=await fetch(RAPI+path,Object.assign({headers:{'Content-Type':'application/json'}},opts));const j=await r.json().catch(()=>({success:false,error:'Bad response'}));if(!r.ok||!j.success)throw new Error(j.error||('HTTP '+r.status));return j;}
+function switchRefTab(t){
+  document.querySelectorAll('.ref-tab').forEach(x=>x.classList.toggle('active',x.dataset.refTab===t));
+  document.getElementById('ref-apps').style.display=t==='apps'?'':'none';
+  document.getElementById('ref-tenancies').style.display=t==='tenancies'?'':'none';
+  document.getElementById('ref-esign').style.display=t==='esign'?'':'none';
+  document.getElementById('ref-fin').style.display=t==='fin'?'':'none';
+  if(t==='tenancies')loadRefTenancies();
+  if(t==='esign')loadRefEsign();
+  if(t==='fin')loadRefFinancials();
+}
+let refDebTimer;function debouncedRefLoad(){clearTimeout(refDebTimer);refDebTimer=setTimeout(loadRefForms,300);}
+async function loadRefForms(){
+  const s=document.getElementById('ref-search').value.trim();
+  const st=document.getElementById('ref-statusFilter').value;
+  const q=new URLSearchParams();if(s)q.set('search',s);if(st)q.set('status',st);q.set('per_page','100');
+  try{
+    const j=await refApi('/forms?'+q.toString());
+    refForms=j.data||[];
+    const el=document.getElementById('ref-stats');
+    if(el){
+      const c={submitted:0,under_review:0,approved:0,sent:0};
+      refForms.forEach(r=>{if(c[r.status]!=null)c[r.status]++;});
+      const flagged=refForms.reduce((a,r)=>a+(r.flagged_count||0),0);
+      el.innerHTML='<div class="card stat"><div class="n">'+refForms.length+'</div><div class="l">Total applications</div></div>'+
+        '<div class="card stat"><div class="n" style="color:#1d4ed8">'+c.submitted+'</div><div class="l">Awaiting review</div></div>'+
+        '<div class="card stat"><div class="n" style="color:#15803d">'+c.approved+'</div><div class="l">Approved</div></div>'+
+        '<div class="card stat"><div class="n" style="color:'+(flagged?'#b91c1c':'#1e293b')+'">'+flagged+'</div><div class="l">Flagged documents</div></div>';
+    }
+    const tb=document.getElementById('ref-formsBody');
+    if(!refForms.length){tb.innerHTML='<tr><td colspan="6"><div class="empty"><div class="big">📋</div>No applications yet. Add your first applicant to begin.</div></td></tr>';return;}
+    tb.innerHTML=refForms.map(r=>'<tr onclick="openRefDetail('+r.id+')"><td><b>'+esc(r.first_name)+' '+esc(r.last_name)+'</b></td>'+
+      '<td class="muted">'+esc(r.email)+'</td><td><span class="pill '+r.status+'">'+esc((r.status||'').replace('_',' '))+'</span></td>'+
+      '<td>'+(r.doc_count||0)+(r.flagged_count?' <span class="flag">'+r.flagged_count+' flag</span>':'')+'</td>'+
+      '<td class="muted">'+refFmtDate(r.created)+'</td><td style="text-align:right"><span class="muted">\u203a</span></td></tr>').join('');
+  }catch(e){document.getElementById('ref-formsBody').innerHTML='<tr><td colspan="6" class="muted" style="padding:30px;text-align:center">'+esc(e.message)+'</td></tr>';}
+}
+function closeRefModal(id){const m=document.getElementById(id);if(m)m.classList.remove('show');}
+function openRefCreate(){['ref-c_first','ref-c_last','ref-c_email','ref-c_mobile'].forEach(i=>{const e=document.getElementById(i);if(e)e.value='';});document.getElementById('ref-createOverlay').classList.add('show');}
+async function createRefForm(){
+  const b={first_name:document.getElementById('ref-c_first').value.trim(),last_name:document.getElementById('ref-c_last').value.trim(),email:document.getElementById('ref-c_email').value.trim(),mobile_phone:document.getElementById('ref-c_mobile').value.trim()};
+  if(!b.first_name||!b.last_name||!b.email){refToast('First name, last name and email required');return;}
+  try{const j=await refApi('/forms',{method:'POST',body:JSON.stringify(b)});closeRefModal('ref-createOverlay');refToast('Applicant created');await loadRefForms();openRefDetail(j.data.id);}catch(e){refToast(e.message);}
+}
+async function openRefDetail(id){
+  const body=document.getElementById('ref-detailBody');if(body)body.innerHTML='<div class="muted" style="padding:20px">Loading\u2026</div>';
+  const foot=document.getElementById('ref-detailFoot');if(foot)foot.innerHTML='';
+  const overlay=document.getElementById('ref-detailOverlay');if(overlay)overlay.classList.add('show');
+  try{const j=await refApi('/forms/'+id);refCurrentForm=j.data;renderRefDetail(j.data);}catch(e){const b=document.getElementById('ref-detailBody');if(b)b.innerHTML='<div class="muted" style="padding:20px">'+esc(e.message)+'</div>';}
+}
+function refDi(k,v){return'<div class="det-item"><div class="k">'+k+'</div><div class="v">'+(esc(v)||'<span class=muted>\u2014</span>')+'</div></div>';}
+function renderRefDetail(d){
+  const f=d.form,docs=d.documents||[],checks=d.checks||[];
+  const link=location.origin+'/apply/'+f.form_token;
+  document.getElementById('ref-d_title').innerHTML=esc(f.first_name)+' '+esc(f.last_name)+' <span class="pill '+f.status+'" style="margin-left:8px">'+esc((f.status||'').replace('_',' '))+'</span>';
+  let h='<div class="det-section"><h4>Referencing Link</h4><div class="linkbox">'+esc(link)+'</div><div style="margin-top:8px;display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="refCopyLink(\''+esc(link)+'\')">Copy link</button></div></div>';
+  h+='<div class="det-section"><h4>Personal & Contact</h4><div class="det-grid">'+
+    refDi('Full name',(f.title||'')+' '+f.first_name+' '+f.last_name)+
+    refDi('Date of birth',f.date_of_birth==='1900-01-01'?'\u2014':f.date_of_birth)+
+    refDi('Email',f.email)+refDi('Mobile',f.mobile_phone)+
+    refDi('Address',[f.current_address_line1,f.current_city,f.current_postcode].filter(Boolean).join(', '))+
+    refDi('Nationality',f.nationality)+'</div></div>';
+  h+='<div class="det-section"><h4>Employment & Income</h4><div class="det-grid">'+
+    refDi('Status',f.employment_status)+refDi('Employer',f.employer_name)+
+    refDi('Job title',f.job_title)+refDi('Annual salary',f.annual_salary?refMoney(f.annual_salary):'')+
+    refDi('Guarantor',f.has_guarantor?((f.guarantor_first_name||'')+' '+(f.guarantor_last_name||'')):'None')+
+    refDi('Guarantor income',f.guarantor_annual_income?refMoney(f.guarantor_annual_income):'')+'</div></div>';
+  h+='<div class="det-section"><h4>Documents ('+docs.length+')</h4>';
+  if(!docs.length)h+='<p class="muted" style="font-size:13px">No documents uploaded yet.</p>';
+  else h+=docs.map(dc=>'<div class="doc-row"><div><div class="dl">'+esc(dc.original_filename||dc.filename)+(dc.ai_flagged?' <span class="flag">FLAGGED</span>':'')+'</div>'+
+    '<div class="dm">'+esc((dc.category||'').replace('_',' '))+' \u00b7 '+Math.round((dc.file_size||0)/1024)+' KB \u00b7 '+(dc.ai_verified?'\u2713 verified':(dc.ai_analysis?'reviewed':'not reviewed'))+(dc.ai_flag_reason?' \u00b7 '+esc(dc.ai_flag_reason):'')+'</div></div>'+
+    '<a class="btn btn-ghost btn-sm" href="'+RAPI+'/documents/'+dc.id+'?download=1" target="_blank">View</a></div>').join('');
+  h+='</div>';
+  if(checks.length){
+    h+='<div class="det-section"><h4>Neo\u2019s Cross-Reference Checks</h4>'+checks.map(c=>'<div class="check-row"><div class="ct">'+esc((c.check_type||'').replace(/_/g,' '))+
+      '<span class="pill '+(c.status==='passed'?'approved':c.status==='failed'?'rejected':'submitted')+'">'+esc(c.status)+'</span></div>'+
+      '<div class="cs">'+esc(c.summary||'')+'</div></div>').join('')+'</div>';
+  }
+  document.getElementById('ref-detailBody').innerHTML=h;
+  let foot='';
+  foot+='<button class="btn btn-accent btn-sm" onclick="runRefAiReview('+f.id+')">\ud83d\udd0d Run Document Review</button>';
+  if(f.status!=='approved'&&f.status!=='tenancy_created')foot+='<button class="btn btn-success btn-sm" onclick="setRefStatus('+f.id+',\'approved\')">Approve</button>';
+  if(f.status!=='rejected'&&f.status!=='tenancy_created')foot+='<button class="btn btn-danger btn-sm" onclick="setRefStatus('+f.id+',\'rejected\')">Reject</button>';
+  if(f.status==='submitted'||f.status==='sent')foot+='<button class="btn btn-ghost btn-sm" onclick="setRefStatus('+f.id+',\'under_review\')">Mark Under Review</button>';
+  if(f.status==='approved')foot+='<button class="btn btn-primary btn-sm" onclick="openRefTenancy('+f.id+',\''+esc(f.first_name)+' '+esc(f.last_name)+'\')">🏠 Create Tenancy</button>';
+  if(f.status==='tenancy_created')foot+='<span class="pill approved" style="align-self:center">Tenancy created \u2713</span>';
+  document.getElementById('ref-detailFoot').innerHTML=foot;
+}
+function refCopyLink(l){navigator.clipboard.writeText(l).then(()=>refToast('Link copied to clipboard'));}
+async function runRefAiReview(id){refToast('Reviewing documents\u2026');try{await refApi('/forms/'+id+'/ai-review',{method:'POST'});refToast('Review complete');openRefDetail(id);}catch(e){refToast(e.message);}}
+async function setRefStatus(id,status){try{await refApi('/forms/'+id+'/status',{method:'PATCH',body:JSON.stringify({status})});refToast('Status updated');openRefDetail(id);loadRefForms();}catch(e){refToast(e.message);}}
+async function loadRefEsign(){
+  try{const j=await refApi('/esignature/requests');const rows=j.data||[];
+    document.getElementById('ref-esignBody').innerHTML=rows.length?rows.map(r=>'<tr><td><b>'+esc(r.document_title||'Document')+'</b></td>'+
+      '<td>'+esc(r.created_for||r.created_for_email||'')+'</td><td><span class="pill '+(r.status==='signed'?'approved':r.status==='viewed'?'submitted':'sent')+'">'+esc(r.status)+'</span></td>'+
+      '<td class="muted">'+refFmtDate(r.created||r.created_at)+'</td><td style="text-align:right">'+
+      (r.status!=='signed'?'<button class="btn btn-ghost btn-sm" onclick="refCopyLink(\''+location.origin+'/sign/'+esc(r.signer_token)+'\')">Copy link</button>':'\u2713')+'</td></tr>').join(''):
+      '<tr><td colspan="5"><div class="empty"><div class="big">\u270d\ufe0f</div>No e-signature requests yet.</div></td></tr>';
+  }catch(e){document.getElementById('ref-esignBody').innerHTML='<tr><td colspan="5" class="muted" style="padding:30px;text-align:center">'+esc(e.message)+'</td></tr>';}
+}
+async function loadRefFinancials(){
+  try{const j=await refApi('/financials/rent-summary');const d=j.data||{};
+    const props=(d.properties||[]).filter(p=>(p.tenancy_count||0)>0||(p.total_rent||0)>0);
+    const totalMonthly=Number(d.total_monthly_rent||0);
+    const activeTen=props.reduce((a,p)=>a+(p.tenancy_count||0),0);
+    document.getElementById('ref-finStats').innerHTML='<div class="card stat"><div class="n">'+refMoney(totalMonthly)+'</div><div class="l">Monthly rent roll</div></div>'+
+      '<div class="card stat"><div class="n">'+refMoney(totalMonthly*12)+'</div><div class="l">Annual rent roll</div></div>'+
+      '<div class="card stat"><div class="n">'+activeTen+'</div><div class="l">Active tenancies</div></div>'+
+      '<div class="card stat"><div class="n" style="color:'+((d.total_arrears||0)>0?'#b91c1c':'#1e293b')+'">'+refMoney(d.total_arrears||0)+'</div><div class="l">Arrears outstanding</div></div>';
+    document.getElementById('ref-finBody').innerHTML=props.length?props.map(p=>'<tr><td><b>'+esc(p.property_name||p.address||('Property #'+p.property_id))+'</b></td>'+
+      '<td>'+(p.tenancy_count||0)+'</td><td>'+refMoney(p.total_rent||0)+'</td><td>'+refMoney((p.total_rent||0)*12)+'</td></tr>').join(''):
+      '<tr><td colspan="4"><div class="empty"><div class="big">💷</div>No active tenancy rent data yet.</div></td></tr>';
+  }catch(e){document.getElementById('ref-finBody').innerHTML='<tr><td colspan="4" class="muted" style="padding:30px;text-align:center">'+esc(e.message)+'</td></tr>';}
+}
+// Tenancies
+let refTenDebTimer;function debouncedRefTen(){clearTimeout(refTenDebTimer);refTenDebTimer=setTimeout(loadRefTenancies,300);}
+function refTerm(t){if(!t.start_date)return'\u2014';const s=refFmtDate(t.start_date);return t.end_date?(s+' \u2192 '+refFmtDate(t.end_date)):(s+' \u00b7 periodic');}
+async function loadRefTenancies(){
+  const q=new URLSearchParams();
+  const s=document.getElementById('ref-tsearch').value.trim();
+  const st=document.getElementById('ref-tstatusFilter').value;
+  const o=document.getElementById('ref-toriginFilter').value;
+  if(s)q.set('q',s);if(st)q.set('status',st);if(o)q.set('origin',o);
+  try{
+    const j=await refApi('/tenancies?'+q.toString());const rows=j.data||[];
+    document.getElementById('ref-tenBody').innerHTML=rows.length?rows.map(t=>'<tr onclick="openRefTenancyDetail('+t.id+')">'+
+      '<td><b>'+esc(t.ref||'')+'</b>'+(t.sync_origin==='banksia'?' <span class="pill approved" style="font-size:9px">OS</span>':'')+'</td>'+
+      '<td>'+esc(t.main_tenant_name||'\u2014')+'</td><td class="muted">'+esc(t.full_address||'\u2014')+'</td>'+
+      '<td><span class="pill '+(t.status==='Current'?'approved':t.status==='Past'?'rejected':'submitted')+'">'+esc(t.status||'')+'</span></td>'+
+      '<td>'+refMoney(t.rent_amount)+(t.rent_frequency?'/'+esc(t.rent_frequency.toLowerCase().replace('monthly','mo').replace('biweekly','2wk').replace('weekly','wk').replace('daily','day')):'')+'</td>'+
+      '<td class="muted">'+refTerm(t)+'</td><td style="text-align:right"><span class="muted">\u203a</span></td></tr>').join(''):
+      '<tr><td colspan="7"><div class="empty"><div class="big">🏠</div>No tenancies match.</div></td></tr>';
+  }catch(e){document.getElementById('ref-tenBody').innerHTML='<tr><td colspan="7" class="muted" style="padding:30px;text-align:center">'+esc(e.message)+'</td></tr>';}
+}
+let refTenancyFormId=null;
+async function openRefTenancy(formId,name){
+  refTenancyFormId=formId;
+  const app=document.getElementById('ref-t_applicant');if(app)app.textContent=name||'';
+  ['ref-t_end','ref-t_deposit'].forEach(i=>{const e=document.getElementById(i);if(e)e.value='';});
+  const start=document.getElementById('ref-t_start');if(start)start.value=new Date().toISOString().slice(0,10);
+  const rent=document.getElementById('ref-t_rent');if(rent)rent.value='';
+  const send=document.getElementById('ref-t_send');if(send)send.checked=true;
+  closeRefModal('ref-detailOverlay');
+  const overlay=document.getElementById('ref-tenancyOverlay');if(overlay)overlay.classList.add('show');
+  const sel=document.getElementById('ref-t_unit');if(sel)sel.innerHTML='<option value="">Loading available units\u2026</option>';
+  try{
+    const j=await refApi('/units/available');const units=j.data||[];
+    if(sel)sel.innerHTML='<option value="">\u2014 Select a unit \u2014</option>'+units.map(u=>'<option value="'+u.id+'" data-prop="'+(u.property_id||'')+'" data-rent="'+(u.market_rent||'')+'" data-dep="'+(u.deposit_amount||'')+'">'+esc(u.full_address||u.property_name||('Property #'+u.property_id))+' \u00b7 '+esc(u.unit_ref||'')+'</option>').join('');
+    if(sel)sel.onchange=function(){const o=sel.options[sel.selectedIndex];const r=o.getAttribute('data-rent'),d=o.getAttribute('data-dep');if(r&&+r>0&&!document.getElementById('ref-t_rent').value)document.getElementById('ref-t_rent').value=r;if(d&&+d>0&&!document.getElementById('ref-t_deposit').value)document.getElementById('ref-t_deposit').value=d;};
+  }catch(e){if(sel)sel.innerHTML='<option value="">Could not load units</option>';refToast(e.message);}
+}
+async function submitRefTenancy(){
+  const sel=document.getElementById('ref-t_unit');const opt=sel?sel.options[sel.selectedIndex]:null;
+  const unit_id=sel&&sel.value?+sel.value:null;
+  const property_id=opt?+(opt.getAttribute('data-prop')||0)||null:null;
+  const body={form_id:refTenancyFormId,unit_id,property_id,
+    start_date:(document.getElementById('ref-t_start')||{}).value,
+    end_date:(document.getElementById('ref-t_end')||{}).value||null,
+    rent_amount:parseFloat((document.getElementById('ref-t_rent')||{}).value||'0'),
+    rent_frequency:(document.getElementById('ref-t_freq')||{}).value,
+    deposit_amount:parseFloat((document.getElementById('ref-t_deposit')||{}).value||'0'),
+    deposit_scheme:(document.getElementById('ref-t_scheme')||{}).value,
+    send_agreement:(document.getElementById('ref-t_send')||{}).checked};
+  if(!body.start_date){refToast('Start date is required');return;}
+  if(!body.rent_amount||body.rent_amount<=0){refToast('Rent amount is required');return;}
+  try{
+    const j=await refApi('/tenancies/create-from-form',{method:'POST',body:JSON.stringify(body)});
+    closeRefModal('ref-tenancyOverlay');
+    const ref=(j.data.tenancy||{}).ref||'';
+    refToast('Tenancy '+ref+' created'+(j.delivery&&String(j.delivery).startsWith('missive')?' \u00b7 agreement emailed':''));
+    switchRefTab('tenancies');loadRefForms();
+    openRefTenancyDetail((j.data.tenancy||{}).id);
+  }catch(e){refToast(e.message);}
+}
+async function openRefTenancyDetail(id){
+  const body=document.getElementById('ref-tenDetailBody');if(body)body.innerHTML='<div class="muted" style="padding:20px">Loading\u2026</div>';
+  const foot=document.getElementById('ref-tenDetailFoot');if(foot)foot.innerHTML='';
+  const overlay=document.getElementById('ref-tenDetailOverlay');if(overlay)overlay.classList.add('show');
+  try{const j=await refApi('/tenancies/'+id);renderRefTenancyDetail(j.data);}catch(e){const b=document.getElementById('ref-tenDetailBody');if(b)b.innerHTML='<div class="muted" style="padding:20px">'+esc(e.message)+'</div>';}
+}
+function renderRefTenancyDetail(d){
+  const t=d.tenancy,ten=(d.tenants||[])[0]||{},ch=d.rent_charges||[],es=d.esignatures||[],tot=d.totals||{};
+  document.getElementById('ref-td_title').innerHTML=esc(t.ref)+' \u00b7 '+esc(t.main_tenant_name||'')+' <span class="pill '+(t.status==='Current'?'approved':'submitted')+'" style="margin-left:8px">'+esc(t.status)+'</span>';
+  let h='<div class="det-section"><h4>Tenancy</h4><div class="det-grid">'+
+    refDi('Address',t.full_address)+refDi('Type',(t.tenancy_type||'')+' \u00b7 '+(t.contract_type||''))+
+    refDi('Term',refTerm(t))+refDi('Rent',refMoney(t.rent_amount)+' / '+(t.rent_frequency||''))+
+    refDi('Deposit',refMoney(t.deposit_registered_amount)+(t.deposit_scheme?(' \u00b7 '+t.deposit_scheme):''))+
+    refDi('Notice period',t.notice_period)+'</div></div>';
+  h+='<div class="det-section"><h4>Tenant</h4><div class="det-grid">'+
+    refDi('Name',(ten.title||'')+' '+(ten.first_name||'')+' '+(ten.last_name||''))+refDi('Email',ten.email)+
+    refDi('Mobile',ten.mobile)+refDi('Guarantor',ten.has_guarantor?((ten.guarantor_first_name||'')+' '+(ten.guarantor_last_name||'')+' ('+(ten.guarantor_relation||'')+')'):'None')+'</div></div>';
+  h+='<div class="det-section"><h4>Rent Schedule <span class="muted" style="font-weight:400">\u2014 billed '+refMoney(tot.billed)+' \u00b7 paid '+refMoney(tot.paid)+' \u00b7 arrears '+refMoney(tot.arrears)+'</span></h4>'+
+    '<table style="font-size:12px"><thead><tr><th>Month</th><th>Due</th><th>Paid</th><th>Status</th></tr></thead><tbody>';
+  h+=ch.map(c=>'<tr><td>'+esc(c.month)+'</td><td>'+refMoney(c.rent_amount)+'</td><td>'+refMoney(c.paid_amount)+'</td>'+
+    '<td><span class="pill '+(c.status==='paid'?'approved':c.paid_amount>=c.rent_amount?'approved':'submitted')+'">'+esc(c.status)+'</span>'+
+    (c.status!=='paid'?'<button class="btn btn-ghost btn-sm" style="padding:2px 8px;margin-left:6px" onclick="markRefPaid('+t.id+','+c.id+','+c.rent_amount+')">Mark paid</button>':'')+'</td></tr>').join('');
+  h+='</tbody></table></div>';
+  if(es.length){h+='<div class="det-section"><h4>Tenancy Agreement</h4>'+es.map(e=>'<div class="doc-row"><div><div class="dl">'+esc(e.document_title||'Agreement')+'</div><div class="dm">'+esc(e.status)+(e.signed_at?' \u00b7 signed '+refFmtDate(e.signed_at):'')+'</div></div>'+
+    (e.status!=='signed'?'<button class="btn btn-ghost btn-sm" onclick="refCopyLink(\''+location.origin+'/sign/'+esc(e.signer_token)+'\')">Copy sign link</button>':'<span class="pill approved">signed \u2713</span>')+'</div>').join('')+'</div>';}
+  document.getElementById('ref-tenDetailBody').innerHTML=h;
+  document.getElementById('ref-tenDetailFoot').innerHTML='<button class="btn btn-ghost btn-sm" onclick="closeRefModal(\'ref-tenDetailOverlay\')">Close</button>';
+}
+async function markRefPaid(tid,cid,amt){try{await refApi('/tenancies/'+tid+'/rent/'+cid,{method:'PATCH',body:JSON.stringify({paid_amount:amt,status:'paid'})});refToast('Payment recorded');openRefTenancyDetail(tid);}catch(e){refToast(e.message);}}
 async function renderSubmissions(resourceId) {
   const el = document.getElementById('page-content');
   el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading submissions...</div>';
@@ -4194,7 +4552,7 @@ function boardLoad() {
   }).catch(() => {});
 }
 let bst; function debBoard(){ clearTimeout(bst); bst=setTimeout(boardLoad,300); }
-function swMV(v){ document.querySelectorAll('.board-vt button').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase().includes(v))); if(v==='board')renderBoardView(); else renderMaintenance(); }
+function swMV(v){ document.querySelectorAll('.board-vt button').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase().includes(v))); maintState.viewMode=v; if(v==='board')renderBoardView(); else renderMaintenance(); }
 
 // Inject board CSS
 (function(){const s=document.createElement('style');s.textContent=`
@@ -4202,7 +4560,9 @@ function swMV(v){ document.querySelectorAll('.board-vt button').forEach(b=>b.cla
 .board-filters{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .board-vt{display:flex;background:#f1f5f9;border-radius:8px;padding:3px;margin-left:auto}
 .board-vt button{border:none;border-radius:6px;font-size:11px;font-weight:500;cursor:pointer;}
-.board-sc{overflow-x:auto;padding-bottom:16px;margin:-4px}
+.board-sc{overflow-x:auto;padding-bottom:16px;margin:-4px;scrollbar-width:thin}
+.board-sc::-webkit-scrollbar{height:6px}
+.board-sc::-webkit-scrollbar-thumb{background:#4a5568;border-radius:3px}
 .board-cn{display:flex;gap:16px;min-width:max-content;padding:4px}
 .board-col{min-width:320px;max-width:380px;flex-shrink:0}
 .board-ch{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:10px 10px 0 0;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}

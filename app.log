@@ -1,32 +1,4 @@
- * Serving Flask app 'app'
- * Debug mode: off
-[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
- * Running on all addresses (0.0.0.0)
- * Running on http://127.0.0.1:5050
- * Running on http://187.124.170.214:5050
-[33mPress CTRL+C to quit[0m
-127.0.0.1 - - [13/Jul/2026 19:26:32] "GET /api/banksia-os/submissions?limit=100 HTTP/1.1" 200 -
-127.0.0.1 - - [13/Jul/2026 19:26:32] "GET /api/banksia-os/submissions?type=document HTTP/1.1" 200 -
-127.0.0.1 - - [13/Jul/2026 19:26:32] "[33mGET /api/banksia-os/summary HTTP/1.1[0m" 404 -
-127.0.0.1 - - [13/Jul/2026 19:26:44] "[33mGET /api/banksia-os/summary HTTP/1.1[0m" 404 -
-127.0.0.1 - - [13/Jul/2026 19:26:44] "[33mGET /api/banksia-os/summary HTTP/1.1[0m" 404 -
-127.0.0.1 - - [13/Jul/2026 19:27:04] "GET /api/banksia-os/dashboard HTTP/1.1" 200 -
-127.0.0.1 - - [13/Jul/2026 19:27:04] "GET /api/banksia-os/submissions?type=document HTTP/1.1" 200 -
-127.0.0.1 - - [13/Jul/2026 19:27:04] "GET /api/banksia-os/submissions?new=1 HTTP/1.1" 200 -
-127.0.0.1 - - [13/Jul/2026 19:27:16] "[32mGET /banksia-os HTTP/1.1[0m" 302 -
-127.0.0.1 - - [13/Jul/2026 19:27:16] "[32mGET /banksia-os/referencing HTTP/1.1[0m" 302 -
-127.0.0.1 - - [13/Jul/2026 19:27:16] "[32mGET /banksia-os/referencing?form=1 HTTP/1.1[0m" 302 -
-127.0.0.1 - - [13/Jul/2026 19:27:16] "[32mGET /banksia-os/referencing HTTP/1.1[0m" 302 -
-127.0.0.1 - - [13/Jul/2026 19:27:16] "[32mGET /banksia-os HTTP/1.1[0m" 302 -
-127.0.0.1 - - [13/Jul/2026 21:20:51] "[33mGET /robots.txt HTTP/1.1[0m" 404 -
-127.0.0.1 - - [13/Jul/2026 21:26:11] "[33mGET /robots.txt HTTP/1.1[0m" 404 -
-127.0.0.1 - - [13/Jul/2026 21:26:12] "[33mGET /robots.txt HTTP/1.1[0m" 404 -
-127.0.0.1 - - [13/Jul/2026 21:29:36] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
-127.0.0.1 - - [13/Jul/2026 21:50:14] "[33mGET /api/banksia-os/maintenance/lookup HTTP/1.1[0m" 404 -
-127.0.0.1 - - [13/Jul/2026 21:50:21] "GET / HTTP/1.1" 200 -
-127.0.0.1 - - [13/Jul/2026 21:50:26] "[33mGET /api/banksia-os/maintenance/lookup HTTP/1.1[0m" 404 -
-127.0.0.1 - - [13/Jul/2026 21:50:30] "[33mGET /api/banksia-os/maintenance/lookup HTTP/1.1[0m" 404 -
-127.0.0.1 - - [13/Jul/2026 21:50:37] "[33mGET /api/banksia-os/maintenance/lookup HTTP/1.1[0m" 404 -
-127.0.0.1 - - [13/Jul/2026 21:50:37] "GET /api/banksia-os/dashboard HTTP/1.1" 200 -
-127.0.0.1 - - [13/Jul/2026 21:50:42] "[33mGET /api/banksia-os/maintenance/jobs HTTP/1.1[0m" 404 -
-127.0.0.1 - - [13/Jul/2026 21:50:42] "[33mGET /api/banksia-os/maintenance/lookup HTTP/1.1[0m" 404 -
+Traceback (most recent call last):
+  File "/root/verv-dashboard/app.py", line 6, in <module>
+    from flask import Flask, render_template, request, jsonify, redirect, session
+ModuleNotFoundError: No module named 'flask'

@@ -23,12 +23,14 @@
   "Tom": {
     "password": "Tomops123@",
     "role": "admin",
-    "email": ""
+    "email": "tom@test.com",
+    "phone": "+44"
   },
   "Fareeha": {
     "password": "Fareehaops123@",
     "role": "admin",
-    "email": ""
+    "email": "fareeha@vervrooms.com",
+    "phone": "+44"
   },
   "Edina": {
     "password": "Edinaops123@",
