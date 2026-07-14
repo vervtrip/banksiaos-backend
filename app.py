@@ -15,22 +15,46 @@ app.config.update(
     TEMPLATES_AUTO_RELOAD=False
 )
 
-# ── Production-ready DB connection pool ──
-import threading
-_db_local = threading.local()
-def get_db():
-    """Per-thread database connection with WAL mode."""
-    if not hasattr(_db_local, 'conn') or _db_local.conn is None:
-        _db_local.conn = sqlite3.connect(
-            os.path.join(os.path.dirname(__file__), "verv_os.db"),
-            check_same_thread=False,
-            timeout=30
-        )
-        _db_local.conn.execute("PRAGMA journal_mode=WAL")
-        _db_local.conn.execute("PRAGMA synchronous=NORMAL")
-        _db_local.conn.execute("PRAGMA cache_size=-8000")
-        _db_local.conn.row_factory = sqlite3.Row
-    return _db_local.conn
+# ── Single authoritative per-thread DB connection ──
+from verv_os_db import get_db, get_dict_db, _vos_local
+
+# ── Flask teardown: clean up thread-local connection ──
+@app.teardown_appcontext
+def shutdown_db(exception=None):
+    """Release the per-thread DB connection when the request context ends.
+    Under gunicorn gthread workers, threads persist across requests,
+    so close the old connection so the next request in this thread
+    gets a fresh one (preventing stale transaction state).
+    Rolls back uncommitted transactions before closing.
+    """
+    conn = getattr(_vos_local, 'conn', None)
+    if conn is not None:
+        try:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        _vos_local.conn = None
+    # Also clean up the separate dict-factory connection, if one was created
+    dict_conn = getattr(_vos_local, 'dict_conn', None)
+    if dict_conn is not None:
+        try:
+            try:
+                dict_conn.rollback()
+            except Exception:
+                pass
+        finally:
+            try:
+                dict_conn.close()
+            except Exception:
+                pass
+        _vos_local.dict_conn = None
+
 
 @app.after_request
 def add_cache_headers(response):
@@ -42,7 +66,6 @@ def add_cache_headers(response):
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
-    # Also compress large responses if client supports it
     return response
 
 # ── Register Banksia OS Blueprint ──
@@ -70,7 +93,6 @@ def require_auth(f):
 @require_auth
 def api_push_to_monday():
     try:
-        from verv_os_db import get_dict_db
         db = get_dict_db()
         try:
             result = push_all_pending(db)
@@ -1410,11 +1432,10 @@ def api_dashboard_data():
         }
         # Rent arrears from DB rent_charges (past month, unpaid)
         try:
-            _db = sqlite3.connect(os.path.join(os.path.dirname(__file__), "verv_os.db"))
+            _db = get_db()
             _row = _db.execute("SELECT COUNT(*), COALESCE(SUM(rent_amount),0) FROM rent_charges WHERE status='due' AND month < strftime('%Y-%m','now')").fetchone()
             data["finance"]["rent_arrears"] = round(_row[1], 2) if _row and _row[0] else 0
             data["finance"]["rent_arrears_count"] = _row[0] if _row else 0
-            _db.close()
         except Exception as _dre:
             print(f"[DASHBOARD-DEBUG] Arrears DB query: {_dre}", flush=True)
             data["finance"]["rent_arrears"] = 0
@@ -1492,14 +1513,13 @@ def api_dashboard_data():
     data["finance"]["total_monthly_rent"] = round(total_rent, 2)
     # Rent arrears from DB
     try:
-        _db2 = sqlite3.connect(os.path.join(os.path.dirname(__file__), "verv_os.db"))
+        _db2 = get_db()
         _row2 = _db2.execute("SELECT COUNT(*), COALESCE(SUM(rent_amount),0) FROM rent_charges WHERE status='due' AND month < strftime('%Y-%m','now')").fetchone()
         data["finance"]["rent_arrears"] = round(_row2[1], 2) if _row2 and _row2[0] else 0
         data["finance"]["rent_arrears_count"] = _row2[0] if _row2 else 0
         # Maintenance stats from DB
         _open_maint = _db2.execute("SELECT COUNT(*) FROM maintenance_jobs WHERE status IN ('PENDING','IN PROGRESS','LIVE')").fetchone()
         data["finance"]["open_maintenance"] = _open_maint[0] if _open_maint else maint_open
-        _db2.close()
     except Exception as _dre2:
         print(f"[DASHBOARD-DEBUG] Finance DB query: {_dre2}", flush=True)
         data["finance"]["rent_arrears"] = 0
@@ -1593,10 +1613,9 @@ def api_finance_summary():
     # Real arrears from DB
     _arrears = 0
     try:
-        _db3 = sqlite3.connect(os.path.join(os.path.dirname(__file__), "verv_os.db"))
+        _db3 = get_db()
         _r3 = _db3.execute("SELECT COALESCE(SUM(rent_amount),0) FROM rent_charges WHERE status='due' AND month < strftime('%Y-%m','now')").fetchone()
         _arrears = round(_r3[0], 2) if _r3 else 0
-        _db3.close()
     except Exception as _dre3:
         print(f"[DASHBOARD-DEBUG] Finance summary DB query: {_dre3}", flush=True)
         pass
@@ -2584,7 +2603,6 @@ def api_form_by_token():
     token = request.args.get("token", "")
     if not token:
         return jsonify({"success": False, "error": "Token required"}), 400
-    from verv_os_db import get_db
     db = get_db()
     db.row_factory = lambda c, r: {col[0]: r[idx] for idx, col in enumerate(c.description)}
     try:
@@ -2622,7 +2640,6 @@ def api_thread_attachment(thread_id):
     save_path = os.path.join(docs_dir, safe_name)
     file.save(save_path)
     author = request.form.get("author", session.get("user", {}).get("username", "User"))
-    from verv_os_db import get_db
     db = get_db()
     try:
         db.execute(

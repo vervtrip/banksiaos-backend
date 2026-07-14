@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flask import Blueprint, jsonify, request, session
 from functools import wraps
 
-from verv_os_db import get_db, count, dict_from_row, raw_query
+from verv_os_db import get_db, get_dict_db, count, dict_from_row, raw_query
 
 banksia_os_bp = Blueprint("banksia_os", __name__, url_prefix="/api/banksia-os")
 
@@ -28,21 +28,6 @@ def _require_banksia_auth():
     if not user:
         return jsonify({"success": False, "error": "Not logged in"}), 401
     request.current_user = user
-
-
-# ── Dict row factory for direct dict results ──
-def dict_factory(cursor, row):
-    d = {}
-    for idx, col in enumerate(cursor.description):
-        d[col[0]] = row[idx]
-    return d
-
-
-def get_dict_db():
-    """Get DB connection with dict row factory."""
-    db = get_db()
-    db.row_factory = dict_factory
-    return db
 
 
 # ── Helpers ──

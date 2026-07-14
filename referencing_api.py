@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flask import Blueprint, jsonify, request, session as flask_session, send_file
 from functools import wraps
 from werkzeug.utils import secure_filename
-from verv_os_db import get_db, dict_from_row
+from verv_os_db import get_db, get_dict_db, dict_from_row
 
 referencing_bp = Blueprint("referencing", __name__, url_prefix="/api/referencing")
 
@@ -30,17 +30,6 @@ PORTAL_SESSION_TTL = timedelta(hours=24)
 FORM_EXPIRY_DAYS = 14
 
 # ── Helpers ──
-
-def dict_factory(cursor, row):
-    d = {}
-    for idx, col in enumerate(cursor.description):
-        d[col[0]] = row[idx]
-    return d
-
-def get_dict_db():
-    db = get_db()
-    db.row_factory = dict_factory
-    return db
 
 def json_success(data, **extra):
     resp = {"success": True, "data": data}

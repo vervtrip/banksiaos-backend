@@ -115,8 +115,11 @@ def _log_conflict(con, table, arthur_id, kind, detail):
 def push_dirty(table, dry_run=True, limit=None):
     """Push every sync_dirty row of `table` to Arthur, verifying each write.
     Clears the dirty flag ONLY on a fully-confirmed write."""
+    DB = os.environ.get("VERV_DB_PATH", os.path.join(os.path.dirname(__file__), "verv_os.db"))
     fmap = FIELD_MAP.get(table)
-    con = sqlite3.connect(DB); con.row_factory = sqlite3.Row
+    con = sqlite3.connect(DB, timeout=30)
+    con.execute("PRAGMA busy_timeout=5000")
+    con.row_factory = sqlite3.Row
     rows = con.execute(
         f"SELECT * FROM {table} WHERE sync_dirty=1 AND arthur_id IS NOT NULL"
         + (f" LIMIT {int(limit)}" if limit else "")).fetchall()

@@ -5,12 +5,58 @@ SQLite-backed persistent store mirroring
 the HMO rental operations data model.
 Complete schema with all fields.
 """
-import json, os, sqlite3, time, uuid
+import json, os, sqlite3, time, uuid, threading
 from datetime import datetime, timezone
 from threading import Lock
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "verv_os.db")
 _lock = Lock()
+# Per-thread connections for request-scoped use
+_vos_local = threading.local()
+
+def get_db():
+    """Per-thread database connection. Each thread keeps its own connection
+    — never shared across threads. check_same_thread=False only disables
+    SQLite's Python ownership check, not thread safety.
+    """
+    if not hasattr(_vos_local, 'conn') or _vos_local.conn is None:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=5000")
+        _vos_local.conn = conn
+    return _vos_local.conn
+
+
+def get_dict_db():
+    """Get DB connection with dict row factory.
+    Uses a separate thread-local connection so the main get_db() row factory
+    is never mutated. This prevents a dict query from leaking its row_factory
+    to a subsequent Row-query in the same request.
+    """
+    if not hasattr(_vos_local, 'dict_conn') or _vos_local.dict_conn is None:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
+        conn.row_factory = lambda c, r: {col[0]: r[idx] for idx, col in enumerate(c.description)}
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=5000")
+        _vos_local.dict_conn = conn
+    return _vos_local.dict_conn
+
+
+# ═══════════════════════════════════════════════
+# IMPORTANT: The helper functions below (insert, update, get, etc.)
+# use a module-level Lock (_lock) for their CREATE-/UPDATE-/DELETE-
+# operations. This is intentional: these functions are called from
+# background sync scripts (arthur_sync.py) that may share a connection
+# across invocations, and the lock serialises writes from multiple
+# sources. The request-scoped endpoints in banksia_os.py use
+# get_dict_db() directly without the lock, which is safe because each
+# request creates its own thread-local connection.
+# ═══════════════════════════════════════════════
 
 SCHEMA_SQL = """
 PRAGMA journal_mode=WAL;
@@ -396,25 +442,7 @@ CREATE TABLE IF NOT EXISTS ll_communications (
     responded_at    TEXT,
     created         TEXT DEFAULT (datetime('now'))
 );
-
 """
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
-
-
-def get_dict_db():
-    """Get DB connection with dict row factory."""
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.row_factory = lambda c, r: {col[0]: r[idx] for idx, col in enumerate(c.description)}
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
-
 
 def init_db():
     with _lock:
@@ -437,18 +465,15 @@ def insert(table, data):
     ph = ", ".join(["?" for _ in keys])
     with _lock:
         conn = get_db()
-        try:
-            cur = conn.execute(f"INSERT INTO {table} ({cols}) VALUES ({ph})", vals)
-            conn.commit()
-            return cur.lastrowid
-        finally:
-            conn.close()
+        cur = conn.execute(f"INSERT INTO {table} ({cols}) VALUES ({ph})", vals)
+        conn.commit()
+        return cur.lastrowid
 
 
 def _log_sync_conflict(table, row_id, detail=""):
     """Record that an inbound overwrite was blocked to protect a local edit."""
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=30)
+        conn = get_db()
         arthur_id = ""
         r = conn.execute(f"SELECT arthur_id FROM {table} WHERE id = ?", (row_id,)).fetchone()
         if r:
@@ -458,7 +483,7 @@ def _log_sync_conflict(table, row_id, detail=""):
             "VALUES (?,?,?,?,?,?)",
             (table, row_id, arthur_id, datetime.now(timezone.utc).isoformat(), "pull_blocked", detail),
         )
-        conn.commit(); conn.close()
+        conn.commit()
     except Exception:
         pass
 
@@ -476,9 +501,8 @@ def update(table, row_id, data, mark_dirty=False):
         # Inbound/programmatic update. Never clobber a local edit that has not
         # yet been pushed back to Arthur (sync_dirty=1). Skip and log instead.
         try:
-            _c = sqlite3.connect(DB_PATH, timeout=30)
+            _c = get_db()
             _r = _c.execute(f"SELECT sync_dirty FROM {table} WHERE id = ?", (row_id,)).fetchone()
-            _c.close()
             if _r and (_r[0] or 0) == 1:
                 _log_sync_conflict(table, row_id, "inbound pull blocked; local edit pending push")
                 return
@@ -491,70 +515,49 @@ def update(table, row_id, data, mark_dirty=False):
     vals = [v for _, v in items] + [row_id]
     with _lock:
         conn = get_db()
-        try:
-            conn.execute(f"UPDATE {table} SET {sc} WHERE id = ?", vals)
-            conn.commit()
-        finally:
-            conn.close()
+        conn.execute(f"UPDATE {table} SET {sc} WHERE id = ?", vals)
+        conn.commit()
 
 
 def get(table, row_id):
     with _lock:
         conn = get_db()
-        try:
-            return dict_from_row(conn.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,)).fetchone())
-        finally:
-            conn.close()
+        return dict_from_row(conn.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,)).fetchone())
 
 
 def get_by_field(table, field, value):
     with _lock:
         conn = get_db()
-        try:
-            return [dict(r) for r in conn.execute(f"SELECT * FROM {table} WHERE {field} = ?", (value,)).fetchall()]
-        finally:
-            conn.close()
+        return [dict(r) for r in conn.execute(f"SELECT * FROM {table} WHERE {field} = ?", (value,)).fetchall()]
 
 
 def list_all(table, order="id DESC", limit=500, off=0):
     with _lock:
         conn = get_db()
-        try:
-            return [dict(r) for r in conn.execute(f"SELECT * FROM {table} ORDER BY {order} LIMIT ? OFFSET ?", (limit, off)).fetchall()]
-        finally:
-            conn.close()
+        return [dict(r) for r in conn.execute(f"SELECT * FROM {table} ORDER BY {order} LIMIT ? OFFSET ?", (limit, off)).fetchall()]
 
 
 def count(table, where="1=1", params=None):
     if params is None: params = []
     with _lock:
         conn = get_db()
-        try:
-            row = conn.execute(f"SELECT COUNT(*) as cnt FROM {table} WHERE {where}", params).fetchone()
-            return row["cnt"] if row else 0
-        finally:
-            conn.close()
+        row = conn.execute(f"SELECT COUNT(*) as cnt FROM {table} WHERE {where}", params).fetchone()
+        return row["cnt"] if row else 0
 
 
 def raw_query(sql, params=None):
     if params is None: params = []
     with _lock:
         conn = get_db()
-        try:
-            return [dict(r) for r in conn.execute(sql, params).fetchall()]
-        finally:
-            conn.close()
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
 def raw_execute(sql, params=None):
     if params is None: params = []
     with _lock:
         conn = get_db()
-        try:
-            conn.execute(sql, params)
-            conn.commit()
-        finally:
-            conn.close()
+        conn.execute(sql, params)
+        conn.commit()
 
 
 if __name__ == "__main__":
