@@ -414,12 +414,16 @@ def reset_password_page():
 def dashboard():
     return render_template("dashboard.html", user=request.current_user)
 
-# ── Banksia OS frontend route ──
+# ── Legacy /banksia redirect (retired in favour of /banksia-os) ──
 @app.route("/banksia")
 @app.route("/banksia/<path:subpath>")
-@require_auth
-def banksia_os_page(subpath=""):
-    return render_template("banksia.html", user=request.current_user)
+def banksia_legacy_redirect(subpath=""):
+    # Preserve query parameters during redirect
+    qs = request.query_string.decode() if request.query_string else ""
+    target = f"/banksia-os/{subpath}" if subpath else "/banksia-os"
+    if qs:
+        target += f"?{qs}"
+    return redirect(target, code=301)
 
 # ── Banksia OS frontend route (new HMO Operations dashboard) ──
 @app.route("/banksia-os")
