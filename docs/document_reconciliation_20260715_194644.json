@@ -1,0 +1,26 @@
+{
+  "generated": "2026-07-15T19:46:44.715923+00:00",
+  "summary": {
+    "total": 1,
+    "linked": 1,
+    "resolved": 0,
+    "ambiguous": 0,
+    "unmatched": 0,
+    "no_ref": 0
+  },
+  "categories": {
+    "linked": [
+      {
+        "id": 1,
+        "filename": "test_doc.txt",
+        "related_to": "tenant",
+        "related_id": "3138",
+        "reason": "Already resolved in previous run"
+      }
+    ],
+    "resolved": [],
+    "ambiguous": [],
+    "unmatched": [],
+    "no_ref": []
+  }
+}

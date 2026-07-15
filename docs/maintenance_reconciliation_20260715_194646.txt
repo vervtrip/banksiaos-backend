@@ -1,0 +1,226 @@
+Maintenance Job Reconciliation Report
+Generated: 2026-07-15T19:46:46.612250+00:00
+================================================================================
+
+Total maintenance jobs in DB: 200
+Records updated in DB:        37
+
+─── CLASSIFICATION ───
+  LINKED:    0
+  RESOLVED:  37
+  AMBIGUOUS: 9
+  UNMATCHED: 154
+  TOTAL:     200
+
+
+================================================================================
+Category: RESOLVED (37 items)
+================================================================================
+  ID=8 | monday=12469464370 | title=13 Jacobson House — install Ring intercom | address=(none) | reason=Matched via title_prefix (conf=0.9) | matched_property_id=262
+  ID=9 | monday=12358754179 | title=59 Claylands Road - Door Handle & Bed Frame | address=(none) | reason=Matched via title_prefix (conf=0.9) | matched_property_id=244
+  ID=17 | monday=12508149783 | title=A new mattress needs to be provided | address=30 Bettons Park, E15 3JN, Room 3 | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=282
+  ID=27 | monday=12449658736 | title=32 Clinton Road - Trash, cleaning, light, dresser & washing  | address=(none) | reason=Matched via title_prefix (conf=0.9) | matched_property_id=280
+  ID=40 | monday=12358790034 | title=11 Wraysbury Drive - Gas Meter Work & Internet Down | address=(none) | reason=Matched via title_prefix (conf=0.9) | matched_property_id=287
+  ID=54 | monday=11765829575 | title=Washing machine mouldy, rusty and not functioning correctly. | address=32 Rectory Square, E1 3NQ | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=281
+  ID=55 | monday=11946468548 | title=Issue 1 – Open Portion Above Door  There is a hollow/open po | address=1 Fakruddin Street, E1 5BU | reason=Matched via exact_address (conf=0.95) | matched_property_id=288
+  ID=56 | monday=11920929549 | title=Washing machine is not draining water. Currently the drum ha | address=Flat 1, 77A Brick Lane, E1 6QL | reason=Matched via exact_address (conf=0.95) | matched_property_id=248
+  ID=57 | monday=11968152876 | title=Broken post box | address=95 Wheat Sheaf Close, E14 9UY | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=254
+  ID=58 | monday=11968182735 | title=The washing machine always add minutes after the wash we sel | address=2 Davey Close, N7 8BB | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=286
+  ID=59 | monday=12034103850 | title=Replace light bulb | address=Flat 4, 77A Brick Lane, E1 6QL | reason=Matched via exact_address (conf=0.95) | matched_property_id=252
+  ID=61 | monday=12053883022 | title=Broken Bed wood | address=Flat 1, 35A Highbury Corner, N5 1RA | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=243
+  ID=65 | monday=12079437135 | title=New lock installation | address=Flat 1, 2 Claremont Square, N1 9LY | reason=Matched via exact_address (conf=0.9) | matched_property_id=248
+  ID=68 | monday=12100144708 | title=Replace fridge | address=39 Eleanor Road, E15 4AB | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=278
+  ID=69 | monday=11831551981 | title=Maintenance project | address=4 Studd Street, Islington, N1 0QJ | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=253
+  ID=71 | monday=12262263866 | title=JIEkAI WEI | address=95 Wheat Sheaf Close, E14 9UY | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=254
+  ID=72 | monday=12234323270 | title=washing machine not draining | address=Flat 3, 35A Highbury Corner, N5 1RA | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=243
+  ID=73 | monday=12364946353 | title=Bed slats fell off | address=Flat 1, 35A Highbury Corner, N5 1RA | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=243
+  ID=74 | monday=12365029795 | title=Pick up fan from studd 6 and drop at essex | address=Flat D, 288 Essex Road, N1 3AR | reason=Matched via keyword_match (conf=0.7) | matched_property_id=253
+  ID=75 | monday=12337245577 | title=Washing machine issues | address=32 Clinton Road, N15 5BH | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=280
+  ID=76 | monday=12378627633 | title=Fix washing machie | address=Flat 3, 35A Highbury Corner, N5 1RA | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=243
+  ID=77 | monday=12387142664 | title=Toilet | address=Flat 4, 77A Brick Lane, E1 6QL | reason=Matched via exact_address (conf=0.95) | matched_property_id=252
+  ID=78 | monday=12408507896 | title=Repair | address=Flat 1, 2 Claremont Square, N1 9LY | reason=Matched via exact_address (conf=0.9) | matched_property_id=248
+  ID=82 | monday=12419806091 | title=F2 Brick Lane - walls need painting + bathroom ceiling issue | address=Flat 2, 77A Brick Lane, E1 6QL | reason=Matched via exact_address (conf=0.95) | matched_property_id=252
+  ID=84 | monday=12385166773 | title=Send someone to open the upper part of the window or change  | address=Flat 1, 35A Highbury Corner, N5 1RA | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=243
+  ID=85 | monday=12441883980 | title=Fob key for main door | address=Flat 18 Lubbock House, Poplar High Street, E14 0AW | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=271
+  ID=90 | monday=12442637983 | title=95 Wheat Sheaf Close - toilet seat needs replacing | address=(none) | reason=Matched via title_prefix (conf=0.9) | matched_property_id=254
+  ID=92 | monday=12507786500 | title=remove and dispose old chiars and sofa bed from Angel and de | address=(none) | reason=Matched via keyword_match (conf=0.7) | matched_property_id=253
+  ID=93 | monday=12439738422 | title=2 Davey Close Room 4 - Mattress broken  remove mattress from | address=(none) | reason=Matched via title_prefix (conf=0.9) | matched_property_id=286
+  ID=94 | monday=12399916183 | title=40 Brabazon Street (Room 2) — Toilet door not opening/closin | address=(none) | reason=Matched via title_prefix (conf=0.9) | matched_property_id=247
+  ID=97 | monday=12446695408 | title=52 Honor Oak — Pest control needed (rodent droppings in kitc | address=(none) | reason=Matched via keyword_match (conf=0.7) | matched_property_id=261
+  ID=99 | monday=11339331594 | title=Gas Certificate | address=Flat 2, 77A Brick Lane | reason=Matched via exact_address (conf=0.9) | matched_property_id=252
+  ID=100 | monday=11339334104 | title=Mattress Removal | address=Flat 1, 77A Brick Lane, E1 6QL | reason=Matched via exact_address (conf=0.95) | matched_property_id=248
+  ID=101 | monday=11339317734 | title=Gas Certificate | address=Flat 1, 35A Highbury Corner, N5 1RA | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=243
+  ID=102 | monday=11339332197 | title=Gas Certificate | address=Flat 1A, 35A Highbury Corner, N5 1RA | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=243
+  ID=103 | monday=11339328312 | title=Paint Door Edges | address=Flat 3, 35A Highbury Corner, N5 1RA | reason=Matched via unique_postcode (conf=0.9) | matched_property_id=243
+  ID=195 | monday=11702805762 | title=Studd 6 needs a small bin for the bathroom. | address=(none) | reason=Matched via keyword_match (conf=0.7) | matched_property_id=253
+
+================================================================================
+Category: UNMATCHED (154 items)
+================================================================================
+  ID=2 | monday=12520217200 | title=Broken Chair | address=(none) | reason=no_match
+  ID=3 | monday=12516704063 | title=The Sink basin is blocked not able to wash dishes etc | address=(none) | reason=no_match
+  ID=4 | monday=12520531843 | title=Dead rodent (mouse I think) in back of sofa | address=(none) | reason=no_match
+  ID=5 | monday=12491750612 | title=Please, refer to my mail for the description of shower hose  | address=(none) | reason=no_match
+  ID=6 | monday=12491865758 | title=central bed support | address=(none) | reason=no_match
+  ID=7 | monday=12424583939 | title=Floorplans | address=(none) | reason=no_match
+  ID=10 | monday=12386637240 | title=FRA certificate | address=(none) | reason=no_match
+  ID=11 | monday=12358790095 | title=2 Claremont Square - Recurring Water Leak | address=(none) | reason=no_match
+  ID=12 | monday=12420156231 | title=Install door number stickers on all properties | address=(none) | reason=no_match
+  ID=13 | monday=12456711138 | title=Take measure of the boiler cupboard | address=(none) | reason=no_match
+  ID=14 | monday=12458134678 | title=Overflowing rubbish and bags left by the previous tenant hav | address=(none) | reason=no_match
+  ID=15 | monday=12479736774 | title=Justine Kissane — Angel F1 Room 2 — Shared facilities compla | address=(none) | reason=no_match
+  ID=16 | monday=12469419642 | title=WIFI's Not reaching my room - need of a connector or separat | address=(none) | reason=no_match
+  ID=18 | monday=12250332370 | title=Fire doors installation and removal of old ones | address=(none) | reason=no_match
+  ID=19 | monday=12381590695 | title=The fridge and dining table chairs are in a bad condition, s | address=(none) | reason=no_match
+  ID=20 | monday=12507834069 | title=Install blinds | address=(none) | reason=no_match
+  ID=22 | monday=12466281147 | title=The common area are not clean | address=(none) | reason=no_match
+  ID=23 | monday=12439780333 | title=Kitchen condition reported by tenant (Ana Fraguio) | address=(none) | reason=no_match
+  ID=24 | monday=12270513929 | title=The oven is broken, it stopped getting hot. | address=(none) | reason=no_match
+  ID=25 | monday=12466212936 | title=The bed slates are brooken | address=(none) | reason=no_match
+  ID=26 | monday=12500737369 | title=Bathroom toilet flushing/refilling very slowly (possible fau | address=(none) | reason=no_match
+  ID=28 | monday=11339328557 | title=Shower Head to be Replaced | address=(none) | reason=no_match
+  ID=29 | monday=11435511345 | title=install a new thumb lock handl | address=(none) | reason=no_match
+  ID=30 | monday=11938292828 | title=Reapir | address=(none) | reason=no_match
+  ID=31 | monday=12014409844 | title=Angel 2: Broken sofa Bed | address=(none) | reason=no_match
+  ID=32 | monday=11404706739 | title=Hobs/oven replaced with wrong size | address=(none) | reason=no_match
+  ID=33 | monday=11603525670 | title=Is my payment recieved for the march month. I received a mai | address=(none) | reason=no_match
+  ID=34 | monday=11859676946 | title=camera or ring for saftey | address=(none) | reason=no_match
+  ID=35 | monday=11906318785 | title=Mould in the bathroom and Switch in the bathroom | address=(none) | reason=no_match
+  ID=36 | monday=11339323836 | title=4 x Keybox Install | address=(none) | reason=no_match
+  ID=37 | monday=12145896608 | title=The window is blocked not able to open | address=(none) | reason=no_match
+  ID=38 | monday=11957022289 | title=Broken Fridge Tray+Measurement of trays | address=(none) | reason=no_match
+  ID=39 | monday=12273975986 | title=Creaky floors making alot of noise in room 4 coming down to  | address=(none) | reason=no_match
+  ID=41 | monday=12167674712 | title=Flame | address=(none) | reason=no_match
+  ID=43 | monday=11385224026 | title=Laundry machine is not draining water properly and fabric so | address=(none) | reason=no_match
+  ID=44 | monday=11362196997 | title=I was told that I will be reimbursed for the battery that I  | address=(none) | reason=no_match
+  ID=45 | monday=11989086069 | title=Removal and disposal | address=(none) | reason=no_match
+  ID=48 | monday=12322461419 | title=Need new Fan | address=(none) | reason=no_match
+  ID=49 | monday=12358738742 | title=Unknown Property - House Lights No Power | address=(none) | reason=marked_as_unknown_property
+  ID=50 | monday=12358779062 | title=Unknown Property - Communal Kitchen Condition | address=(none) | reason=marked_as_unknown_property
+  ID=51 | monday=12387411915 | title=Window open | address=(none) | reason=no_match
+  ID=52 | monday=12389853825 | title=Claremont — re-book dining chair delivery (bar stool was del | address=(none) | reason=no_match
+  ID=53 | monday=12429933701 | title=Bed frame broken | address=(none) | reason=no_match
+  ID=60 | monday=12042315148 | title=Pest issues second visit | address=10 Beech Street, RM7 7LA | reason=no_match
+  ID=62 | monday=12033363692 | title=Fix led light hanging at the kitchen cabinets | address=29c Lowfield Road, London NW6 2PP | reason=no_match
+  ID=63 | monday=12040490029 | title=Shower head leak | address=29c Lowfield Road, London NW6 2PP | reason=no_match
+  ID=64 | monday=12042453079 | title=Carpet cleaner moving | address=29c Lowfield Road, London NW6 2PP | reason=no_match
+  ID=66 | monday=12094437577 | title=black mould in the bathroom | address=29c Lowfield Road, London NW6 2PP | reason=no_match
+  ID=67 | monday=12094438150 | title=Fix wardrobe doors and the back cover - change the  blinds - | address=29c Lowfield Road, London NW6 2PP | reason=no_match
+  ID=79 | monday=12379844307 | title=Claremont 2 | address=Flat 2, 2 Claremont Square, N1 9LY | reason=no_match
+  ID=80 | monday=12389854086 | title=Claremont Flats — check all flats have blinds and curtains i | address=(none) | reason=no_match
+  ID=86 | monday=12440993169 | title=Fix the window | address=(none) | reason=no_match
+  ID=87 | monday=12492592088 | title=Boiler issues and fire alarm detactor replace battery | address=(none) | reason=no_match
+  ID=88 | monday=12466277610 | title=The painting is really damaged | address=(none) | reason=no_match
+  ID=89 | monday=12466190031 | title=Fire alarm - it s making some noise | address=(none) | reason=no_match
+  ID=95 | monday=12457659101 | title=Hallway light hanging with exposed wires | address=(none) | reason=no_match
+  ID=96 | monday=12457710322 | title=Kitchen ceiling leak from bathroom above | address=(none) | reason=no_match
+  ID=98 | monday=12507520567 | title=Washing machine issues | address=(none) | reason=no_match
+  ID=104 | monday=11339331787 | title=Gas Certificate | address=(none) | reason=no_match
+  ID=105 | monday=11339328564 | title=Mold Treatment | address=(none) | reason=no_match
+  ID=106 | monday=11339328573 | title=Broken Door Strips | address=(none) | reason=no_match
+  ID=107 | monday=11339328581 | title=Bath Panel Installation | address=(none) | reason=no_match
+  ID=108 | monday=11339328565 | title=Door Closer Not Working | address=(none) | reason=no_match
+  ID=109 | monday=11339323634 | title=Cleaning Fridge and balcony | address=(none) | reason=no_match
+  ID=110 | monday=11339333973 | title=No hot water in shower | address=(none) | reason=no_match
+  ID=111 | monday=11339328558 | title=Water leaking from bathroom extractor fan | address=(none) | reason=no_match
+  ID=112 | monday=11339331065 | title=Rubbish Removal | address=(none) | reason=no_match
+  ID=113 | monday=11339338471 | title=Door Lock Setup (Thumb Locks) | address=(none) | reason=no_match
+  ID=114 | monday=11339323838 | title=Light/Lamp Replacement | address=(none) | reason=no_match
+  ID=115 | monday=11351410701 | title=No water | address=(none) | reason=no_match
+  ID=116 | monday=11339319494 | title=Bathroom extractor fan is not working | address=(none) | reason=no_match
+  ID=117 | monday=11339323837 | title=Replace main door lock and check Cameras | address=(none) | reason=no_match
+  ID=118 | monday=11361315945 | title=No hot water in the kitchen, bathroom | address=(none) | reason=no_match
+  ID=119 | monday=11372277469 | title=Toilet seat replacement | address=(none) | reason=no_match
+  ID=120 | monday=11364282050 | title=Emergency Lighting | address=(none) | reason=no_match
+  ID=121 | monday=11372425795 | title=Broken toilet flash | address=(none) | reason=no_match
+  ID=122 | monday=11360820597 | title=The water in the bathtub after bathing does not drain proper | address=(none) | reason=no_match
+  ID=123 | monday=11372417482 | title=The door of my refrigerator suddenly fell off. | address=(none) | reason=no_match
+  ID=124 | monday=11354675176 | title=My main fridge is completely freezing all the food inside. A | address=(none) | reason=no_match
+  ID=125 | monday=11354750241 | title=All the chairs in the living room and the table are very dam | address=(none) | reason=no_match
+  ID=126 | monday=11354765708 | title=The smoke detector alarm is making a very loud noise every 2 | address=(none) | reason=no_match
+  ID=127 | monday=11384750045 | title=Closet door is not closing properly. We have cleaned the are | address=(none) | reason=no_match
+  ID=128 | monday=11351764099 | title=The freezer door got unglued and now it is difficult to open | address=(none) | reason=no_match
+  ID=129 | monday=11354701498 | title=Balcony full of birds poop. I have raised this issue even be | address=(none) | reason=no_match
+  ID=130 | monday=11377204618 | title=clogged sink | address=(none) | reason=no_match
+  ID=131 | monday=11377181963 | title=Leaking shower head and broken support | address=(none) | reason=no_match
+  ID=132 | monday=11392436953 | title=Leak | address=(none) | reason=no_match
+  ID=133 | monday=11339328768 | title=Shower Issue: Too hot or too cold water | address=(none) | reason=no_match
+  ID=134 | monday=11383035208 | title=The door handle screw in room M1 has come loose and won't ho | address=(none) | reason=no_match
+  ID=135 | monday=11391862942 | title=Washing machine is not working | address=(none) | reason=no_match
+  ID=136 | monday=11395188861 | title=I was away and returned home yesterday to find that the show | address=(none) | reason=no_match
+  ID=137 | monday=11339338668 | title=Bedframe Installation | address=(none) | reason=no_match
+  ID=138 | monday=11410968284 | title=Bathroom Leak | address=(none) | reason=no_match
+  ID=139 | monday=11392793748 | title=West : pillow has stains, there is mold in the bathroom, the | address=(none) | reason=no_match
+  ID=140 | monday=11339328219 | title=Broken Toilet Seat & Soap Stand | address=(none) | reason=no_match
+  ID=141 | monday=11444341555 | title=I have a problem in the gas boiler, central heating,gas stov | address=(none) | reason=no_match
+  ID=142 | monday=11421861288 | title=Broken bedfram | address=(none) | reason=no_match
+  ID=143 | monday=11339331385 | title=Bath Mixer Tap Replacement - Low Water Pressure | address=(none) | reason=no_match
+  ID=144 | monday=11451064014 | title=Lock issue at Room 3 | address=(none) | reason=no_match
+  ID=145 | monday=11364319329 | title=Fire alarm Installation | address=(none) | reason=no_match
+  ID=146 | monday=11391872330 | title=Faulty washing machine. This issue was previously raised lik | address=(none) | reason=no_match
+  ID=147 | monday=11339331213 | title=Broken Intercom | address=(none) | reason=no_match
+  ID=148 | monday=11459798030 | title=Damage Door in room 3 and open lock in room2 | address=(none) | reason=no_match
+  ID=149 | monday=11500825067 | title=Order Dehumidifier | address=(none) | reason=no_match
+  ID=150 | monday=11499178716 | title=Leak in the toilet | address=(none) | reason=no_match
+  ID=151 | monday=11339319789 | title=Ceiling Repair | address=(none) | reason=no_match
+  ID=152 | monday=11339323635 | title=Water leaking under the sink | address=(none) | reason=no_match
+  ID=153 | monday=11508408889 | title=Broken pipe | address=(none) | reason=no_match
+  ID=154 | monday=11499211678 | title=Issues:Mould on the bathroom ceiling  Poor bathroom ventilat | address=(none) | reason=no_match
+  ID=155 | monday=11353679202 | title=This is regarding a previously reported issue with the washi | address=(none) | reason=no_match
+  ID=156 | monday=11541242346 | title=Fuse box in room 1 need to be checked by electricianrule out | address=(none) | reason=no_match
+  ID=157 | monday=11544992863 | title=Faulty wall socket. The on-and-off switch on the wall socket | address=(none) | reason=no_match
+  ID=158 | monday=11402816722 | title=Our dryer has not been working for a month. Someone came to  | address=(none) | reason=no_match
+  ID=159 | monday=11415720655 | title=Dryer is not working for more than 1 month | address=(none) | reason=no_match
+  ID=160 | monday=11385184452 | title=X6 fire alarm,X1 heat alarm X2 emergency lightings | address=(none) | reason=no_match
+  ID=161 | monday=11525935883 | title=Rubbish from Maintenance Left in top hallway for extended pe | address=(none) | reason=no_match
+  ID=162 | monday=11565314008 | title=Remove rubbish from front | address=(none) | reason=no_match
+  ID=163 | monday=11572658520 | title=Leaking Issues | address=(none) | reason=no_match
+  ID=164 | monday=11514926362 | title=There may be some water damage in the ceiling of the downsta | address=(none) | reason=no_match
+  ID=165 | monday=11525948241 | title=The heater didn't work since Thursday morning | address=(none) | reason=no_match
+  ID=166 | monday=11525958303 | title=Oven Racks Damaged from unknown cooking (likely plastic) wil | address=(none) | reason=no_match
+  ID=167 | monday=11406486011 | title=The oven is broken. The flame doesn’t stay on and nothing ge | address=(none) | reason=no_match
+  ID=168 | monday=11581406757 | title=Maintenance Issues | address=(none) | reason=no_match
+  ID=169 | monday=11563846445 | title=Bed Frame is sagging / broken | address=(none) | reason=no_match
+  ID=170 | monday=11563839417 | title=Blinds / Strings are not working | address=(none) | reason=no_match
+  ID=171 | monday=11563823907 | title=Light bulb is not working, has burned out | address=(none) | reason=no_match
+  ID=172 | monday=11594602089 | title=Broken shower head | address=(none) | reason=no_match
+  ID=173 | monday=11619569526 | title=lock and self-close are not working | address=(none) | reason=no_match
+  ID=174 | monday=11614169105 | title=Door Self-Closer closes normally, but opening it is difficul | address=(none) | reason=no_match
+  ID=175 | monday=11621870843 | title=Sink clogged and water stuck inside washing machine | address=(none) | reason=no_match
+  ID=176 | monday=11619414275 | title=Blockage kichen sink | address=(none) | reason=no_match
+  ID=177 | monday=11611595763 | title=Shower head holder or sliding bracket is broken, needs to be | address=(none) | reason=no_match
+  ID=178 | monday=11637245591 | title=Toilet seat broken&wifi box | address=(none) | reason=no_match
+  ID=179 | monday=11637254986 | title=Wall mounted router fall | address=(none) | reason=no_match
+  ID=180 | monday=11632252123 | title=Internet speeds are EXTREMELY slow / not working. Please can | address=(none) | reason=no_match
+  ID=181 | monday=11562890298 | title=I have lost my keys and needs a new set asap. The fob to get | address=(none) | reason=no_match
+  ID=182 | monday=11580291128 | title=Bath Tap Leakage | address=(none) | reason=no_match
+  ID=183 | monday=11622217753 | title=The health faucet pipe is all rusted and leaking. Needs repl | address=(none) | reason=no_match
+  ID=184 | monday=11677999745 | title=Broken Bedframe & Fridge | address=(none) | reason=no_match
+  ID=185 | monday=11392718694 | title=New fire door installation and old doors removal | address=(none) | reason=no_match
+  ID=186 | monday=11678128332 | title=check the door handle -check his light -take the broken chai | address=(none) | reason=no_match
+  ID=187 | monday=11446438227 | title=The boiler isn’t working again and we have no hot water or h | address=(none) | reason=no_match
+  ID=188 | monday=11376112076 | title=The boiler isn’t working it has been on and off working for  | address=(none) | reason=no_match
+  ID=189 | monday=11447002609 | title=Hot water and heating is not working again! Apparently it’s  | address=(none) | reason=no_match
+  ID=190 | monday=11688568516 | title=Leak Inspection | address=(none) | reason=no_match
+  ID=191 | monday=11678067033 | title=-bathroom fixutres -kitchen fixtures  -remove key boxes from | address=(none) | reason=no_match
+  ID=192 | monday=11649988073 | title=Curtain rail hook needs changing. It seems that the hook tha | address=(none) | reason=no_match
+  ID=193 | monday=11625284300 | title=This morning the hoover stopped working. While I was using i | address=(none) | reason=no_match
+  ID=194 | monday=11643155772 | title=Hoover is not working when I try to switch on is not working | address=(none) | reason=no_match
+  ID=196 | monday=11627350032 | title=The hot water and heating not working in the property. Boile | address=(none) | reason=no_match
+  ID=197 | monday=11626311711 | title=Sofa bed: Is a little bumpy, and a spring sticks out, could  | address=(none) | reason=no_match
+  ID=198 | monday=11675210793 | title=The radiator in room 3 does not work and is leaking and drip | address=(none) | reason=no_match
+  ID=199 | monday=11678691432 | title=Faucet: Seems to be loose, moves from side to side, guest co | address=(none) | reason=no_match
+  ID=200 | monday=11673303793 | title=Socket: The wire casing/trunking is coming off from the wall | address=(none) | reason=no_match
+
+================================================================================
+Category: AMBIGUOUS (9 items)
+================================================================================
+  ID=1 | monday=12522559490 | title=Bricklane F4 | address=(none) | reason=ambiguous_keyword_Brick Lane_3_matches
+  ID=21 | monday=12498956732 | title=Room 1 + communal areas clean — new tenant prep (Fernanda) | address=5 Radford House (Room 1) | reason=ambiguous_keyword_Radford House_3_matches
+  ID=42 | monday=12449333283 | title=Alysia Reed - Brick Lane Studio - Water Pressure | address=(none) | reason=ambiguous_keyword_Brick Lane_3_matches
+  ID=46 | monday=12358825901 | title=32 Carrol Close - Emergency Lighting Cert Renewal | address=(none) | reason=ambiguous_keyword_Carrol Close_2_matches
+  ID=47 | monday=12358827125 | title=32 Carrol Close - Fire Alarm Cert Renewal | address=(none) | reason=ambiguous_keyword_Carrol Close_2_matches
+  ID=70 | monday=12244709088 | title=the kitchen unit below the worktop appears to be damaged, wi | address=Flat 8 Radford House, 2A Chadbourne Street, E14 6QW | reason=ambiguous_postcode_E14 6QW_3_matches
+  ID=81 | monday=12394843742 | title=Broken Window | address=Flat 3, 2 Claremont Square, N1 9LY | reason=ambiguous_address_3_matches
+  ID=83 | monday=12418734944 | title=Window isn't closing | address=Flat 3, 2 Claremont Square, N1 9LY | reason=ambiguous_address_3_matches
+  ID=91 | monday=12243932222 | title=1 take measurements for the kitchen door flat 2 brick lane 2 | address=(none) | reason=ambiguous_keyword_Brick Lane_3_matches

@@ -3647,77 +3647,9 @@ def api_guarantors():
 
 @banksia_os_bp.route("/guarantors/<int:guarantor_id>")
 def api_guarantor(guarantor_id):
-    db = get_dict_db()
-    try:
-        tenant = db.execute(
-            "SELECT id, arthur_id, arthur_person_id, tenancy_id, unit_id, property_id, "
-            "full_address, title, first_name, last_name, date_of_birth, gender, citizen, "
-            "email, phone_home, phone_work, mobile AS phone, passport_number, visa_number, visa_type, "
-            "visa_years, country_of_origin, ni_number, main_tenant, status, has_guarantor, "
-            "guarantor_first_name, guarantor_last_name, guarantor_date_of_birth, "
-            "guarantor_address, guarantor_city, guarantor_postcode, guarantor_country, "
-            "guarantor_phone, guarantor_mobile, guarantor_email, guarantor_relation, "
-            "guarantor_profession, guarantor_home_owner, "
-            "employment_company, employment_salary, employment_length, student_status, university, "
-            "bank_name, latest_credit_score, latest_credit_description, "
-            "applicant_note, manager_note, move_in_date, move_out_date, modified, created "
-            "FROM tenants WHERE id = ?",
-            (guarantor_id,)
-        ).fetchone()
-        if not tenant:
-            return json_error("Guarantor not found", 404)
-
-        bool_fields(tenant, "main_tenant", "has_guarantor", "guarantor_home_owner")
-
-        # Add the computed fields from the list endpoint
-        tenant["first_name_display"] = tenant.get("guarantor_first_name") or ""
-        tenant["last_name_display"] = tenant.get("guarantor_last_name") or ""
-        tenant["email_display"] = tenant.get("guarantor_email") or ""
-        tenant["phone_display"] = tenant.get("guarantor_mobile") or ""
-        tenant["mobile_display"] = tenant.get("guarantor_mobile") or ""
-        tenant["relationship"] = tenant.get("guarantor_relation") or ""
-        tenant["linked_applicant_name"] = (tenant.get("first_name") or "") + " " + (tenant.get("last_name") or "")
-        tenant["linked_tenant_name"] = tenant["linked_applicant_name"]
-        tenant["annual_income"] = tenant.get("employment_salary")
-        tenant["employer_name"] = tenant.get("employment_company")
-
-        if tenant.get("property_id"):
-            prop = db.execute(
-                "SELECT p.name FROM properties p WHERE p.arthur_id = CAST(? AS TEXT)",
-                (tenant["property_id"],)
-            ).fetchone()
-            tenant["property_name"] = prop["name"] if prop else None
-            prop_full = db.execute(
-                "SELECT id, ref, name, address_line_1, city, postcode FROM properties WHERE id = ?",
-                (tenant["property_id"],)
-            ).fetchone()
-            tenant["property"] = prop_full
-        else:
-            tenant["property_name"] = None
-            tenant["property"] = None
-
-        # Linked tenancy
-        if tenant.get("tenancy_id"):
-            tenancy = db.execute("SELECT * FROM tenancies WHERE id = ?", (tenant["tenancy_id"],)).fetchone()
-            if tenancy:
-                bool_fields(tenancy, "deposit_registered", "section_21_served", "is_renewed")
-            tenant["tenancy"] = tenancy
-        else:
-            tenant["tenancy"] = None
-
-        # Linked unit
-        if tenant.get("unit_id"):
-            unit = db.execute(
-                "SELECT id, unit_ref, unit_type, full_address FROM units WHERE id = ?",
-                (tenant["unit_id"],)
-            ).fetchone()
-            tenant["unit"] = unit
-
-        return json_success(tenant)
-    except Exception as e:
-        return json_error(str(e), 500)
-    finally:
-        db.close()
+    """Redirect to the new guarantor detail endpoint."""
+    from flask import redirect as _rd
+    return _rd(f"/api/banksia-os/guarantors/{guarantor_id}")
 
 
 # ═══════════════════════════════════════════════
@@ -3779,125 +3711,9 @@ def api_referencing():
 
 @banksia_os_bp.route("/referencing/<int:ref_id>")
 def api_referencing_detail(ref_id):
-    db = get_dict_db()
-    try:
-        form = db.execute("SELECT * FROM referencing_forms WHERE id = ?", (ref_id,)).fetchone()
-        if not form:
-            return json_error("Referencing form not found", 404)
-
-        bool_fields(form, "has_guarantor", "guarantor_homeowner", "housing_benefit",
-                     "has_pet", "has_ccj", "has_iva", "has_bankruptcy",
-                     "has_eviction", "declaration_confirmed")
-
-        # Linked applicant info
-        if form.get("applicant_id"):
-            applicant = db.execute(
-                "SELECT id, first_name, last_name, email, mobile, status, "
-                "employment_company, employment_salary, has_guarantor, "
-                "guarantor_first_name, guarantor_last_name, "
-                "created, modified "
-                "FROM applicants WHERE id = ?",
-                (form["applicant_id"],)
-            ).fetchone()
-            if applicant:
-                bool_fields(applicant, "has_guarantor")
-            form["applicant"] = applicant
-        else:
-            form["applicant"] = None
-
-        # Check results
-        checks = db.execute(
-            "SELECT id, form_id, check_type, status, checked_at, details, "
-            "confidence, summary, created "
-            "FROM referencing_checks WHERE form_id = ? ORDER BY check_type",
-            (ref_id,)
-        ).fetchall()
-        form["checks"] = checks
-
-        # Documents
-        docs = db.execute(
-            "SELECT id, form_id, category, original_filename, stored_filename, "
-            "file_size, mime_type, uploaded_by, uploaded_at, is_verified, "
-            "ai_analysis, ai_verified, ai_confidence, ai_flagged, ai_flag_reason "
-            "FROM referencing_documents WHERE form_id = ? ORDER BY category",
-            (ref_id,)
-        ).fetchall()
-        for d in docs:
-            bool_fields(d, "is_verified", "ai_verified", "ai_flagged")
-        form["documents"] = docs
-
-        return json_success(form)
-    except Exception as e:
-        return json_error(str(e), 500)
-    finally:
-        db.close()
-
-
-# ═══════════════════════════════════════════════
-# 6. APPLICANTS
-# ═══════════════════════════════════════════════
-
-@banksia_os_bp.route("/applicants")
-def api_applicants():
-    page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20)
-    status_filter = request.args.get("status", "").strip()
-    search = request.args.get("search", "").strip()
-
-    where_parts = ["1=1"]
-    params = []
-
-    if status_filter:
-        where_parts.append("status = ?")
-        params.append(status_filter)
-
-    if search:
-        search_clause, search_params = build_search_clause(
-            ["first_name", "last_name", "email", "mobile", "full_address"], search
-        )
-        where_parts.append(search_clause)
-        params.extend(search_params)
-
-    where = " AND ".join(where_parts)
-
-    rows, total = paginate(
-        f"SELECT * FROM applicants WHERE {where} ORDER BY created DESC",
-        f"SELECT COUNT(*) AS cnt FROM applicants WHERE {where}",
-        params, page, per_page
-    )
-
-    for r in rows:
-        bool_fields(r, "has_guarantor")
-
-    return json_success(rows, total, page, per_page)
-
-
-@banksia_os_bp.route("/applicants/<int:app_id>", methods=["GET", "PATCH"])
-def api_applicant(app_id):
-    if request.method == "PATCH":
-        return api_update_resource("applicants", app_id)
-    db = get_dict_db()
-    try:
-        app = db.execute("SELECT * FROM applicants WHERE id = ?", (app_id,)).fetchone()
-        if not app:
-            return json_error("Applicant not found", 404)
-
-        bool_fields(app, "has_guarantor")
-
-        # Parse matched_unit_ids if present
-        if app.get("matched_unit_ids"):
-            try:
-                app["matched_units"] = json.loads(app["matched_unit_ids"])
-            except (json.JSONDecodeError, TypeError):
-                app["matched_units"] = []
-        else:
-            app["matched_units"] = []
-
-        return json_success(app)
-    except Exception as e:
-        return json_error(str(e), 500)
-    finally:
-        db.close()
+    """Get full referencing detail — merged duplicate of the GET endpoint."""
+    from flask import redirect as _rd
+    return _rd(f"/api/banksia-os/referencing/{ref_id}")
 
 
 # ═══════════════════════════════════════════════
@@ -4786,73 +4602,6 @@ def api_end_tenancy(ten_id):
             db.commit()
 
         return json_success({"id": ten_id, "status": "Ended"})
-    except Exception as e:
-        db.rollback()
-        return json_error(str(e), 500)
-    finally:
-        db.close()
-
-
-@banksia_os_bp.route("/applicants", methods=["POST"])
-def api_create_applicant():
-    """Create a new applicant."""
-    data = request.get_json(silent=True)
-    if not data:
-        return json_error("Request body must be JSON")
-
-    first_name = data.get("first_name", "").strip()
-    last_name = data.get("last_name", "").strip()
-    email = data.get("email", "").strip()
-    mobile = data.get("mobile", "").strip()
-    source = data.get("source", "").strip()
-    status = data.get("status", "Active").strip()
-
-    if not first_name or not last_name:
-        return json_error("first_name and last_name are required")
-
-    db = get_dict_db()
-    try:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        db.execute(
-            """INSERT INTO applicants
-               (first_name, last_name, email, mobile, source, status, modified, created)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (first_name, last_name, email, mobile, source, status, now_iso, now_iso)
-        )
-        new_id = db.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
-        db.commit()
-        return json_success({"id": new_id})
-    except Exception as e:
-        db.rollback()
-        return json_error(str(e), 500)
-    finally:
-        db.close()
-
-
-@banksia_os_bp.route("/applicants/<int:app_id>/status", methods=["POST"])
-def api_update_applicant_status(app_id):
-    """Update an applicant's status."""
-    data = request.get_json(silent=True)
-    if not data:
-        return json_error("Request body must be JSON")
-
-    status = data.get("status", "").strip()
-    if not status:
-        return json_error("status is required")
-
-    db = get_dict_db()
-    try:
-        app = db.execute("SELECT id FROM applicants WHERE id = ?", (app_id,)).fetchone()
-        if not app:
-            return json_error("Applicant not found", 404)
-
-        now_iso = datetime.now(timezone.utc).isoformat()
-        db.execute(
-            "UPDATE applicants SET status = ?, modified = ? WHERE id = ?",
-            (status, now_iso, app_id)
-        )
-        db.commit()
-        return json_success({"id": app_id, "status": status})
     except Exception as e:
         db.rollback()
         return json_error(str(e), 500)
@@ -6579,6 +6328,919 @@ def api_cancel_invoice(invoice_id):
         db.execute("UPDATE invoices SET status='cancelled' WHERE id=?", (invoice_id,))
         db.commit()
         return json_success({"message": "Invoice cancelled"})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════════════════════
+# 9. APPLICANT-TO-TENANCY WORKFLOW
+# ═══════════════════════════════════════════════════════════════
+#
+# Endpoints:
+#   Applicant CRUD + status transitions
+#   Referencing lifecycle
+#   Guarantor CRUD
+#   Single-transaction applicant-to-tenancy conversion
+#   Unit occupancy check
+# ═══════════════════════════════════════════════════════════════
+
+# ── Applicant status machine ──
+APPLICANT_VALID_TRANSITIONS = {
+    "new":              ["form_sent", "withdrawn"],
+    "form_sent":        ["submitted", "withdrawn"],
+    "submitted":        ["under_review", "more_info", "withdrawn"],
+    "under_review":     ["approved", "declined", "more_info", "withdrawn"],
+    "more_info":        ["submitted", "withdrawn"],
+    "approved":         ["tenancy_created", "withdrawn"],
+    "declined":         ["withdrawn"],
+    "tenancy_created":  ["withdrawn"],
+    "withdrawn":        [],
+}
+
+# ── Referencing status machine ──
+REFERENCING_VALID_TRANSITIONS = {
+    "new":              ["form_sent", "withdrawn"],
+    "form_sent":        ["submitted", "withdrawn"],
+    "submitted":        ["under_review", "more_info", "withdrawn"],
+    "under_review":     ["approved", "declined", "more_info", "withdrawn"],
+    "more_info":        ["submitted", "withdrawn"],
+    "approved":         ["withdrawn"],
+    "declined":         ["withdrawn"],
+    "tenancy_created":  ["withdrawn"],
+    "withdrawn":        [],
+}
+
+
+# ═══════════════════════════════════════════════════════════════
+# 9A. APPLICANT ENDPOINTS
+# ═══════════════════════════════════════════════════════════════
+
+@banksia_os_bp.route("/applicants", methods=["GET"])
+def api_applicants_list():
+    """List applicants with search, pagination, status filter."""
+    page = int_param(request.args.get("page"))
+    per_page = int_param(request.args.get("per_page"), 20)
+    status_filter = request.args.get("status", "").strip()
+    search = request.args.get("search", "").strip()
+
+    where_parts = ["1=1"]
+    params = []
+
+    if status_filter:
+        where_parts.append("status = ?")
+        params.append(status_filter)
+
+    if search:
+        search_clause, search_params = build_search_clause(
+            ["first_name", "last_name", "email", "mobile", "phone"], search
+        )
+        where_parts.append(search_clause)
+        params.extend(search_params)
+
+    where = " AND ".join(where_parts)
+
+    rows, total = paginate(
+        f"SELECT * FROM applicants WHERE {where} ORDER BY created DESC",
+        f"SELECT COUNT(*) AS cnt FROM applicants WHERE {where}",
+        params, page, per_page
+    )
+
+    for r in rows:
+        bool_fields(r, "has_guarantor")
+
+    return json_success(rows, total, page, per_page)
+
+
+@banksia_os_bp.route("/applicants/<int:app_id>", methods=["GET"])
+def api_applicant_detail(app_id):
+    """Get full applicant detail with linked referencing(s) and guarantor(s)."""
+    db = get_dict_db()
+    try:
+        app = db.execute("SELECT * FROM applicants WHERE id = ?", (app_id,)).fetchone()
+        if not app:
+            return json_error("Applicant not found", 404)
+
+        bool_fields(app, "has_guarantor")
+
+        # Load referencing records (new-style referencing_forms)
+        refs = db.execute(
+            "SELECT * FROM referencing_forms WHERE applicant_id = ? ORDER BY created DESC",
+            (app_id,)
+        ).fetchall()
+        app["referencing_forms"] = refs
+
+        # Load new-style referencing_checks
+        ref_checks = db.execute(
+            "SELECT rc.* FROM referencing_checks rc "
+            "JOIN referencing_forms rf ON rf.id = rc.form_id "
+            "WHERE rf.applicant_id = ? ORDER BY rc.created DESC",
+            (app_id,)
+        ).fetchall()
+        app["referencing_checks"] = ref_checks
+
+        # Load guarantor(s)
+        gs = db.execute(
+            "SELECT * FROM guarantors WHERE applicant_id = ?", (app_id,)
+        ).fetchall()
+        app["guarantors"] = gs
+
+        return json_success(app)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/applicants", methods=["POST"])
+def api_create_applicant():
+    """Create a new applicant."""
+    data = request.get_json()
+    if not data:
+        return json_error("No data provided")
+
+    first_name = (data.get("first_name") or "").strip()
+    last_name = (data.get("last_name") or "").strip()
+    if not first_name or not last_name:
+        return json_error("first_name and last_name are required")
+
+    email = (data.get("email") or "").strip()
+    phone = (data.get("phone") or "").strip()
+    property_id = data.get("property_id")
+    unit_id = data.get("unit_id")
+    proposed_rent = data.get("proposed_rent")
+    proposed_deposit = data.get("proposed_deposit")
+    desired_move_in = data.get("desired_move_in")
+    assigned_to = (data.get("assigned_to") or "").strip()
+    notes = data.get("notes", "").strip()
+    has_guarantor = 1 if data.get("has_guarantor") else 0
+
+    db = get_dict_db()
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Validate property exists if property_id provided
+        if property_id:
+            prop = db.execute("SELECT id FROM properties WHERE id = ?", (property_id,)).fetchone()
+            if not prop:
+                return json_error(f"Property {property_id} not found", 404)
+
+        # Validate unit belongs to property if both provided
+        if property_id and unit_id:
+            unit = db.execute(
+                "SELECT id FROM units WHERE id = ? AND property_id = ?",
+                (unit_id, property_id)
+            ).fetchone()
+            if not unit:
+                return json_error(f"Unit {unit_id} does not belong to property {property_id}", 400)
+
+        branch_id = getattr(request, "current_user", {}).get("branch_id", "")
+
+        cur = db.execute(
+            "INSERT INTO applicants (first_name, last_name, email, phone, property_id, unit_id, "
+            "proposed_rent, proposed_deposit, desired_move_in, assigned_to, applicant_note, "
+            "has_guarantor, status, created, modified) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)",
+            [first_name, last_name, email, phone, property_id, unit_id,
+             proposed_rent, proposed_deposit, desired_move_in, assigned_to, notes,
+             has_guarantor, now, now]
+        )
+        db.commit()
+        new_id = cur.lastrowid
+
+        _log_activity("applicant", new_id, "created",
+                       notes=f"Applicant {first_name} {last_name} created",
+                       db=db)
+
+        app = db.execute("SELECT * FROM applicants WHERE id = ?", (new_id,)).fetchone()
+        bool_fields(app, "has_guarantor")
+        return json_success(app), 201
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/applicants/<int:app_id>", methods=["PATCH"])
+def api_update_applicant(app_id):
+    """Update applicant fields (title-safe fields only)."""
+    data = request.get_json()
+    if not data:
+        return json_error("No data provided")
+
+    db = get_dict_db()
+    try:
+        app = db.execute("SELECT * FROM applicants WHERE id = ?", (app_id,)).fetchone()
+        if not app:
+            return json_error("Applicant not found", 404)
+
+        real_cols = {r["name"] for r in db.execute("PRAGMA table_info(applicants)").fetchall()}
+        protected_keys = {"id", "arthur_id", "sync_dirty", "local_modified", "sync_origin", "pushed_at"}
+
+        set_parts = []
+        params = []
+        changed_fields = []
+
+        for key, val in data.items():
+            if key in protected_keys or key not in real_cols:
+                continue
+            old_val = app.get(key)
+            set_parts.append(f"{key} = ?")
+            params.append(val)
+            changed_fields.append((key, old_val, val))
+
+        if not set_parts:
+            return json_error("No valid fields to update")
+
+        now = datetime.now(timezone.utc).isoformat()
+        set_parts.append("modified = ?")
+        params.append(now)
+        params.append(app_id)
+
+        db.execute(f"UPDATE applicants SET {', '.join(set_parts)} WHERE id = ?", params)
+        db.commit()
+
+        for field, old_val, new_val in changed_fields:
+            _log_activity("applicant", app_id, "update",
+                           field_changed=field, old_value=str(old_val) if old_val else None,
+                           new_value=str(new_val) if new_val else None, db=db)
+
+        updated = db.execute("SELECT * FROM applicants WHERE id = ?", (app_id,)).fetchone()
+        bool_fields(updated, "has_guarantor")
+        return json_success(updated)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/applicants/<int:app_id>/status", methods=["POST"])
+def api_transition_applicant_status(app_id):
+    """Transition applicant status with validation."""
+    data = request.get_json()
+    if not data:
+        return json_error("No data provided")
+
+    new_status = (data.get("status") or "").strip().lower()
+    if not new_status:
+        return json_error("status is required")
+
+    db = get_dict_db()
+    try:
+        app = db.execute("SELECT * FROM applicants WHERE id = ?", (app_id,)).fetchone()
+        if not app:
+            return json_error("Applicant not found", 404)
+
+        current = (app.get("status") or "new").strip().lower()
+        allowed = APPLICANT_VALID_TRANSITIONS.get(current, [])
+
+        if new_status not in allowed:
+            # Also allow remaining transitions from tenancy_created state
+            if current == "approved" and new_status == "tenancy_created":
+                pass  # explicit allow
+            else:
+                return json_error(
+                    f"Cannot transition from '{current}' to '{new_status}'. "
+                    f"Allowed: {allowed or '(none)'}",
+                    400
+                )
+
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute("UPDATE applicants SET status = ?, modified = ? WHERE id = ?",
+                   (new_status, now, app_id))
+        db.commit()
+
+        _log_activity("applicant", app_id, "status_change",
+                       field_changed="status",
+                       old_value=current, new_value=new_status,
+                       notes=f"Status changed from {current} to {new_status}",
+                       db=db)
+
+        updated = db.execute("SELECT * FROM applicants WHERE id = ?", (app_id,)).fetchone()
+        bool_fields(updated, "has_guarantor")
+        return json_success(updated)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════════════════════
+# 9B. REFERENCING ENDPOINTS
+# ═══════════════════════════════════════════════════════════════
+
+@banksia_os_bp.route("/applicants/<int:app_id>/referencing", methods=["POST"])
+def api_create_referencing(app_id):
+    """Create a referencing for an applicant (links to applicant_id)."""
+    db = get_dict_db()
+    try:
+        app = db.execute("SELECT * FROM applicants WHERE id = ?", (app_id,)).fetchone()
+        if not app:
+            return json_error("Applicant not found", 404)
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Insert into referencing_forms (new-style)
+        import secrets
+        form_token = secrets.token_urlsafe(32)
+
+        cur = db.execute(
+            "INSERT INTO referencing_forms (applicant_id, form_token, status, first_name, last_name, "
+            "email, created, modified) "
+            "VALUES (?, ?, 'new', ?, ?, ?, ?, ?)",
+            [app_id, form_token, app.get("first_name", ""), app.get("last_name", ""),
+             app.get("email", ""), now, now]
+        )
+        form_id = cur.lastrowid
+
+        _log_activity("referencing_form", form_id, "created",
+                       notes=f"Referencing created for applicant #{app_id}", db=db)
+
+        ref = db.execute("SELECT * FROM referencing_forms WHERE id = ?", (form_id,)).fetchone()
+        return json_success(ref), 201
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/referencing/<int:ref_id>", methods=["GET"])
+def api_get_referencing(ref_id):
+    """Get referencing detail with forms, documents, history."""
+    db = get_dict_db()
+    try:
+        form = db.execute("SELECT * FROM referencing_forms WHERE id = ?", (ref_id,)).fetchone()
+        if not form:
+            return json_error("Referencing not found", 404)
+
+        # Attach referencing_checks
+        checks = db.execute(
+            "SELECT * FROM referencing_checks WHERE form_id = ? ORDER BY created",
+            (ref_id,)
+        ).fetchall()
+        form["checks"] = checks
+
+        # Attach referencing_documents
+        docs = db.execute(
+            "SELECT * FROM referencing_documents WHERE form_id = ? ORDER BY uploaded_at",
+            (ref_id,)
+        ).fetchall()
+        form["documents"] = docs
+
+        # Attach applicant info
+        if form.get("applicant_id"):
+            app = db.execute("SELECT id, first_name, last_name, email, phone, status FROM applicants WHERE id = ?",
+                             (form["applicant_id"],)).fetchone()
+            form["applicant"] = app
+
+        return json_success(form)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/referencing/<int:ref_id>", methods=["PATCH"])
+def api_update_referencing(ref_id):
+    """Update referencing fields."""
+    data = request.get_json()
+    if not data:
+        return json_error("No data provided")
+
+    db = get_dict_db()
+    try:
+        form = db.execute("SELECT * FROM referencing_forms WHERE id = ?", (ref_id,)).fetchone()
+        if not form:
+            return json_error("Referencing not found", 404)
+
+        real_cols = {r["name"] for r in db.execute("PRAGMA table_info(referencing_forms)").fetchall()}
+        protected_keys = {"id", "form_token", "submitted_at", "created"}
+
+        set_parts = []
+        params = []
+
+        for key, val in data.items():
+            if key in protected_keys or key not in real_cols:
+                continue
+            set_parts.append(f"{key} = ?")
+            params.append(val)
+
+        if not set_parts:
+            return json_error("No valid fields to update")
+
+        now = datetime.now(timezone.utc).isoformat()
+        set_parts.append("modified = ?")
+        params.append(now)
+        params.append(ref_id)
+
+        db.execute(f"UPDATE referencing_forms SET {', '.join(set_parts)} WHERE id = ?", params)
+        db.commit()
+
+        updated = db.execute("SELECT * FROM referencing_forms WHERE id = ?", (ref_id,)).fetchone()
+        return json_success(updated)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/referencing/<int:ref_id>/status", methods=["POST"])
+def api_transition_referencing_status(ref_id):
+    """Transition referencing status. If approved, auto-sets applicant status."""
+    data = request.get_json()
+    if not data:
+        return json_error("No data provided")
+
+    new_status = (data.get("status") or "").strip().lower()
+    if not new_status:
+        return json_error("status is required")
+
+    db = get_dict_db()
+    try:
+        form = db.execute("SELECT * FROM referencing_forms WHERE id = ?", (ref_id,)).fetchone()
+        if not form:
+            return json_error("Referencing not found", 404)
+
+        current = (form.get("status") or "new").strip().lower()
+        allowed = REFERENCING_VALID_TRANSITIONS.get(current, [])
+
+        if new_status not in allowed:
+            return json_error(
+                f"Cannot transition referencing from '{current}' to '{new_status}'. "
+                f"Allowed: {allowed or '(none)'}",
+                400
+            )
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        # If approved, set the submitted_at/reviewed_at
+        extra_updates = []
+        if new_status == "approved":
+            extra_updates.append("reviewed_at = ?")
+            extra_updates.append("reviewed_by = ?")
+            user_name = getattr(request, "current_user", {}).get("username", "system")
+            params = [now, user_name, new_status, now, ref_id]
+        else:
+            params = [new_status, now, ref_id]
+
+        if extra_updates:
+            db.execute(
+                f"UPDATE referencing_forms SET status = ?, modified = ?, {', '.join(extra_updates)} WHERE id = ?",
+                params
+            )
+        else:
+            db.execute(
+                "UPDATE referencing_forms SET status = ?, modified = ? WHERE id = ?",
+                params
+            )
+        db.commit()
+
+        _log_activity("referencing_form", ref_id, "status_change",
+                       field_changed="status",
+                       old_value=current, new_value=new_status, db=db)
+
+        # If approved, auto-set applicant status to 'approved'
+        if new_status == "approved" and form.get("applicant_id"):
+            app = db.execute("SELECT status FROM applicants WHERE id = ?",
+                             (form["applicant_id"],)).fetchone()
+            if app and app.get("status", "").strip().lower() != "approved":
+                app_current = app["status"]
+                db.execute("UPDATE applicants SET status = 'approved', modified = ? WHERE id = ?",
+                           (now, form["applicant_id"]))
+                db.commit()
+                _log_activity("applicant", form["applicant_id"], "status_change",
+                               field_changed="status",
+                               old_value=app_current, new_value="approved",
+                               notes="Auto-approved via referencing approval", db=db)
+
+        updated = db.execute("SELECT * FROM referencing_forms WHERE id = ?", (ref_id,)).fetchone()
+        return json_success(updated)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════════════════════
+# 9C. GUARANTOR ENDPOINTS
+# ═══════════════════════════════════════════════════════════════
+
+@banksia_os_bp.route("/applicants/<int:app_id>/guarantor", methods=["POST"])
+def api_create_guarantor(app_id):
+    """Create a guarantor for an applicant."""
+    data = request.get_json()
+    if not data:
+        return json_error("No data provided")
+
+    first_name = (data.get("first_name") or "").strip()
+    last_name = (data.get("last_name") or "").strip()
+    if not first_name or not last_name:
+        return json_error("guarantor first_name and last_name are required")
+
+    db = get_dict_db()
+    try:
+        app = db.execute("SELECT * FROM applicants WHERE id = ?", (app_id,)).fetchone()
+        if not app:
+            return json_error("Applicant not found", 404)
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        cur = db.execute(
+            "INSERT INTO guarantors (applicant_id, first_name, last_name, email, phone, "
+            "address, city, postcode, country, employment, income, relation, created, modified) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [app_id, first_name, last_name,
+             (data.get("email") or "").strip(),
+             (data.get("phone") or "").strip(),
+             (data.get("address") or "").strip(),
+             (data.get("city") or "").strip(),
+             (data.get("postcode") or "").strip(),
+             (data.get("country") or "").strip(),
+             (data.get("employment") or "").strip(),
+             data.get("income"),
+             (data.get("relation") or "").strip(),
+             now, now]
+        )
+        db.commit()
+        new_id = cur.lastrowid
+
+        # Update has_guarantor on applicant
+        db.execute("UPDATE applicants SET has_guarantor = 1, modified = ? WHERE id = ?",
+                   (now, app_id))
+        db.commit()
+
+        _log_activity("guarantor", new_id, "created",
+                       notes=f"Guarantor {first_name} {last_name} created for applicant #{app_id}",
+                       db=db)
+
+        g = db.execute("SELECT * FROM guarantors WHERE id = ?", (new_id,)).fetchone()
+        return json_success(g), 201
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/guarantors/<int:g_id>", methods=["GET"])
+def api_get_guarantor(g_id):
+    """Get guarantor detail."""
+    db = get_dict_db()
+    try:
+        g = db.execute("SELECT * FROM guarantors WHERE id = ?", (g_id,)).fetchone()
+        if not g:
+            return json_error("Guarantor not found", 404)
+
+        # Also load the linked applicant info
+        if g.get("applicant_id"):
+            app = db.execute("SELECT id, first_name, last_name, email FROM applicants WHERE id = ?",
+                             (g["applicant_id"],)).fetchone()
+            g["applicant"] = app
+
+        return json_success(g)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/guarantors/<int:g_id>", methods=["PATCH"])
+def api_update_guarantor(g_id):
+    """Update guarantor fields."""
+    data = request.get_json()
+    if not data:
+        return json_error("No data provided")
+
+    db = get_dict_db()
+    try:
+        g = db.execute("SELECT * FROM guarantors WHERE id = ?", (g_id,)).fetchone()
+        if not g:
+            return json_error("Guarantor not found", 404)
+
+        real_cols = {r["name"] for r in db.execute("PRAGMA table_info(guarantors)").fetchall()}
+        protected_keys = {"id", "applicant_id", "created"}
+
+        set_parts = []
+        params = []
+
+        for key, val in data.items():
+            if key in protected_keys or key not in real_cols:
+                continue
+            set_parts.append(f"{key} = ?")
+            params.append(val)
+
+        if not set_parts:
+            return json_error("No valid fields to update")
+
+        now = datetime.now(timezone.utc).isoformat()
+        set_parts.append("modified = ?")
+        params.append(now)
+        params.append(g_id)
+
+        db.execute(f"UPDATE guarantors SET {', '.join(set_parts)} WHERE id = ?", params)
+        db.commit()
+
+        updated = db.execute("SELECT * FROM guarantors WHERE id = ?", (g_id,)).fetchone()
+        return json_success(updated)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════════════════════
+# 9D. SINGLE-TRANSACTION TENANCY CREATION
+# ═══════════════════════════════════════════════════════════════
+
+@banksia_os_bp.route("/applicants/<int:app_id>/create-tenancy", methods=["POST"])
+def api_create_tenancy_from_applicant(app_id):
+    """Convert an approved applicant to a tenancy in one atomic transaction.
+
+    Creates tenancy + tenant + deposit, updates unit occupancy,
+    logs activity, and sends notifications.
+    """
+    data = request.get_json() or {}
+    override_occupancy = data.get("override_occupancy", False)
+
+    db = get_dict_db()
+    try:
+        # Begin transaction explicitly
+        db.execute("BEGIN IMMEDIATE")
+
+        # 1. Validate applicant
+        app = db.execute("SELECT * FROM applicants WHERE id = ?", (app_id,)).fetchone()
+        if not app:
+            db.execute("ROLLBACK")
+            return json_error("Applicant not found", 404)
+
+        app_status = (app.get("status") or "").strip().lower()
+        if app_status not in ("approved", "tenancy_created"):
+            db.execute("ROLLBACK")
+            return json_error(
+                f"Applicant status must be 'approved' to create tenancy, got '{app_status}'",
+                400
+            )
+
+        property_id = app.get("property_id")
+        unit_id = app.get("unit_id")
+        if not property_id or not unit_id:
+            db.execute("ROLLBACK")
+            return json_error("Applicant must have property_id and unit_id set", 400)
+
+        # Validate property exists
+        prop = db.execute("SELECT id, name FROM properties WHERE id = ?", (property_id,)).fetchone()
+        if not prop:
+            db.execute("ROLLBACK")
+            return json_error(f"Property {property_id} not found", 404)
+
+        # Validate unit exists and belongs to property
+        unit = db.execute(
+            "SELECT * FROM units WHERE id = ? AND property_id = ?",
+            (unit_id, property_id)
+        ).fetchone()
+        if not unit:
+            db.execute("ROLLBACK")
+            return json_error(f"Unit {unit_id} not found under property {property_id}", 404)
+
+        # 3. Check unit availability
+        if not override_occupancy:
+            active_tenancy = db.execute(
+                "SELECT id, status, start_date, end_date FROM tenancies "
+                "WHERE unit_id = ? AND status IN ('Active', 'active', 'Periodic', 'periodic') "
+                "LIMIT 1",
+                (unit_id,)
+            ).fetchone()
+            if active_tenancy:
+                db.execute("ROLLBACK")
+                return json_error(
+                    f"Unit {unit_id} already has an active tenancy (#{active_tenancy['id']}). "
+                    "Use override_occupancy=true to force.",
+                    409
+                )
+
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        user_name = getattr(request, "current_user", {}).get("username", "system")
+
+        first_name = app.get("first_name", "")
+        last_name = app.get("last_name", "")
+        email = app.get("email", "")
+        phone = app.get("phone", "") or app.get("mobile", "")
+        main_tenant_name = f"{first_name} {last_name}".strip()
+
+        # Determine start_date
+        start_date = app.get("desired_move_in") or now_iso[:10]
+        # end_date = start_date + 6 months
+        try:
+            from dateutil.relativedelta import relativedelta
+            start_dt = datetime.fromisoformat(start_date) if "T" in start_date else datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = start_dt + relativedelta(months=6)
+        except ImportError:
+            # Fallback: add ~182 days
+            from datetime import timedelta
+            try:
+                start_dt = datetime.fromisoformat(start_date) if "T" in start_date else datetime.strptime(start_date, "%Y-%m-%d")
+            except (ValueError, TypeError):
+                start_dt = now
+            end_dt = start_dt + timedelta(days=182)
+        end_date = end_dt.strftime("%Y-%m-%d")
+        rent_amount = app.get("proposed_rent")
+        deposit_amount = app.get("proposed_deposit")
+
+        # 4. Create tenancy record
+        tenancy_cur = db.execute(
+            "INSERT INTO tenancies (property_id, unit_id, main_tenant_name, status, "
+            "start_date, end_date, rent_amount, rent_frequency, created, modified) "
+            "VALUES (?, ?, ?, 'active', ?, ?, ?, 'pcm', ?, ?)",
+            [property_id, unit_id, main_tenant_name, start_date, end_date,
+             rent_amount, now_iso, now_iso]
+        )
+        tenancy_id = tenancy_cur.lastrowid
+
+        _log_activity("tenancy", tenancy_id, "created",
+                       notes=f"Tenancy created from applicant #{app_id} ({main_tenant_name})",
+                       db=db)
+
+        # 5. Create tenant record
+        tenant_cur = db.execute(
+            "INSERT INTO tenants (first_name, last_name, email, phone_home, mobile, "
+            "property_id, unit_id, tenancy_id, main_tenant, status, created, modified) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'active', ?, ?)",
+            [first_name, last_name, email, phone, phone,
+             property_id, unit_id, tenancy_id, now_iso, now_iso]
+        )
+        tenant_id = tenant_cur.lastrowid
+
+        _log_activity("tenant", tenant_id, "created",
+                       notes=f"Tenant {main_tenant_name} created from applicant #{app_id}",
+                       db=db)
+
+        # 6. Create deposit record
+        dep_cur = db.execute(
+            "INSERT INTO deposits (tenancy_id, tenant_id, unit_id, property_id, "
+            "amount, current_status, protection_status, date_received, created, modified) "
+            "VALUES (?, ?, ?, ?, ?, 'held', 'unprotected', ?, ?, ?)",
+            [tenancy_id, tenant_id, unit_id, property_id,
+             deposit_amount or 0, start_date, now_iso, now_iso]
+        )
+        deposit_id = dep_cur.lastrowid
+
+        _log_activity("deposit", deposit_id, "created",
+                       notes=f"Deposit of {deposit_amount} created for tenancy #{tenancy_id}",
+                       db=db)
+
+        # 7. Update applicant status to 'tenancy_created'
+        old_app_status = app.get("status", "")
+        db.execute("UPDATE applicants SET status = 'tenancy_created', modified = ? WHERE id = ?",
+                   (now_iso, app_id))
+
+        _log_activity("applicant", app_id, "status_change",
+                       field_changed="status",
+                       old_value=old_app_status, new_value="tenancy_created",
+                       notes="Status updated to tenancy_created via tenancy creation", db=db)
+
+        # 8. Update referencing status to 'tenancy_created' if referencing exists
+        refs = db.execute(
+            "SELECT id, status FROM referencing_forms WHERE applicant_id = ? AND status NOT IN ('tenancy_created', 'withdrawn')",
+            (app_id,)
+        ).fetchall()
+        for ref in refs:
+            old_ref_status = ref["status"]
+            db.execute("UPDATE referencing_forms SET status = 'tenancy_created', modified = ? WHERE id = ?",
+                       (now_iso, ref["id"]))
+            _log_activity("referencing_form", ref["id"], "status_change",
+                           field_changed="status",
+                           old_value=old_ref_status, new_value="tenancy_created", db=db)
+
+        # 9. Update unit occupancy
+        is_occupied = False
+        if start_date and start_date <= now_iso[:10]:
+            unit_status_map = {
+                "available": "Occupied",
+                "Available": "Occupied",
+                "Available To Let": "Occupied",
+                "Let": "Occupied",
+            }
+            new_unit_status = unit_status_map.get(unit.get("unit_status", ""), "Occupied")
+            db.execute(
+                "UPDATE units SET unit_status = ?, unit_vacant = 0, status = ?, modified = ? WHERE id = ?",
+                (new_unit_status, "occupied", now_iso, unit_id)
+            )
+            is_occupied = True
+
+        _log_activity("unit", unit_id, "updated",
+                       field_changed="unit_status",
+                       old_value=unit.get("unit_status", ""),
+                       new_value="Occupied" if is_occupied else unit.get("unit_status", ""),
+                       notes="Unit occupied via tenancy creation" if is_occupied else "Unit linked to new tenancy",
+                       db=db)
+
+        # 10. Create notifications
+        notify_message = (
+            f"Tenancy created for {main_tenant_name} — "
+            f"tenancy #{tenancy_id}, unit #{unit_id}"
+        )
+        notify_link = f"/banksia-os?entity=tenancies&id={tenancy_id}"
+
+        # Notify assigned_to
+        assigned_to = app.get("assigned_to", "").strip()
+        notified = set()
+        if assigned_to:
+            create_notification(assigned_to, notify_message, notify_link)
+            notified.add(assigned_to)
+
+        # Notify super_admins
+        super_admins = ["Sami", "Roo", "Norbert", "Sadman"]
+        for sa in super_admins:
+            if sa not in notified:
+                create_notification(sa, notify_message, notify_link)
+                notified.add(sa)
+
+        db.commit()
+
+        # 11. Fetch and return results using a fresh connection
+        db2 = get_dict_db()
+        try:
+            tenancy = db2.execute("SELECT * FROM tenancies WHERE id = ?", (tenancy_id,)).fetchone()
+            tenant = db2.execute("SELECT * FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
+            deposit = db2.execute("SELECT * FROM deposits WHERE id = ?", (deposit_id,)).fetchone()
+        finally:
+            db2.close()
+
+        return json_success({
+            "tenancy_id": tenancy_id,
+            "tenant_id": tenant_id,
+            "deposit_id": deposit_id,
+            "tenancy": tenancy,
+            "tenant": tenant,
+            "deposit": deposit,
+        })
+    except Exception as e:
+        db.execute("ROLLBACK")
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════════════════════
+# 9E. UNIT OCCUPANCY CHECK
+# ═══════════════════════════════════════════════════════════════
+
+@banksia_os_bp.route("/units/<int:unit_id>/occupancy", methods=["GET"])
+def api_unit_occupancy(unit_id):
+    """Check if a unit is available for a new tenancy.
+
+    Returns:
+        - is_available: boolean
+        - current_tenancy: active/perodic tenancy on this unit, or null
+        - next_tenancy: upcoming tenancy (future start_date), or null
+        - future_tenancies: all future/recent tenancies
+    """
+    db = get_dict_db()
+    try:
+        unit = db.execute("SELECT * FROM units WHERE id = ?", (unit_id,)).fetchone()
+        if not unit:
+            return json_error("Unit not found", 404)
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        # Current active/periodic tenancy
+        current = db.execute(
+            "SELECT * FROM tenancies WHERE unit_id = ? AND status IN ('Active', 'active', 'Periodic', 'periodic') "
+            "ORDER BY start_date DESC LIMIT 1",
+            (unit_id,)
+        ).fetchone()
+
+        # Future tenancies (future start_date)
+        future = db.execute(
+            "SELECT * FROM tenancies WHERE unit_id = ? AND start_date > ? AND status NOT IN ('ended', 'Ended', 'cancelled', 'Cancelled') "
+            "ORDER BY start_date ASC",
+            (unit_id, now_iso[:10])
+        ).fetchall()
+
+        # Next tenancy (closest future)
+        next_tenancy = future[0] if future else None
+
+        # Also check tenant count
+        tenant_count = db.execute(
+            "SELECT COUNT(*) AS cnt FROM tenants WHERE unit_id = ? AND status = 'active'",
+            (unit_id,)
+        ).fetchone()["cnt"]
+
+        is_available = current is None and tenant_count == 0
+
+        return json_success({
+            "is_available": is_available,
+            "unit": {
+                "id": unit["id"],
+                "unit_ref": unit.get("unit_ref"),
+                "unit_status": unit.get("unit_status"),
+                "unit_vacant": bool(unit.get("unit_vacant")),
+            },
+            "current_tenancy": current,
+            "next_tenancy": next_tenancy,
+            "future_tenancies": future,
+        })
     except Exception as e:
         return json_error(str(e), 500)
     finally:

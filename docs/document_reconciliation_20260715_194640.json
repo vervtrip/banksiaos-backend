@@ -1,0 +1,32 @@
+{
+  "generated": "2026-07-15T19:46:40.611278+00:00",
+  "summary": {
+    "total": 1,
+    "linked": 0,
+    "resolved": 1,
+    "ambiguous": 0,
+    "unmatched": 0,
+    "no_ref": 0
+  },
+  "categories": {
+    "linked": [],
+    "resolved": [
+      {
+        "id": 1,
+        "filename": "test_doc.txt",
+        "related_to": "tenant",
+        "related_id": "3138",
+        "entity_id": 3138,
+        "property_id": 308276,
+        "unit_id": 710378,
+        "tenancy_id": 2742,
+        "tenant_id": 3138,
+        "applicant_id": null,
+        "reason": "Resolved to internal tenant#3138"
+      }
+    ],
+    "ambiguous": [],
+    "unmatched": [],
+    "no_ref": []
+  }
+}

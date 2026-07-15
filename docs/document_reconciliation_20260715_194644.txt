@@ -1,0 +1,21 @@
+Document Reconciliation Report
+Generated: 2026-07-15T19:46:44.715862+00:00
+================================================================================
+
+Total documents in DB: 1
+
+─── CLASSIFICATION ───
+  LINKED:    1
+  RESOLVED:  0
+  AMBIGUOUS: 0
+  UNMATCHED: 0
+  NO_REF:    0
+  TOTAL:     1
+
+================================================================================
+
+
+================================================================================
+Category: LINKED (1 items)
+================================================================================
+  ID=1 | filename=test_doc.txt | related_to=tenant | related_id=3138 | reason=Already resolved in previous run
