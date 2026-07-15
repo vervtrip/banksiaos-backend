@@ -13,7 +13,12 @@
   "Roo": {
     "password": "Roomanager123@",
     "role": "super_admin",
-    "email": "roo@vervrooms.com"
+    "email": "roo@vervrooms.com",
+    "phone": "",
+    "date_of_birth": "",
+    "biography": "COO",
+    "department": "",
+    "position": ""
   },
   "Sadman": {
     "password": "Sadmanops123@",

@@ -99,6 +99,15 @@ def int_param(val, default=1):
         return default
 
 
+def float_param(val):
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
 def build_search_clause(fields, search_term):
     """Build a WHERE clause fragment for searching across multiple TEXT fields."""
     if not search_term:
@@ -883,7 +892,8 @@ def api_maintenance_job(job_id):
             "address", "contractor", "labour_cost", "materials_cost",
             "bill_ll", "ll_informed", "ll_informed_via", "ll_notes",
             "emergency", "reporter_name", "reporter_email", "photo_paths",
-            "invoice_paths", "team_notes", "start_date", "completed_date"
+            "invoice_paths", "team_notes", "start_date", "completed_date",
+            "property_id", "unit"
         ]
         updates = []
         params = []
@@ -1385,6 +1395,9 @@ def api_properties():
     page = int_param(request.args.get("page"))
     per_page = int_param(request.args.get("per_page"), 20)
     search = request.args.get("search", "").strip()
+    occ_filter = request.args.get("occupancy", "").strip().lower()
+    rent_min = float_param(request.args.get("rent_min"))
+    rent_max = float_param(request.args.get("rent_max"))
 
     base_where = "1=1"
     base_params = []
@@ -1396,16 +1409,45 @@ def api_properties():
         base_where = search_clause
         base_params = search_params
 
-    rows, total = paginate(
-        f"SELECT *, "
-        f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id) AS actual_units, "
-        f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id AND u.unit_vacant = 0) AS occupied_units, "
-        f"COALESCE((SELECT SUM(t.rent_amount) FROM tenancies t WHERE t.property_id = properties.id AND t.status IN ('Current','current','Periodic','periodic','Active','active')), 0) AS monthly_rent, "
-        f"CASE WHEN (SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id AND u.unit_vacant = 0) > 0 THEN 'Active' ELSE 'Vacant' END AS property_status "
-        f"FROM properties WHERE {base_where} ORDER BY ref ASC",
-        f"SELECT COUNT(*) AS cnt FROM properties WHERE {base_where}",
-        base_params, page, per_page
-    )
+    # Occupancy filter via HAVING on derived columns
+    occ_having = ""
+    if occ_filter == "vacant":
+        occ_having = "HAVING occupied_units = 0 OR occupied_units IS NULL"
+    elif occ_filter == "full":
+        occ_having = "HAVING occupied_units = total_units AND occupied_units > 0"
+    elif occ_filter == "partial":
+        occ_having = "HAVING occupied_units > 0 AND occupied_units < total_units"
+
+    # Rent range filter
+    rent_having = ""
+    if rent_min is not None:
+        rent_having = f"HAVING monthly_rent >= {rent_min}"
+        if rent_max is not None and rent_max < float('inf'):
+            rent_having = f"HAVING monthly_rent >= {rent_min} AND monthly_rent <= {rent_max}"
+
+    # Combine HAVING clauses
+    combined_having = ""
+    if occ_having or rent_having:
+        parts = [h for h in [occ_having, rent_having] if h]
+        combined_having = parts[0].replace("HAVING", "HAVING ", 1)
+        for h in parts[1:]:
+            combined_having += " AND " + h.replace("HAVING ", "", 1)
+
+    base_query = f"SELECT *, " \
+        f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id) AS actual_units, " \
+        f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id AND u.unit_vacant = 0) AS occupied_units, " \
+        f"COALESCE((SELECT SUM(t.rent_amount) FROM tenancies t WHERE t.property_id = properties.id AND t.status IN ('Current','current','Periodic','periodic','Active','active')), 0) AS monthly_rent, " \
+        f"CASE WHEN (SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id AND u.unit_vacant = 0) > 0 THEN 'Active' ELSE 'Vacant' END AS property_status " \
+        f"FROM properties WHERE {base_where}"
+
+    if combined_having:
+        base_query += f" {combined_having}"
+
+    base_query += " ORDER BY ref ASC"
+
+    count_query = f"SELECT COUNT(*) AS cnt FROM properties WHERE {base_where}"
+
+    rows, total = paginate(base_query, count_query, base_params, page, per_page)
 
     return json_success(rows, total, page, per_page)
 
@@ -1521,6 +1563,25 @@ def api_property(prop_id):
             (prop_id,)
         ).fetchall()
         prop["activity"] = [clean_none(dict(r)) for r in activity]
+
+        # ── Images ──
+        images = db.execute(
+            "SELECT pi.id, pi.property_id, pi.unit_id, pi.image_url, pi.caption, "
+            "pi.category, pi.sort_order, pi.created_at, "
+            "u.unit_ref "
+            "FROM property_images pi "
+            "LEFT JOIN units u ON pi.unit_id = u.id "
+            "WHERE pi.property_id = ? "
+            "ORDER BY pi.sort_order ASC, pi.id ASC",
+            (prop_id,)
+        ).fetchall()
+        img_list = []
+        for img in images:
+            d = dict(img)
+            d["url"] = d.pop("image_url")
+            d["thumbnail_url"] = d["url"]
+            img_list.append(d)
+        prop["images"] = img_list
 
         return json_success(prop)
     except Exception as e:
@@ -2654,46 +2715,35 @@ def api_bulk_create_units(prop_id):
 # 2h. PROPERTY IMAGES — list images for a property
 # ═══════════════════════════════════════════════
 
-@banksia_os_bp.route("/properties/<int:prop_id>/images")
+@banksia_os_bp.route("/properties/<int:prop_id>/images", methods=["GET"])
 def api_property_images(prop_id):
     db = get_dict_db()
     try:
         # Check property exists
-        prop = db.execute("SELECT id, image_urls, main_image_url FROM properties WHERE id = ?", (prop_id,)).fetchone()
+        prop = db.execute("SELECT id FROM properties WHERE id = ?", (prop_id,)).fetchone()
         if not prop:
             return json_error("Property not found", 404)
 
-        # Try property_images table first
+        # Return images with unit_ref joined in
         images = db.execute(
-            "SELECT id, category, image_url, caption, sort_order FROM property_images "
-            "WHERE property_id = ? ORDER BY sort_order ASC, id ASC",
+            "SELECT pi.id, pi.property_id, pi.unit_id, pi.image_url, pi.caption, "
+            "pi.category, pi.sort_order, pi.created_at, "
+            "u.unit_ref "
+            "FROM property_images pi "
+            "LEFT JOIN units u ON pi.unit_id = u.id "
+            "WHERE pi.property_id = ? "
+            "ORDER BY pi.sort_order ASC, pi.id ASC",
             (prop_id,)
         ).fetchall()
 
-        # If no images in property_images table, parse image_urls JSON
-        if not images and prop.get("image_urls"):
-            try:
-                urls = json.loads(prop["image_urls"])
-                if isinstance(urls, list):
-                    images = [{"id": None, "category": None, "image_url": u, "caption": None, "sort_order": i}
-                              for i, u in enumerate(urls) if isinstance(u, str)]
-                elif isinstance(urls, dict):
-                    images = [{"id": None, "category": k, "image_url": v if isinstance(v, str) else (v[0] if isinstance(v, list) else ""),
-                               "caption": None, "sort_order": i}
-                              for i, (k, v) in enumerate(urls.items())]
-            except (json.JSONDecodeError, TypeError):
-                pass
+        result = []
+        for img in images:
+            d = dict(img)
+            d["url"] = d.pop("image_url")
+            d["thumbnail_url"] = d["url"]
+            result.append(d)
 
-        # Also include main_image_url if available
-        if prop.get("main_image_url") and not any(
-            img.get("image_url") == prop["main_image_url"] for img in images
-        ):
-            images.insert(0, {
-                "id": None, "category": "main", "image_url": prop["main_image_url"],
-                "caption": "Main image", "sort_order": -1
-            })
-
-        return json_success(images)
+        return json_success(result)
     except Exception as e:
         return json_error(str(e), 500)
     finally:
@@ -3674,6 +3724,7 @@ def api_referencing():
     page = int_param(request.args.get("page"))
     per_page = int_param(request.args.get("per_page"), 20)
     search = request.args.get("search", "").strip()
+    status_filter = request.args.get("status", "").strip()
 
     where_parts = ["1=1"]
     params = []
@@ -3685,13 +3736,29 @@ def api_referencing():
         where_parts.append(search_clause)
         params.extend(search_params)
 
+    if status_filter:
+        # Map frontend 'new' status to DB 'draft'
+        db_status = status_filter
+        if db_status == "new":
+            db_status = "draft"
+        # Allow comma-separated status filter
+        statuses = [s.strip() for s in db_status.split(",")]
+        placeholders = ",".join("?" * len(statuses))
+        where_parts.append(f"rf.status IN ({placeholders})")
+        params.extend(statuses)
+
     where = " AND ".join(where_parts)
 
     query = (
         "SELECT rf.id, rf.first_name, rf.last_name, rf.email, rf.status, "
         "rf.created, rf.submitted_at, "
+        "COALESCE(p.name, '') AS property_name, "
+        "COALESCE(u.unit_ref, '') AS unit_ref, "
         "'' AS assigned_to "
         "FROM referencing_forms rf "
+        "LEFT JOIN applicants a ON rf.applicant_id = a.id "
+        "LEFT JOIN properties p ON a.property_id = p.id "
+        "LEFT JOIN units u ON a.unit_id = u.id "
         f"WHERE {where} ORDER BY rf.created DESC"
     )
 
@@ -3702,6 +3769,11 @@ def api_referencing():
         total = db.execute(count_query, params).fetchone()["cnt"]
         offset = (page - 1) * per_page
         rows = db.execute(query + " LIMIT ? OFFSET ?", params + [per_page, offset]).fetchall()
+
+        # Map DB status 'draft' to frontend 'new' in rows
+        for row in rows:
+            if row["status"] == "draft":
+                row["status"] = "new"
 
         stats = db.execute("""
             SELECT
@@ -3720,13 +3792,6 @@ def api_referencing():
         return json_error(str(e), 500)
     finally:
         db.close()
-
-
-@banksia_os_bp.route("/referencing/<int:ref_id>")
-def api_referencing_detail(ref_id):
-    """Get full referencing detail — merged duplicate of the GET endpoint."""
-    from flask import redirect as _rd
-    return _rd(f"/api/banksia-os/referencing/{ref_id}")
 
 
 # ═══════════════════════════════════════════════
@@ -5648,51 +5713,58 @@ def api_access_available():
 MEDIA_ROOT = os.path.join(os.path.dirname(__file__), "media")
 
 
-@banksia_os_bp.route("/properties/<int:prop_id>/images/upload", methods=["POST"])
+@banksia_os_bp.route("/properties/<int:prop_id>/images", methods=["POST"])
 def api_property_image_upload(prop_id):
-    """Upload an image for a property."""
+    """Upload an image for a property. Expects multipart/form-data with 'file' field."""
     db = get_dict_db()
     try:
-        # Verify property exists
         prop = db.execute("SELECT id FROM properties WHERE id = ?", (prop_id,)).fetchone()
         if not prop:
             return json_error("Property not found", 404)
 
-        if "image" not in request.files:
-            return json_error("No image file provided (use field 'image')")
+        if "file" not in request.files:
+            return json_error("No image file provided (use field 'file')")
 
-        file = request.files["image"]
+        file = request.files["file"]
         if file.filename == "":
             return json_error("Empty filename")
 
-        category = request.form.get("category", "")
+        unit_id = request.form.get("unit_id", type=int) or None
+        caption = request.form.get("caption", "").strip()
 
         # Ensure upload directory exists
         prop_dir = os.path.join(MEDIA_ROOT, "properties", str(prop_id))
         os.makedirs(prop_dir, exist_ok=True)
 
-        # Sanitize filename
-        safe_name = f"{int(datetime.now().timestamp())}_{file.filename.replace(' ', '_')}"
+        # Sanitize filename — preserve extension
+        orig_name = file.filename
+        ext = os.path.splitext(orig_name)[1] or ""
+        safe_name = f"{int(datetime.now().timestamp())}_{abs(hash(orig_name)) % 100000}{ext}"
         filepath = os.path.join(prop_dir, safe_name)
         file.save(filepath)
+
+        # File metadata
+        file_size = os.path.getsize(filepath)
+        mime_type = file.content_type or "image/jpeg"
+        uploaded_by = (request.current_user or {}).get("username", "") if hasattr(request, "current_user") else ""
 
         # Record in property_images table
         image_url = f"/api/banksia-os/media/properties/{prop_id}/{safe_name}"
         db.execute(
-            "INSERT INTO property_images (property_id, category, image_url, caption) "
-            "VALUES (?, ?, ?, ?)",
-            (prop_id, category, image_url, "Uploaded image")
+            "INSERT INTO property_images (property_id, unit_id, image_url, caption, category, sort_order, created_at) "
+            "VALUES (?, ?, ?, ?, '', 0, datetime('now'))",
+            (prop_id, unit_id, image_url, caption or "Uploaded image")
         )
         db.commit()
         image_id = db.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
 
-        return json_success({
-            "id": image_id,
-            "filename": safe_name,
-            "url": image_url,
-            "category": category,
-            "path": filepath,
-        })
+        # Return full record
+        img = db.execute(
+            "SELECT id, property_id, unit_id, image_url, caption, category, created_at FROM property_images WHERE id = ?",
+            (image_id,)
+        ).fetchone()
+
+        return json_success(dict(img))
     except Exception as e:
         return json_error(str(e), 500)
     finally:
@@ -5718,34 +5790,87 @@ def api_serve_property_image(prop_id, filename):
     return send_file(filepath)
 
 
-@banksia_os_bp.route("/properties/<int:prop_id>/images/<filename>", methods=["DELETE"])
-def api_property_image_delete(prop_id, filename):
-    """Delete an uploaded property image."""
-    prop_dir = os.path.join(MEDIA_ROOT, "properties", str(prop_id))
-    filepath = os.path.join(prop_dir, filename)
-
-    # Prevent directory traversal
-    real_path = os.path.realpath(filepath)
-    real_base = os.path.realpath(prop_dir)
-    if not real_path.startswith(real_base):
-        return json_error("Invalid path", 403)
-
-    if not os.path.exists(filepath):
-        return json_error("Image not found", 404)
+@banksia_os_bp.route("/properties/images/<int:img_id>", methods=["PATCH"])
+def api_property_image_patch(img_id):
+    """PATCH /api/banksia-os/properties/images/:img_id — update image metadata (unit_id, caption)."""
+    data = request.get_json(silent=True)
+    if not data:
+        return json_error("No data provided", 400)
 
     db = get_dict_db()
     try:
-        os.remove(filepath)
+        img = db.execute("SELECT * FROM property_images WHERE id = ?", (img_id,)).fetchone()
+        if not img:
+            return json_error("Image not found", 404)
 
-        # Remove database record matching this image path
-        image_url = f"/api/banksia-os/media/properties/{prop_id}/{filename}"
+        allowed = {"unit_id", "caption"}
+        updates = {}
+        for k in allowed:
+            if k in data:
+                updates[k] = data[k]
+
+        if not updates:
+            return json_success({"msg": "No changes"})
+
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        vals = list(updates.values()) + [img_id]
+
         db.execute(
-            "DELETE FROM property_images WHERE property_id = ? AND image_url = ?",
-            (prop_id, image_url)
+            f"UPDATE property_images SET {set_clause} WHERE id = ?",
+            vals
         )
         db.commit()
 
-        return json_success({"deleted": filename})
+        # Return updated record with unit_ref
+        updated = db.execute(
+            "SELECT pi.id, pi.property_id, pi.unit_id, pi.image_url, pi.caption, "
+            "pi.category, pi.sort_order, pi.created_at, "
+            "u.unit_ref "
+            "FROM property_images pi "
+            "LEFT JOIN units u ON pi.unit_id = u.id "
+            "WHERE pi.id = ?",
+            (img_id,)
+        ).fetchone()
+
+        d = dict(updated)
+        d["url"] = d.pop("image_url")
+        d["thumbnail_url"] = d["url"]
+
+        return json_success(d)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/properties/images/<int:img_id>", methods=["DELETE"])
+def api_property_image_delete(img_id):
+    """DELETE /api/banksia-os/properties/images/:img_id — delete image and file."""
+    db = get_dict_db()
+    try:
+        img = db.execute("SELECT * FROM property_images WHERE id = ?", (img_id,)).fetchone()
+        if not img:
+            return json_error("Image not found", 404)
+
+        # Delete physical file
+        image_url = img.get("image_url", "")
+        if image_url and image_url.startswith("/api/banksia-os/media/properties/"):
+            parts = image_url.split("/")
+            if len(parts) >= 7:
+                prop_id_str = parts[-2]
+                filename = parts[-1]
+                try:
+                    prop_id_val = int(prop_id_str)
+                    filepath = os.path.join(MEDIA_ROOT, "properties", str(prop_id_val), filename)
+                    if os.path.exists(filepath):
+                        os.remove(filepath)
+                except (ValueError, OSError):
+                    pass
+
+        db.execute("DELETE FROM property_images WHERE id = ?", (img_id,))
+        db.commit()
+
+        return json_success({"deleted": img_id})
     except Exception as e:
         return json_error(str(e), 500)
     finally:
@@ -6687,6 +6812,28 @@ def api_get_referencing(ref_id):
         if not form:
             return json_error("Referencing not found", 404)
 
+        # Map DB draft → frontend new
+        if form.get("status") == "draft":
+            form["status"] = "new"
+
+        # Attach property info via applicant → unit → property chain
+        property_name = ""
+        unit_ref = ""
+        if form.get("applicant_id"):
+            app_info = db.execute(
+                "SELECT p.name AS pname, u.unit_ref AS uref "
+                "FROM applicants a "
+                "LEFT JOIN units u ON a.unit_id = u.id "
+                "LEFT JOIN properties p ON u.property_id = p.id "
+                "WHERE a.id = ?",
+                (form["applicant_id"],)
+            ).fetchone()
+            if app_info:
+                property_name = app_info["pname"] or ""
+                unit_ref = app_info["uref"] or ""
+        form["property_name"] = property_name
+        form["unit_ref"] = unit_ref
+
         # Attach referencing_checks
         checks = db.execute(
             "SELECT * FROM referencing_checks WHERE form_id = ? ORDER BY created",
@@ -6752,6 +6899,23 @@ def api_update_referencing(ref_id):
 
         updated = db.execute("SELECT * FROM referencing_forms WHERE id = ?", (ref_id,)).fetchone()
         return json_success(updated)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/referencing/<int:ref_id>", methods=["DELETE"])
+def api_delete_referencing(ref_id):
+    """Delete a referencing record."""
+    db = get_dict_db()
+    try:
+        form = db.execute("SELECT id FROM referencing_forms WHERE id = ?", (ref_id,)).fetchone()
+        if not form:
+            return json_error("Referencing not found", 404)
+        db.execute("DELETE FROM referencing_forms WHERE id = ?", (ref_id,))
+        db.commit()
+        return json_success({"deleted": ref_id})
     except Exception as e:
         return json_error(str(e), 500)
     finally:

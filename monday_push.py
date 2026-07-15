@@ -42,53 +42,53 @@ def push_job_status(job):
     label = job.get("status") or "PENDING"
     col_id = STATUS_INDEX.get(label)
     if col_id is not None:
-        column_values["status"] = json.dumps({"index": col_id})
+        column_values["status"] = {"index": col_id}
 
     # Priority
     pri_label = job.get("priority") or "Medium"
     pri_idx = PRIORITY_INDEX.get(pri_label)
     if pri_idx is not None:
-        column_values["color_mm0p8qna"] = json.dumps({"index": pri_idx})
+        column_values["color_mm0p8qna"] = {"index": pri_idx}
 
     # Type
     type_label = job.get("type") or ""
     if type_label and type_label in TYPE_INDEX:
-        column_values["color_mm0vfxmq"] = json.dumps({"index": TYPE_INDEX[type_label]})
+        column_values["color_mm0vfxmq"] = {"index": TYPE_INDEX[type_label]}
 
     # Address
     addr = job.get("address") or ""
     if addr:
-        column_values["short_text041ydfbp"] = json.dumps(addr)
+        column_values["short_text041ydfbp"] = addr
 
     # Contractor
     con_label = job.get("contractor") or ""
     if con_label and con_label in CONTRACTOR_INDEX:
-        column_values["color_mm0p4947"] = json.dumps({"index": CONTRACTOR_INDEX[con_label]})
+        column_values["color_mm0p4947"] = {"index": CONTRACTOR_INDEX[con_label]}
 
     # Labour cost
     lc = job.get("labour_cost")
     if lc:
-        column_values["numeric_mm0pndmj"] = json.dumps(str(lc))
+        column_values["numeric_mm0pndmj"] = str(lc)
 
     # Materials cost
     mc = job.get("materials_cost")
     if mc:
-        column_values["numeric_mm0p7jdn"] = json.dumps(str(mc))
+        column_values["numeric_mm0p7jdn"] = str(mc)
 
     # Bill LL
     bl = job.get("bill_ll")
     if bl is not None:
-        column_values["boolean_mm0phkaq"] = json.dumps({"checked": bool(bl)})
+        column_values["boolean_mm0phkaq"] = {"checked": bool(bl)}
 
     # Emergency
     em = job.get("emergency")
     if em is not None:
-        column_values["boolean2hbqq7ey"] = json.dumps({"checked": bool(em)})
+        column_values["boolean2hbqq7ey"] = {"checked": bool(em)}
 
     # Reporter name
     rn = job.get("reporter_name") or ""
     if rn:
-        column_values["short_textcvckh2h3"] = json.dumps(rn)
+        column_values["short_textcvckh2h3"] = rn
 
     if not column_values:
         return False, "no changes"
