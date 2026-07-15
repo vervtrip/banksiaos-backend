@@ -7245,3 +7245,528 @@ def api_unit_occupancy(unit_id):
         return json_error(str(e), 500)
     finally:
         db.close()
+
+
+# ═══════════════════════════════════════════════════════════════
+# 9F. GLOBAL SEARCH
+# ═══════════════════════════════════════════════════════════════
+
+
+@banksia_os_bp.route("/search", methods=["GET"])
+def global_search():
+    """
+    Global search across all entity types.
+
+    GET /api/banksia-os/search?q=4+Studd&limit=10
+
+    Searches properties, units, tenants, applicants, tenancies,
+    guarantors, property_owners, maintenance_jobs, documents, and invoices.
+    Returns grouped results with type/id/label/url/match/parent for each hit.
+    """
+    q_raw = request.args.get("q", "").strip()
+    limit_per_type = request.args.get("limit", 5, type=int)
+    if limit_per_type < 1:
+        limit_per_type = 5
+    if limit_per_type > 50:
+        limit_per_type = 50
+
+    if not q_raw:
+        return jsonify({
+            "success": True,
+            "data": {
+                "query": "",
+                "total": 0,
+                "results": [],
+                "grouped": {},
+            }
+        })
+
+    like = f"%{q_raw}%"
+    db = get_dict_db()
+
+    results = []
+    grouped = {}
+
+    def add_result(etype, eid, label, url, match, parent=None):
+        entry = {
+            "type": etype,
+            "id": eid,
+            "label": label,
+            "url": url,
+            "match": match,
+        }
+        if parent:
+            entry["parent"] = parent
+        results.append(entry)
+        grouped.setdefault(etype, []).append(entry)
+
+    try:
+        # ── Properties ──
+        rows = db.execute(
+            """SELECT id, name, address_line_1, address_line_2, city, postcode, property_ref
+               FROM properties
+               WHERE name LIKE ? OR address_line_1 LIKE ? OR address_line_2 LIKE ?
+                     OR city LIKE ? OR postcode LIKE ? OR property_ref LIKE ?
+               LIMIT ?""",
+            (like, like, like, like, like, like, limit_per_type)
+        ).fetchall()
+        for r in rows:
+            label = r["name"] or r["address_line_1"] or r["property_ref"] or f"Property #{r['id']}"
+            if r["address_line_1"] and r["city"]:
+                label = f"{label}, {r['city']}"
+            match_field = "name"
+            if not (r["name"] and q_raw.lower() in r["name"].lower()):
+                if r["address_line_1"] and q_raw.lower() in r["address_line_1"].lower():
+                    match_field = "address_line_1"
+                elif r["address_line_2"] and q_raw.lower() in r["address_line_2"].lower():
+                    match_field = "address_line_2"
+                elif r["city"] and q_raw.lower() in r["city"].lower():
+                    match_field = "city"
+                elif r["postcode"] and q_raw.lower() in r["postcode"].lower():
+                    match_field = "postcode"
+                else:
+                    match_field = "property_ref"
+            add_result("property", r["id"], label, f"/properties/{r['id']}", match_field)
+
+        # ── Units ──
+        rows = db.execute(
+            """SELECT u.id, u.unit_ref, u.property_id, p.name AS pname, p.address_line_1 AS paddr
+               FROM units u LEFT JOIN properties p ON u.property_id = p.id
+               WHERE u.unit_ref LIKE ?
+               LIMIT ?""",
+            (like, limit_per_type)
+        ).fetchall()
+        for r in rows:
+            parent_label = r["pname"] or r["paddr"] or f"Property #{r['property_id']}" if r["property_id"] else None
+            parent = None
+            if r["property_id"]:
+                parent = {"type": "property", "id": r["property_id"], "label": parent_label}
+            add_result("unit", r["id"], r["unit_ref"] or f"Unit #{r['id']}",
+                       f"/units/{r['id']}", "unit_ref", parent)
+
+        # ── Tenants ──
+        rows = db.execute(
+            """SELECT t.id, t.first_name, t.last_name, t.email, t.phone_home, t.mobile,
+                      t.property_id, p.name AS pname, p.address_line_1 AS paddr
+               FROM tenants t LEFT JOIN properties p ON t.property_id = p.id
+               WHERE t.first_name LIKE ? OR t.last_name LIKE ? OR t.email LIKE ?
+                     OR t.phone_home LIKE ? OR t.mobile LIKE ?
+               LIMIT ?""",
+            (like, like, like, like, like, limit_per_type)
+        ).fetchall()
+        for r in rows:
+            label = f"{r['first_name'] or ''} {r['last_name'] or ''}".strip() or f"Tenant #{r['id']}"
+            match_field = "first_name"
+            if not (r["first_name"] and q_raw.lower() in r["first_name"].lower()):
+                if r["last_name"] and q_raw.lower() in r["last_name"].lower():
+                    match_field = "last_name"
+                elif r["email"] and q_raw.lower() in r["email"].lower():
+                    match_field = "email"
+                elif r["phone_home"] and q_raw.lower() in r["phone_home"].lower():
+                    match_field = "phone_home"
+                else:
+                    match_field = "mobile"
+            parent_label = r["pname"] or r["paddr"] or f"Property #{r['property_id']}" if r["property_id"] else None
+            parent = None
+            if r["property_id"]:
+                parent = {"type": "property", "id": r["property_id"], "label": parent_label}
+            add_result("tenant", r["id"], label, f"/tenants/{r['id']}", match_field, parent)
+
+        # ── Applicants ──
+        rows = db.execute(
+            """SELECT id, first_name, last_name, email
+               FROM applicants
+               WHERE first_name LIKE ? OR last_name LIKE ? OR email LIKE ?
+               LIMIT ?""",
+            (like, like, like, limit_per_type)
+        ).fetchall()
+        for r in rows:
+            label = f"{r['first_name'] or ''} {r['last_name'] or ''}".strip() or f"Applicant #{r['id']}"
+            match_field = "first_name"
+            if not (r["first_name"] and q_raw.lower() in r["first_name"].lower()):
+                if r["last_name"] and q_raw.lower() in r["last_name"].lower():
+                    match_field = "last_name"
+                else:
+                    match_field = "email"
+            add_result("applicant", r["id"], label, f"/applicants/{r['id']}", match_field)
+
+        # ── Tenancies ──
+        rows = db.execute(
+            """SELECT tn.id, tn.ref, tn.main_tenant_name, tn.property_id,
+                      p.name AS pname, p.address_line_1 AS paddr
+               FROM tenancies tn LEFT JOIN properties p ON tn.property_id = p.id
+               WHERE tn.main_tenant_name LIKE ? OR tn.ref LIKE ?
+               LIMIT ?""",
+            (like, like, limit_per_type)
+        ).fetchall()
+        for r in rows:
+            label = r["main_tenant_name"] or r["ref"] or f"Tenancy #{r['id']}"
+            match_field = "main_tenant_name"
+            if not (r["main_tenant_name"] and q_raw.lower() in r["main_tenant_name"].lower()):
+                match_field = "ref"
+            parent_label = r["pname"] or r["paddr"] or f"Property #{r['property_id']}" if r["property_id"] else None
+            parent = None
+            if r["property_id"]:
+                parent = {"type": "property", "id": r["property_id"], "label": parent_label}
+            add_result("tenancy", r["id"], label, f"/tenancies/{r['id']}", match_field, parent)
+
+        # ── Guarantors ──
+        rows = db.execute(
+            """SELECT g.id, g.first_name, g.last_name, g.email, g.applicant_id,
+                      a.first_name AS afn, a.last_name AS aln
+               FROM guarantors g LEFT JOIN applicants a ON g.applicant_id = a.id
+               WHERE g.first_name LIKE ? OR g.last_name LIKE ? OR g.email LIKE ?
+               LIMIT ?""",
+            (like, like, like, limit_per_type)
+        ).fetchall()
+        for r in rows:
+            label = f"{r['first_name'] or ''} {r['last_name'] or ''}".strip() or f"Guarantor #{r['id']}"
+            match_field = "first_name"
+            if not (r["first_name"] and q_raw.lower() in r["first_name"].lower()):
+                if r["last_name"] and q_raw.lower() in r["last_name"].lower():
+                    match_field = "last_name"
+                else:
+                    match_field = "email"
+            parent_label = f"{r['afn'] or ''} {r['aln'] or ''}".strip() if r["applicant_id"] else None
+            parent = None
+            if r["applicant_id"]:
+                parent = {"type": "applicant", "id": r["applicant_id"], "label": parent_label or f"Applicant #{r['applicant_id']}"}
+            add_result("guarantor", r["id"], label, f"/guarantors/{r['id']}", match_field, parent)
+
+        # ── Property Owners ──
+        rows = db.execute(
+            """SELECT id, name, company_name, contact_email
+               FROM property_owners
+               WHERE name LIKE ? OR company_name LIKE ? OR contact_email LIKE ?
+               LIMIT ?""",
+            (like, like, like, limit_per_type)
+        ).fetchall()
+        for r in rows:
+            label = r["name"] or r["company_name"] or f"Owner #{r['id']}"
+            match_field = "name"
+            if not (r["name"] and q_raw.lower() in r["name"].lower()):
+                if r["company_name"] and q_raw.lower() in r["company_name"].lower():
+                    match_field = "company_name"
+                else:
+                    match_field = "contact_email"
+            add_result("property_owner", r["id"], label, f"/property-owners/{r['id']}", match_field)
+
+        # ── Maintenance Jobs ──
+        rows = db.execute(
+            """SELECT mj.id, mj.title, mj.reference, mj.address, mj.property_id,
+                      p.name AS pname, p.address_line_1 AS paddr
+               FROM maintenance_jobs mj LEFT JOIN properties p ON mj.property_id = p.id
+               WHERE mj.title LIKE ? OR mj.reference LIKE ? OR mj.address LIKE ?
+               LIMIT ?""",
+            (like, like, like, limit_per_type)
+        ).fetchall()
+        for r in rows:
+            label = r["title"] or r["reference"] or f"Maintenance #{r['id']}"
+            match_field = "title"
+            if not (r["title"] and q_raw.lower() in r["title"].lower()):
+                if r["reference"] and q_raw.lower() in r["reference"].lower():
+                    match_field = "reference"
+                else:
+                    match_field = "address"
+            parent_label = r["pname"] or r["paddr"] or f"Property #{r['property_id']}" if r["property_id"] else None
+            parent = None
+            if r["property_id"]:
+                parent = {"type": "property", "id": r["property_id"], "label": parent_label}
+            add_result("maintenance", r["id"], label, f"/maintenance/{r['id']}", match_field, parent)
+
+        # ── Documents ──
+        rows = db.execute(
+            """SELECT id, filename, name, related_to, related_id
+               FROM documents
+               WHERE (filename IS NOT NULL AND filename LIKE ?)
+                  OR (name IS NOT NULL AND name LIKE ?)
+               LIMIT ?""",
+            (like, like, limit_per_type)
+        ).fetchall()
+        for r in rows:
+            label = r["name"] or r["filename"] or f"Document #{r['id']}"
+            match_field = "name" if (r["name"] and q_raw.lower() in r["name"].lower()) else "filename"
+            parent = None
+            if r["related_to"] and r["related_id"]:
+                parent = {"type": r["related_to"], "id": r["related_id"], "label": f"{r['related_to'].title()} #{r['related_id']}"}
+            add_result("document", r["id"], label, f"/documents/{r['id']}", match_field, parent)
+
+        # ── Invoices ──
+        try:
+            rows = db.execute(
+                """SELECT id, invoice_ref, description, tenancy_id
+                   FROM invoices
+                   WHERE invoice_ref LIKE ? OR description LIKE ?
+                   LIMIT ?""",
+                (like, like, limit_per_type)
+            ).fetchall()
+            for r in rows:
+                label = r["invoice_ref"] or r["description"] or f"Invoice #{r['id']}"
+                match_field = "invoice_ref" if (r["invoice_ref"] and q_raw.lower() in r["invoice_ref"].lower()) else "description"
+                parent = None
+                if r["tenancy_id"]:
+                    parent = {"type": "tenancy", "id": r["tenancy_id"], "label": f"Tenancy #{r['tenancy_id']}"}
+                add_result("invoice", r["id"], label, f"/invoices/{r['id']}", match_field, parent)
+        except Exception:
+            pass  # invoices table might not exist
+
+        total = len(results)
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "query": q_raw,
+                "total": total,
+                "results": results,
+                "grouped": grouped,
+            }
+        })
+
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+# ═══════════════════════════════════════════════
+# 2i. UNIVERSAL TIMELINE — activity for entity + all related sub-entities
+# ═══════════════════════════════════════════════
+
+TIMELINE_TYPE_MAP = {
+    ("property", "update"): ("property_updated", "edit"),
+    ("property", "created"): ("property_created", "plus"),
+    ("property", "archived"): ("property_archived", "archive"),
+    ("property", "restored"): ("property_restored", "rotate-ccw"),
+    ("property", "deleted"): ("property_deleted", "trash-2"),
+    ("unit", "created"): ("unit_added", "door-open"),
+    ("unit", "linked"): ("unit_added", "door-open"),
+    ("unit", "update"): ("unit_updated", "edit"),
+    ("unit", "updated"): ("unit_updated", "edit"),
+    ("unit", "archived"): ("unit_archived", "archive"),
+    ("unit", "deleted"): ("unit_deleted", "trash-2"),
+    ("tenancy", "created"): ("tenancy_created", "file-text"),
+    ("tenancy", "update"): ("tenancy_updated", "edit"),
+    ("tenant", "created"): ("tenant_created", "user-plus"),
+    ("tenant", "update"): ("tenant_updated", "edit"),
+    ("applicant", "created"): ("applicant_created", "user-plus"),
+    ("applicant", "update"): ("applicant_updated", "edit"),
+    ("applicant", "status_change"): ("applicant_status", "arrow-right"),
+    ("deposit", "created"): ("deposit_received", "shield"),
+    ("deposit", "update"): ("deposit_updated", "edit"),
+    ("referencing_form", "created"): ("referencing_created", "clipboard"),
+    ("referencing_form", "status_change"): ("referencing_updated", "clipboard"),
+    ("guarantor", "created"): ("guarantor_added", "user-plus"),
+    ("maintenance_job", "created"): ("maintenance_raised", "wrench"),
+    ("maintenance_job", "update"): ("maintenance_updated", "wrench"),
+}
+
+
+def _get_entity_label(db, entity_type, entity_id):
+    """Look up a human-readable label for an entity."""
+    try:
+        if entity_type == "property":
+            row = db.execute(
+                "SELECT COALESCE(NULLIF(name,''), NULLIF(ref,''), 'Property #'||CAST(id AS TEXT)) AS label FROM properties WHERE id = ?",
+                (entity_id,)
+            ).fetchone()
+            return row["label"] if row else f"Property #{entity_id}"
+        elif entity_type == "unit":
+            row = db.execute(
+                "SELECT COALESCE(NULLIF(unit_ref,''), 'Unit #'||CAST(id AS TEXT)) AS label FROM units WHERE id = ?",
+                (entity_id,)
+            ).fetchone()
+            return row["label"] if row else f"Unit #{entity_id}"
+        elif entity_type == "tenancy":
+            row = db.execute(
+                "SELECT COALESCE(NULLIF(ref,''), 'Tenancy #'||CAST(id AS TEXT)) AS label FROM tenancies WHERE id = ?",
+                (entity_id,)
+            ).fetchone()
+            return row["label"] if row else f"Tenancy #{entity_id}"
+        elif entity_type == "tenant":
+            row = db.execute(
+                "SELECT COALESCE(NULLIF(first_name||' '||last_name, ' '), 'Tenant #'||CAST(id AS TEXT)) AS label FROM tenants WHERE id = ?",
+                (entity_id,)
+            ).fetchone()
+            return row["label"] if row else f"Tenant #{entity_id}"
+        elif entity_type == "applicant":
+            row = db.execute(
+                "SELECT COALESCE(NULLIF(first_name||' '||last_name, ' '), 'Applicant #'||CAST(id AS TEXT)) AS label FROM applicants WHERE id = ?",
+                (entity_id,)
+            ).fetchone()
+            return row["label"] if row else f"Applicant #{entity_id}"
+        elif entity_type == "maintenance_job":
+            row = db.execute(
+                "SELECT COALESCE(NULLIF(title,''), NULLIF(reference,''), 'Job #'||CAST(id AS TEXT)) AS label FROM maintenance_jobs WHERE id = ?",
+                (entity_id,)
+            ).fetchone()
+            return row["label"] if row else f"Job #{entity_id}"
+        elif entity_type == "deposit":
+            row = db.execute(
+                "SELECT 'Deposit #'||CAST(id AS TEXT) AS label FROM deposits WHERE id = ?",
+                (entity_id,)
+            ).fetchone()
+            return row["label"] if row else f"Deposit #{entity_id}"
+        elif entity_type == "referencing_form":
+            row = db.execute(
+                "SELECT 'Referencing #'||CAST(id AS TEXT) AS label FROM referencing_forms WHERE id = ?",
+                (entity_id,)
+            ).fetchone()
+            return row["label"] if row else f"Referencing #{entity_id}"
+        elif entity_type == "guarantor":
+            row = db.execute(
+                "SELECT COALESCE(NULLIF(first_name||' '||last_name, ' '), 'Guarantor #'||CAST(id AS TEXT)) AS label FROM guarantors WHERE id = ?",
+                (entity_id,)
+            ).fetchone()
+            return row["label"] if row else f"Guarantor #{entity_id}"
+    except Exception:
+        pass
+    return f"{entity_type.title()} #{entity_id}"
+
+
+def _derive_timeline_type(action, entity_type, field_changed):
+    """Derive type and icon from action + entity_type + field_changed."""
+    key = (entity_type, action)
+    if key in TIMELINE_TYPE_MAP:
+        return TIMELINE_TYPE_MAP[key]
+    return (f"{entity_type}_{action}", "circle")
+
+
+def _enhance_timeline_item(item):
+    """Add derived type, icon, and entity_label to an activity log row."""
+    row = dict(item)
+    ttype, icon = _derive_timeline_type(
+        row.get("action", ""),
+        row.get("entity_type", ""),
+        row.get("field_changed", "")
+    )
+    row["type"] = ttype
+    row["icon"] = icon
+    return row
+
+
+@banksia_os_bp.route("/timeline", methods=["GET"])
+def api_universal_timeline():
+    """Return paginated activity log for an entity + all related sub-entities."""
+    entity_type = request.args.get("entity_type", "").strip().lower()
+    entity_id_str = request.args.get("entity_id", "").strip()
+    page = int_param(request.args.get("page"), default=1)
+    per_page = int_param(request.args.get("per_page"), default=20)
+
+    if not entity_type or not entity_id_str:
+        return json_error("entity_type and entity_id are required", 400)
+
+    try:
+        entity_id = int(entity_id_str)
+    except ValueError:
+        return json_error("entity_id must be an integer", 400)
+
+    db = get_dict_db()
+    try:
+        union_parts = []
+        params_list = []
+
+        # 1. Direct entity activity
+        union_parts.append(
+            "SELECT *, 0 AS sort_order FROM activity_log WHERE entity_type = ? AND entity_id = ?"
+        )
+        params_list.append([entity_type, entity_id])
+
+        # 2. For property, expand to sub-entities
+        if entity_type == "property":
+            union_parts.append(
+                "SELECT al.*, 1 AS sort_order FROM activity_log al "
+                "WHERE al.entity_type = 'unit' AND al.entity_id IN (SELECT id FROM units WHERE property_id = ?)"
+            )
+            params_list.append([entity_id])
+
+            union_parts.append(
+                "SELECT al.*, 2 AS sort_order FROM activity_log al "
+                "WHERE al.entity_type = 'tenancy' AND al.entity_id IN (SELECT id FROM tenancies WHERE property_id = ?)"
+            )
+            params_list.append([entity_id])
+
+            union_parts.append(
+                "SELECT al.*, 3 AS sort_order FROM activity_log al "
+                "WHERE al.entity_type = 'tenant' AND al.entity_id IN (SELECT id FROM tenants WHERE property_id = ?)"
+            )
+            params_list.append([entity_id])
+
+            union_parts.append(
+                "SELECT al.*, 4 AS sort_order FROM activity_log al "
+                "WHERE al.entity_type = 'applicant' AND al.entity_id IN (SELECT id FROM applicants WHERE property_id = ?)"
+            )
+            params_list.append([entity_id])
+
+            union_parts.append(
+                "SELECT al.*, 5 AS sort_order FROM activity_log al "
+                "WHERE al.entity_type = 'maintenance_job' AND al.entity_id IN (SELECT id FROM maintenance_jobs WHERE property_id = ?)"
+            )
+            params_list.append([entity_id])
+
+            union_parts.append(
+                "SELECT al.*, 6 AS sort_order FROM activity_log al "
+                "WHERE al.entity_type = 'deposit' AND al.entity_id IN (SELECT id FROM deposits WHERE property_id = ?)"
+            )
+            params_list.append([entity_id])
+
+        # 3. For tenancy, include deposits and tenants
+        elif entity_type == "tenancy":
+            union_parts.append(
+                "SELECT al.*, 1 AS sort_order FROM activity_log al "
+                "WHERE al.entity_type = 'deposit' AND al.entity_id IN (SELECT id FROM deposits WHERE tenancy_id = ?)"
+            )
+            params_list.append([entity_id])
+
+            union_parts.append(
+                "SELECT al.*, 2 AS sort_order FROM activity_log al "
+                "WHERE al.entity_type = 'tenant' AND al.entity_id IN (SELECT id FROM tenants WHERE tenancy_id = ?)"
+            )
+            params_list.append([entity_id])
+
+        # 4. For tenant, include related tenancy
+        elif entity_type == "tenant":
+            union_parts.append(
+                "SELECT al.*, 1 AS sort_order FROM activity_log al "
+                "WHERE al.entity_type = 'tenancy' AND al.entity_id IN (SELECT tenancy_id FROM tenants WHERE id = ?) AND tenancy_id IS NOT NULL"
+            )
+            params_list.append([entity_id])
+
+        full_query_parts = []
+        all_params = []
+        for sql, params in zip(union_parts, params_list):
+            full_query_parts.append(sql)
+            all_params.extend(params)
+
+        combined_sql = " UNION ALL ".join(full_query_parts)
+
+        count_sql = f"SELECT COUNT(*) AS cnt FROM ({combined_sql})"
+        total = db.execute(count_sql, all_params).fetchone()["cnt"]
+
+        offset = (page - 1) * per_page
+        data_sql = f"""
+            SELECT * FROM ({combined_sql}) AS combined
+            ORDER BY created DESC, sort_order ASC
+            LIMIT ? OFFSET ?
+        """
+        params_with_pagination = all_params + [per_page, offset]
+        rows = db.execute(data_sql, params_with_pagination).fetchall()
+
+        items = []
+        for row in rows:
+            item = _enhance_timeline_item(row)
+            item["entity_label"] = _get_entity_label(db, row["entity_type"], row["entity_id"])
+            items.append(item)
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "items": items,
+                "total": total,
+                "page": page,
+                "per_page": per_page,
+            }
+        })
+
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
