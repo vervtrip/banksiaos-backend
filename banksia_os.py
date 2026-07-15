@@ -66,6 +66,19 @@ def json_error(msg, status=400):
     return jsonify({"success": False, "error": msg}), status
 
 
+def clean_none(row):
+    """Replace all None values in a dict with empty string, recursing into nested dicts/lists."""
+    if row is None:
+        return ""
+    if isinstance(row, dict):
+        return {k: clean_none(v) for k, v in row.items()}
+    if isinstance(row, list):
+        return [clean_none(v) for v in row]
+    if row is None:
+        return ""
+    return row
+
+
 # ── User helpers ──
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
 
@@ -1438,8 +1451,8 @@ def api_property(prop_id):
         if not prop:
             return json_error("Property not found", 404)
 
+        # ── Units (existing) ──
         units = db.execute("SELECT * FROM units WHERE property_id = ? ORDER BY sort_order ASC, unit_ref ASC", (prop_id,)).fetchall()
-        # Enrich units with active tenancy and tenant info
         for u in units:
             tn = db.execute("SELECT * FROM tenancies WHERE unit_id=? AND status IN ('Active','active','Periodic','periodic') ORDER BY id DESC LIMIT 1", (u["id"],)).fetchone()
             if tn:
@@ -1448,10 +1461,8 @@ def api_property(prop_id):
                 u['tenancy_rent'] = tn.get('rent_amount', 0)
                 u['tenancy_status'] = tn.get('status', '')
                 u['deposit_amount'] = tn.get('deposit_registered_amount', 0) or 0
-                # Count tenants on this tenancy
                 cnt = db.execute("SELECT COUNT(*) AS cnt FROM tenants WHERE tenancy_id=?", (tn["id"],)).fetchone()
                 u["occupant_count"] = cnt["cnt"] if cnt else 0
-                # Get first tenant ID for linking
                 first_t = db.execute("SELECT id FROM tenants WHERE tenancy_id=? LIMIT 1", (tn["id"],)).fetchone()
                 u["tenant_id"] = first_t["id"] if first_t else None
             else:
@@ -1462,6 +1473,55 @@ def api_property(prop_id):
                 u["occupant_count"] = 0
                 u["tenant_id"] = None
         prop["units"] = units
+
+        # ── Tenancies ──
+        tenancies = db.execute(
+            "SELECT t.*, u.unit_ref FROM tenancies t LEFT JOIN units u ON t.unit_id=u.id "
+            "WHERE t.property_id=? AND t.status IN ('Active','active','Periodic','periodic') ORDER BY t.id DESC",
+            (prop_id,)
+        ).fetchall()
+        prop["tenancies"] = [clean_none(dict(r)) for r in tenancies]
+
+        # ── Tenants ──
+        tenants = db.execute(
+            "SELECT t.id, t.first_name, t.last_name, t.email, t.mobile, t.phone_home, "
+            "t.title, t.date_of_birth, t.gender, t.main_tenant, t.tenancy_id, t.property_id, "
+            "u.unit_ref, tn.start_date, tn.end_date, tn.rent_amount "
+            "FROM tenants t "
+            "JOIN tenancies tn ON t.tenancy_id=tn.id "
+            "LEFT JOIN units u ON t.unit_id=u.id "
+            "WHERE tn.property_id=? "
+            "AND (t.main_tenant=1 OR t.status='active' OR t.status='Active') "
+            "ORDER BY COALESCE(t.last_name,t.first_name)",
+            (prop_id,)
+        ).fetchall()
+        # tenants use first_name/last_name — compose name
+        for t in tenants:
+            if not t.get("name") and t.get("first_name"):
+                t["name"] = (t.get("first_name", "") or "") + " " + (t.get("last_name", "") or "")
+        prop["tenants"] = [clean_none(dict(r)) for r in tenants]
+
+        # ── Maintenance jobs ──
+        maint = db.execute(
+            "SELECT * FROM maintenance_jobs WHERE property_id=? ORDER BY created DESC LIMIT 20",
+            (prop_id,)
+        ).fetchall()
+        prop["maintenance"] = [clean_none(dict(r)) for r in maint]
+
+        # ── Documents ──
+        docs = db.execute(
+            "SELECT * FROM documents WHERE related_to='property' AND related_id=? ORDER BY created DESC LIMIT 20",
+            (str(prop_id),)
+        ).fetchall()
+        prop["documents"] = [clean_none(dict(r)) for r in docs]
+
+        # ── Activity ──
+        activity = db.execute(
+            "SELECT * FROM activity_log WHERE entity_type='property' AND entity_id=? ORDER BY created DESC LIMIT 20",
+            (prop_id,)
+        ).fetchall()
+        prop["activity"] = [clean_none(dict(r)) for r in activity]
+
         return json_success(prop)
     except Exception as e:
         return json_error(str(e), 500)
@@ -1879,6 +1939,9 @@ def _log_activity(entity_type, entity_id, action, field_changed=None,
 
     Automatically redacts sensitive field values.
     If no db connection is provided, creates one (for use outside request context).
+    
+    For property updates, also creates notifications for the responsible_manager
+    and all super_admin users.
     """
     # Redact sensitive fields
     if field_changed and field_changed in SENSITIVE_FIELDS:
@@ -1896,6 +1959,45 @@ def _log_activity(entity_type, entity_id, action, field_changed=None,
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             [entity_type, entity_id, action, field_changed, old_value, new_value, user_name, notes]
         )
+        
+        # For property updates, create notifications for responsible_manager + super_admins
+        if entity_type == "property" and action == "update" and field_changed:
+            try:
+                now = datetime.now(timezone.utc).isoformat()
+                prop = db.execute(
+                    "SELECT name, ref, responsible_manager FROM properties WHERE id = ?",
+                    (entity_id,)
+                ).fetchone()
+                if prop:
+                    prop_label = prop.get("name") or prop.get("ref") or f"#{entity_id}"
+                    rm = prop.get("responsible_manager") or ""
+                    message = (f"{user_name} updated {field_changed} on property "
+                               f"'{prop_label}' ({_format_value(old_value)} → {_format_value(new_value)})")
+                    link = f"/banksia-os?entity=properties&id={entity_id}"
+                    
+                    # Notify responsible_manager
+                    notified = set()
+                    if rm and rm.strip():
+                        db.execute(
+                            "INSERT INTO notifications (username, message, link, read, created) "
+                            "VALUES (?, ?, ?, 0, ?)",
+                            (rm.strip(), message, link, now)
+                        )
+                        notified.add(rm.strip())
+                    
+                    # Notify super_admins (Sami, Roo, Norbert, Sadman) who aren't the updater
+                    super_admins = ["Sami", "Roo", "Norbert", "Sadman"]
+                    for sa in super_admins:
+                        if sa not in notified and sa != user_name:
+                            db.execute(
+                                "INSERT INTO notifications (username, message, link, read, created) "
+                                "VALUES (?, ?, ?, 0, ?)",
+                                (sa, message, link, now)
+                            )
+                            notified.add(sa)
+            except Exception:
+                pass  # Never let notification creation crash logging
+        
         if own_conn:
             db.commit()
     except Exception:
@@ -1903,6 +2005,16 @@ def _log_activity(entity_type, entity_id, action, field_changed=None,
     finally:
         if own_conn:
             db.close()
+
+
+def _format_value(val):
+    """Format a value for notification messages — truncate and clean up."""
+    if val is None:
+        return "∅"
+    s = str(val)
+    if len(s) > 60:
+        s = s[:57] + "..."
+    return s
 
 
 # ═══════════════════════════════════════════════
@@ -2289,6 +2401,240 @@ def api_create_activity():
     )
 
     return json_success({"message": "Activity logged"})
+
+
+# ═══════════════════════════════════════════════
+# 2h. UNIT CRUD — create, edit, archive, delete, bulk-create
+# ═══════════════════════════════════════════════
+
+ALLOWED_UNIT_FIELDS = {
+    "unit_ref", "unit_type", "floor", "bedrooms", "capacity",
+    "market_rent", "furnished", "status", "notes",
+    "unit_status", "max_occupancy", "bathrooms",
+}
+
+
+@banksia_os_bp.route("/properties/<int:prop_id>/units", methods=["POST"])
+def api_create_unit_for_property(prop_id):
+    """POST /api/banksia-os/properties/{prop_id}/units — create a unit."""
+    data = request.get_json(silent=True)
+    if not data:
+        return json_error("No data provided", 400)
+
+    unit_ref = data.get("unit_ref")
+    unit_type = data.get("unit_type")
+    if not unit_ref or not unit_type:
+        return json_error("'unit_ref' and 'unit_type' are required", 400)
+
+    db = get_dict_db()
+    try:
+        prop = db.execute("SELECT id FROM properties WHERE id = ?", (prop_id,)).fetchone()
+        if not prop:
+            return json_error("Property not found", 404)
+
+        now = datetime.now(timezone.utc).isoformat()
+        ins_cols = ["property_id", "unit_ref", "unit_type", "created", "modified"]
+        ins_vals = [prop_id, unit_ref, unit_type, now, now]
+
+        optional_fields = ["floor", "bedrooms", "capacity", "market_rent", "furnished", "status", "notes",
+                           "unit_status", "max_occupancy", "bathrooms"]
+        for f in optional_fields:
+            if f in data:
+                ins_cols.append(f)
+                ins_vals.append(data[f])
+
+        placeholders = ",".join(["?"] * len(ins_cols))
+        cursor = db.execute(
+            f"INSERT INTO units ({','.join(ins_cols)}) VALUES ({placeholders})",
+            ins_vals
+        )
+        new_id = cursor.lastrowid
+        db.commit()
+
+        _log_activity("unit", new_id, "created",
+                      notes=f"Unit '{unit_ref}' created on property #{prop_id}",
+                      db=db)
+
+        created = db.execute("SELECT * FROM units WHERE id = ?", (new_id,)).fetchone()
+        return json_success(clean_none(dict(created))), 201
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/units/<int:unit_id>", methods=["PATCH"])
+def api_update_unit(unit_id):
+    """PATCH /api/banksia-os/units/{unit_id} — edit a unit."""
+    data = request.get_json(silent=True)
+    if not data:
+        return json_error("No data provided", 400)
+
+    db = get_dict_db()
+    try:
+        unit = db.execute("SELECT * FROM units WHERE id = ?", (unit_id,)).fetchone()
+        if not unit:
+            return json_error("Unit not found", 404)
+
+        now = datetime.now(timezone.utc).isoformat()
+        updates = {}
+        for key, val in data.items():
+            if key in ALLOWED_UNIT_FIELDS:
+                updates[key] = val
+
+        if not updates:
+            return json_error("No valid fields to update", 400)
+
+        set_parts = [f"{k} = ?" for k in updates]
+        params = list(updates.values())
+        set_parts.append("modified = ?")
+        params.append(now)
+        params.append(unit_id)
+
+        db.execute(f"UPDATE units SET {', '.join(set_parts)} WHERE id = ?", params)
+        db.commit()
+
+        _log_activity("unit", unit_id, "update",
+                      notes=f"Unit '{unit.get('unit_ref', '')}' updated",
+                      db=db)
+
+        updated = db.execute("SELECT * FROM units WHERE id = ?", (unit_id,)).fetchone()
+        return json_success(clean_none(dict(updated)))
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/units/<int:unit_id>/archive", methods=["POST"])
+def api_archive_unit(unit_id):
+    """POST /api/banksia-os/units/{unit_id}/archive — soft-delete a unit."""
+    db = get_dict_db()
+    try:
+        unit = db.execute("SELECT * FROM units WHERE id = ?", (unit_id,)).fetchone()
+        if not unit:
+            return json_error("Unit not found", 404)
+
+        # Check for active tenancies
+        active = db.execute(
+            "SELECT COUNT(*) AS cnt FROM tenancies WHERE unit_id=? AND status IN ('Active','active','Periodic','periodic','Current','current')",
+            (unit_id,)
+        ).fetchone()["cnt"]
+        if active > 0:
+            return json_error(f"Cannot archive unit with {active} active tenanc{'y' if active == 1 else 'ies'}", 409)
+
+        # Soft-archive by setting status to 'archived'
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "UPDATE units SET status='archived', unit_vacant=1, modified=? WHERE id=?",
+            (now, unit_id)
+        )
+        db.commit()
+
+        _log_activity("unit", unit_id, "archived",
+                      notes=f"Unit '{unit.get('unit_ref', '')}' archived",
+                      db=db)
+
+        return json_success({"id": unit_id, "message": "Unit archived successfully", "status": "archived"})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/units/<int:unit_id>/delete", methods=["POST"])
+def api_delete_unit(unit_id):
+    """POST /api/banksia-os/units/{unit_id}/delete — permanently delete a unit."""
+    db = get_dict_db()
+    try:
+        unit = db.execute("SELECT * FROM units WHERE id = ?", (unit_id,)).fetchone()
+        if not unit:
+            return json_error("Unit not found", 404)
+
+        # Check for active tenancies
+        active = db.execute(
+            "SELECT COUNT(*) AS cnt FROM tenancies WHERE unit_id=? AND status IN ('Active','active','Periodic','periodic','Current','current')",
+            (unit_id,)
+        ).fetchone()["cnt"]
+        if active > 0:
+            return json_error(f"Cannot delete unit with {active} active tenanc{'y' if active == 1 else 'ies'}", 409)
+
+        # Delete related records first
+        db.execute("UPDATE tenants SET unit_id=NULL, property_id=NULL WHERE unit_id=?", (unit_id,))
+        db.execute("UPDATE tenancies SET unit_id=NULL WHERE unit_id=?", (unit_id,))
+        db.execute("DELETE FROM units WHERE id=?", (unit_id,))
+        db.commit()
+
+        _log_activity("unit", unit_id, "deleted",
+                      notes=f"Unit '{unit.get('unit_ref', '')}' permanently deleted",
+                      db=db)
+
+        return json_success({"id": unit_id, "message": "Unit permanently deleted"})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/properties/<int:prop_id>/units/bulk", methods=["POST"])
+def api_bulk_create_units(prop_id):
+    """POST /api/banksia-os/properties/{prop_id}/units/bulk — bulk-create units."""
+    data = request.get_json(silent=True)
+    if not data:
+        return json_error("No data provided", 400)
+
+    units_data = data.get("units", [])
+    if not units_data or not isinstance(units_data, list):
+        return json_error("'units' must be a non-empty array", 400)
+
+    db = get_dict_db()
+    try:
+        prop = db.execute("SELECT id FROM properties WHERE id = ?", (prop_id,)).fetchone()
+        if not prop:
+            return json_error("Property not found", 404)
+
+        now = datetime.now(timezone.utc).isoformat()
+        created_ids = []
+        errors = []
+
+        for idx, unit_data in enumerate(units_data):
+            unit_ref = unit_data.get("unit_ref")
+            unit_type = unit_data.get("unit_type")
+            if not unit_ref or not unit_type:
+                errors.append({"index": idx, "error": "'unit_ref' and 'unit_type' are required"})
+                continue
+
+            try:
+                ins_cols = ["property_id", "unit_ref", "unit_type", "created", "modified"]
+                ins_vals = [prop_id, unit_ref, unit_type, now, now]
+
+                optional_fields = ["floor", "bedrooms", "capacity", "market_rent", "furnished", "status", "notes",
+                                   "unit_status", "max_occupancy", "bathrooms"]
+                for f in optional_fields:
+                    if f in unit_data:
+                        ins_cols.append(f)
+                        ins_vals.append(unit_data[f])
+
+                placeholders = ",".join(["?"] * len(ins_cols))
+                cursor = db.execute(
+                    f"INSERT INTO units ({','.join(ins_cols)}) VALUES ({placeholders})",
+                    ins_vals
+                )
+                created_ids.append(cursor.lastrowid)
+            except Exception as e:
+                errors.append({"index": idx, "error": str(e)})
+
+        db.commit()
+
+        return json_success({
+            "created_ids": created_ids,
+            "count": len(created_ids),
+            "errors": errors if errors else None,
+        }), 201
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
 
 
 # ═══════════════════════════════════════════════
@@ -4902,19 +5248,88 @@ def api_properties_compliance():
 
 @banksia_os_bp.route("/notifications", methods=["GET"])
 def api_get_notifications():
+    """Enhanced GET /notifications — returns full items + unread_count.
+    
+    Query params:
+        mark_read=true|false  (default true) — mark returned notifications as read
+        unread_only=true       — legacy compat, just returns unread_count
+    """
     db = get_dict_db()
     try:
-        u = getattr(request,'current_user',None) or session.get("user",{})
-        uname = u.get("username","") if isinstance(u,dict) else getattr(u,"username","")
-        if request.args.get("unread_only","") == "true":
-            cnt = db.execute("SELECT COUNT(*) AS c FROM notifications WHERE username=? AND read=0",(uname,)).fetchone()["c"]
-            return json_success({"unread_count":cnt})
+        u = getattr(request, 'current_user', None) or session.get("user", {})
+        uname = u.get("username", "") if isinstance(u, dict) else getattr(u, "username", "")
+        
+        # Legacy compat: just return count
+        if request.args.get("unread_only", "") == "true":
+            cnt = db.execute(
+                "SELECT COUNT(*) AS c FROM notifications WHERE username=? AND read=0",
+                (uname,)
+            ).fetchone()["c"]
+            return json_success({"unread_count": cnt})
+        
+        # Fetch unread notifications (limit 20, ordered by created DESC)
         items = db.execute(
-            "SELECT id,message,link,read,created FROM notifications WHERE username=? ORDER BY created DESC LIMIT 50",
+            "SELECT id, message, link, read, created FROM notifications "
+            "WHERE username=? AND read=0 ORDER BY created DESC LIMIT 20",
             (uname,)
         ).fetchall()
-        uc = db.execute("SELECT COUNT(*) AS c FROM notifications WHERE username=? AND read=0",(uname,)).fetchone()["c"]
-        return json_success({"items":items,"unread_count":uc})
+        
+        uc = db.execute(
+            "SELECT COUNT(*) AS c FROM notifications WHERE username=? AND read=0",
+            (uname,)
+        ).fetchone()["c"]
+        
+        # Mark as read if requested (default true)
+        mark_read = request.args.get("mark_read", "true").lower() == "true"
+        if mark_read and items:
+            ids = [r["id"] for r in items]
+            placeholders = ",".join("?" * len(ids))
+            db.execute(
+                f"UPDATE notifications SET read=1 WHERE id IN ({placeholders})",
+                ids
+            )
+            db.commit()
+            uc = 0  # just marked them all as read
+        
+        return json_success({"items": items, "unread_count": uc})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/notifications/<int:notification_id>/read", methods=["POST"])
+def api_mark_notification_read(notification_id):
+    """Mark a single notification as read."""
+    db = get_dict_db()
+    try:
+        u = getattr(request, 'current_user', None) or session.get("user", {})
+        uname = u.get("username", "") if isinstance(u, dict) else getattr(u, "username", "")
+        db.execute(
+            "UPDATE notifications SET read=1 WHERE id=? AND username=?",
+            (notification_id, uname)
+        )
+        db.commit()
+        return json_success({"ok": True})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/notifications/read-all", methods=["POST"])
+def api_mark_all_read():
+    """Mark all of the current user's notifications as read."""
+    db = get_dict_db()
+    try:
+        u = getattr(request, 'current_user', None) or session.get("user", {})
+        uname = u.get("username", "") if isinstance(u, dict) else getattr(u, "username", "")
+        db.execute(
+            "UPDATE notifications SET read=1 WHERE username=? AND read=0",
+            (uname,)
+        )
+        db.commit()
+        return json_success({"ok": True})
     except Exception as e:
         return json_error(str(e), 500)
     finally:
@@ -4923,22 +5338,50 @@ def api_get_notifications():
 
 @banksia_os_bp.route("/notifications/mark-read", methods=["POST"])
 def api_mark_read():
+    """Legacy: mark single notification by id in JSON body, or all if no id given."""
     db = get_dict_db()
     try:
-        u = getattr(request,'current_user',None) or session.get("user",{})
-        uname = u.get("username","") if isinstance(u,dict) else getattr(u,"username","")
+        u = getattr(request, 'current_user', None) or session.get("user", {})
+        uname = u.get("username", "") if isinstance(u, dict) else getattr(u, "username", "")
         data = request.get_json() or {}
         nid = data.get("id")
         if nid:
-            db.execute("UPDATE notifications SET read=1 WHERE id=? AND username=?",(nid,uname))
+            db.execute("UPDATE notifications SET read=1 WHERE id=? AND username=?", (nid, uname))
         else:
-            db.execute("UPDATE notifications SET read=1 WHERE username=? AND read=0",(uname,))
+            db.execute("UPDATE notifications SET read=1 WHERE username=? AND read=0", (uname,))
         db.commit()
-        return json_success({"ok":True})
+        return json_success({"ok": True})
     except Exception as e:
         return json_error(str(e), 500)
     finally:
         db.close()
+
+
+def create_notification(username, message, link=None):
+    """Standalone helper: insert a notification for a user.
+    
+    Args:
+        username: str — the recipient's username
+        message: str — notification text
+        link: str or None — optional link path
+    
+    Returns:
+        int — the new notification id, or None on failure
+    """
+    try:
+        db = get_dict_db()
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            cur = db.execute(
+                "INSERT INTO notifications (username, message, link, read, created) VALUES (?, ?, ?, 0, ?)",
+                (username, message, link or "", now)
+            )
+            db.commit()
+            return cur.lastrowid
+        finally:
+            db.close()
+    except Exception:
+        return None
 
 
 @banksia_os_bp.route("/users", methods=["GET"])
