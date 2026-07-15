@@ -1,13 +1,13 @@
 
 # Banksia OS — Database Integrity Audit
-**Generated:** 2026-07-15T20:15:11.463033
+**Generated:** 2026-07-15T20:34:43.441888
 **Database:** /root/verv-dashboard/verv_os.db
 
 ## 1. Table Overview
 | Table | Records | PK Columns | Has created | Has modified | FK Count | Index Count |
 | --- | --- | --- | --- | --- | --- | --- |
 | access_records | 11 | id | ❌ | ❌ | 2 | 2 |
-| activity_log | 71 | id | ✅ | ❌ | 0 | 2 |
+| activity_log | 72 | id | ✅ | ❌ | 0 | 2 |
 | applicants | 682 | id | ✅ | ✅ | 2 | 2 |
 | comments | 5 | id | ✅ | ❌ | 0 | 1 |
 | company_settings | 9 | id | ❌ | ❌ | 0 | 1 |
@@ -26,7 +26,7 @@
 | message_threads | 2 | id | ✅ | ✅ | 0 | 0 |
 | messages | 6 | id | ✅ | ❌ | 1 | 0 |
 | migration_log | 1 | id | ❌ | ❌ | 0 | 1 |
-| notifications | 22 | id | ✅ | ❌ | 0 | 1 |
+| notifications | 25 | id | ✅ | ❌ | 0 | 1 |
 | portal_sessions | 9 | id | ✅ | ❌ | 1 | 3 |
 | portal_users | 2 | id | ✅ | ✅ | 2 | 3 |
 | properties | 67 | id | ✅ | ✅ | 0 | 2 |
@@ -696,7 +696,7 @@ SELECT u.id, u.unit_ref, u.unit_status, u.property_id
 | Table | Record Count |
 | --- | --- |
 | access_records | 11 |
-| activity_log | 71 |
+| activity_log | 72 |
 | applicants | 682 |
 | comments | 5 |
 | company_settings | 9 |
@@ -715,7 +715,7 @@ SELECT u.id, u.unit_ref, u.unit_status, u.property_id
 | message_threads | 2 |
 | messages | 6 |
 | migration_log | 1 |
-| notifications | 22 |
+| notifications | 25 |
 | portal_sessions | 9 |
 | portal_users | 2 |
 | properties | 67 |
@@ -734,4 +734,4 @@ SELECT u.id, u.unit_ref, u.unit_status, u.property_id
 | transactions | 7293 |
 | units | 193 |
 
-*Audit completed at 2026-07-15T20:15:11.473879*
+*Audit completed at 2026-07-15T20:34:43.455423*
