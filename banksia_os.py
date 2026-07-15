@@ -1470,14 +1470,27 @@ def api_property(prop_id):
 
 
 # ── Allowed fields for PATCH on properties (mass-assignment protection) ──
+# All editable columns from the properties table except: id, arthur_id, created, modified,
+# sync_dirty, local_modified, pushed_at, sync_origin, total_units, rentable_units.
 ALLOWED_PROPERTY_FIELDS = {
     "name", "ref", "address_line_1", "address_line_2", "city", "county",
-    "postcode", "country", "lat", "lng", "property_type", "total_units",
-    "rentable_units", "property_owner_id", "property_owner_name",
-    "max_occupancy", "bathrooms", "bedrooms", "council_tax_band",
-    "council_account_no", "main_image_url", "image_urls", "epc_urls",
+    "postcode", "country", "lat", "lng", "property_type",
+    "property_owner_id", "property_owner_name",
+    "max_occupancy", "bathrooms", "bedrooms", "kitchens", "floors",
+    "council_tax_band", "council_account_no", "main_image_url", "image_urls", "epc_urls",
     "floor_plan_urls", "thumbnail_urls", "features", "notes", "tags",
     "custom_fields",
+    # Extended HMO onboarding fields
+    "status", "property_ref", "acquisition_date", "owner_company",
+    "management_type", "monthly_property_rent", "management_fee",
+    "contract_start", "contract_end", "notice_period_days",
+    "deposit_paid_to_landlord", "responsible_manager",
+    "is_hmo", "licence_number", "licence_expiry",
+    "heating_type", "boiler_details", "utility_suppliers", "wifi_provider",
+    "main_door_instructions", "keybox_location", "keybox_code",
+    "smart_lock_provider", "smart_lock_code", "intercom_details",
+    "alarm_details", "emergency_access_notes",
+    "description", "internal_notes", "is_active",
 }
 
 SYNC_TABLES = {"properties", "units", "tenancies", "tenants", "applicants"}
@@ -1811,13 +1824,24 @@ def api_create_property_full():
 
 
 def _create_activity_log(db, action, resource_id, description, user=None):
-    """Create an activity log entry. Uses the activity table if it exists,
-    otherwise writes to a simple log via database-level fallback."""
+    """Create an activity log entry. Writes to the activity_log table
+    (used by the PATCH endpoint) as well as the legacy activity table."""
     if user is None:
         user = getattr(request, "current_user", {}).get("username", "system")
     try:
         now = datetime.now(timezone.utc).isoformat()
-        # Try activity table first
+
+        # Write to activity_log table (primary, used by activity endpoints)
+        try:
+            db.execute(
+                "INSERT INTO activity_log (entity_type, entity_id, action, user_name, notes, created) "
+                "VALUES ('property', ?, ?, ?, ?, ?)",
+                [resource_id, action, user, description, now]
+            )
+        except Exception:
+            pass  # activity_log table may not exist
+
+        # Legacy: Try activity table if it exists
         try:
             db.execute(
                 "INSERT INTO activity (action, resource_type, resource_id, description, user, created_at) "
@@ -1825,16 +1849,17 @@ def _create_activity_log(db, action, resource_id, description, user=None):
                 [action, resource_id, description, user, now]
             )
         except Exception:
-            # activity table doesn't exist — fall back to inserting into
-            # a generic log table if available, or just pass silently
-            try:
-                db.execute(
-                    "INSERT INTO notifications (type, title, message, created_at) "
-                    "VALUES ('activity', ?, ?, ?)",
-                    [f"{action}: {description}", f"Property #{resource_id}", now]
-                )
-            except Exception:
-                pass  # No logging table at all — benign
+            pass  # activity table doesn't exist — benign
+
+        # Also try notifications table as a last fallback
+        try:
+            db.execute(
+                "INSERT INTO notifications (type, title, message, created_at) "
+                "VALUES ('activity', ?, ?, ?)",
+                [f"{action}: {description}", f"Property #{resource_id}", now]
+            )
+        except Exception:
+            pass  # No logging table at all — benign
     except Exception:
         pass  # Never let logging crash the main operation
 
@@ -1886,43 +1911,75 @@ def _log_activity(entity_type, entity_id, action, field_changed=None,
 
 @banksia_os_bp.route("/properties/<int:prop_id>/archive", methods=["POST"])
 def api_archive_property(prop_id):
-    """Archive (soft delete) a property. Checks for active tenancies first."""
+    """Archive (soft delete) a property. Checks for active tenancies and
+    other dependencies first. If dependencies exist, returns them so the
+    UI can display what blocks archiving."""
     db = get_dict_db()
     try:
         prop = db.execute("SELECT * FROM properties WHERE id = ?", (prop_id,)).fetchone()
         if not prop:
             return json_error("Property not found", 404)
 
-        # Check for active tenancies on units under this property
+        # ── Aggregate all dependency counts ──
         active_statuses = ("'Current','current','Periodic','periodic','Active','active'")
+
+        units_count = db.execute(
+            "SELECT COUNT(*) AS cnt FROM units WHERE property_id = ?",
+            (prop_id,)
+        ).fetchone()["cnt"]
+
+        tenants_count = db.execute(
+            "SELECT COUNT(*) AS cnt FROM tenants WHERE property_id = ?",
+            (prop_id,)
+        ).fetchone()["cnt"]
+
         active_tenancies = db.execute(
-            f"SELECT id, ref, main_tenant_name, unit_id, status FROM tenancies "
+            f"SELECT COUNT(*) AS cnt FROM tenancies "
             f"WHERE property_id = ? AND status IN ({active_statuses})",
             (prop_id,)
-        ).fetchall()
+        ).fetchone()["cnt"]
 
-        if active_tenancies:
-            return json_error({
-                "message": "Cannot archive property with active tenancies",
-                "code": "ACTIVE_TENANCIES_EXIST",
-                "active_tenancies": [dict(t) for t in active_tenancies],
-            }, 409)
+        total_tenancies = db.execute(
+            "SELECT COUNT(*) AS cnt FROM tenancies WHERE property_id = ?",
+            (prop_id,)
+        ).fetchone()["cnt"]
 
-        # Check for active maintenance jobs
         active_jobs = db.execute(
             "SELECT COUNT(*) AS cnt FROM maintenance_jobs "
             "WHERE property_id = ? AND status NOT IN ('COMPLETED', 'CANCELLED', 'No Invoice Found')",
             (prop_id,)
         ).fetchone()["cnt"]
 
-        if active_jobs > 0:
-            return json_error({
-                "message": "Cannot archive property with active maintenance jobs",
-                "code": "ACTIVE_MAINTENANCE_EXISTS",
-                "active_maintenance_count": active_jobs,
-            }, 409)
+        total_jobs = db.execute(
+            "SELECT COUNT(*) AS cnt FROM maintenance_jobs WHERE property_id = ?",
+            (prop_id,)
+        ).fetchone()["cnt"]
 
-        # Set status to 'archived'
+        dependencies = {
+            "units": units_count,
+            "tenants": tenants_count,
+            "active_tenancies": active_tenancies,
+            "total_tenancies": total_tenancies,
+            "active_maintenance_jobs": active_jobs,
+            "total_maintenance_jobs": total_jobs,
+        }
+
+        # ── If any blocking dependency exists, return dependency info ──
+        blockers = []
+        if active_tenancies > 0:
+            blockers.append("active_tenancies")
+        if active_jobs > 0:
+            blockers.append("active_maintenance_jobs")
+
+        if blockers:
+            return json_success({
+                "archived": False,
+                "message": "Property has dependencies that prevent archiving",
+                "dependencies": dependencies,
+                "blockers": blockers,
+            })
+
+        # ── Perform archive ──
         db.execute(
             "UPDATE properties SET status = 'archived', modified = ? WHERE id = ?",
             [datetime.now(timezone.utc).isoformat(), prop_id]
@@ -1936,6 +1993,7 @@ def api_archive_property(prop_id):
             "id": prop_id,
             "message": "Property archived successfully",
             "status": "archived",
+            "dependencies": dependencies,
         })
 
     except Exception as e:
@@ -1996,8 +2054,9 @@ def api_restore_property(prop_id):
 
 @banksia_os_bp.route("/properties/<int:prop_id>/delete", methods=["POST"])
 def api_delete_property(prop_id):
-    """Permanently delete a property. Requires super_admin role and
-    no remaining operational records."""
+    """Permanently delete a property. Requires super_admin role,
+    `?confirm=PROPERTY-NAME` query parameter, and no remaining
+    operational records."""
     user = session.get("user", {})
     if user.get("role") != "super_admin":
         return json_error("Only super admins can permanently delete properties", 403)
@@ -2007,6 +2066,17 @@ def api_delete_property(prop_id):
         prop = db.execute("SELECT * FROM properties WHERE id = ?", (prop_id,)).fetchone()
         if not prop:
             return json_error("Property not found", 404)
+
+        # Require confirmation via ?confirm=<property-name>
+        confirm = request.args.get("confirm", "")
+        expected_name = prop.get("name", "") or prop.get("ref", "")
+        if not confirm or confirm.strip() != expected_name:
+            return json_error({
+                "message": "Confirmation required. Pass ?confirm=<property-name> matching the property name.",
+                "code": "CONFIRMATION_REQUIRED",
+                "expected": expected_name,
+                "provided": confirm,
+            }, 400)
 
         # Check for any remaining records
         dependencies = {}
@@ -2027,8 +2097,7 @@ def api_delete_property(prop_id):
         dependencies["tenants"] = tenants_count
 
         # applicants don't have a property_id column — skip them
-        applicants_count = 0
-        dependencies["applicants"] = applicants_count
+        dependencies["applicants"] = 0
 
         documents_count = db.execute(
             "SELECT COUNT(*) AS cnt FROM documents WHERE related_to = 'property' AND related_id = ?",
@@ -2046,11 +2115,20 @@ def api_delete_property(prop_id):
         ).fetchone()["cnt"]
         dependencies["images"] = images_count
 
-        # Check access_records
         access_count = db.execute(
             "SELECT COUNT(*) AS cnt FROM access_records WHERE property_id = ?", (prop_id,)
         ).fetchone()["cnt"]
         dependencies["access_records"] = access_count
+
+        # Check deposits
+        deposits_count = 0
+        try:
+            deposits_count = db.execute(
+                "SELECT COUNT(*) AS cnt FROM deposits WHERE property_id = ?", (prop_id,)
+            ).fetchone()["cnt"]
+        except Exception:
+            pass
+        dependencies["deposits"] = deposits_count
 
         # Check transactions
         try:
@@ -2066,10 +2144,25 @@ def api_delete_property(prop_id):
             return json_error({
                 "message": "Cannot delete property with operational history",
                 "code": "HAS_OPERATIONAL_HISTORY",
-                "dependencies": dependencies,
+                "dependencies": {k: v for k, v in dependencies.items() if v > 0},
             }, 409)
 
-        # Delete the property — CASCADE handles units, access_records, property_images
+        # Delete related records explicitly (CASCADE may not be configured)
+        for table in ("access_records", "property_images", "documents"):
+            try:
+                if table == "documents":
+                    db.execute(
+                        f"DELETE FROM {table} WHERE related_to = 'property' AND related_id = ?",
+                        (str(prop_id),)
+                    )
+                elif table == "access_records":
+                    db.execute(f"DELETE FROM {table} WHERE property_id = ?", (prop_id,))
+                else:
+                    db.execute(f"DELETE FROM {table} WHERE property_id = ?", (prop_id,))
+            except Exception:
+                pass  # table may not exist
+
+        # Delete the property
         db.execute("DELETE FROM properties WHERE id = ?", (prop_id,))
 
         _create_activity_log(db, "property_deleted", prop_id,
@@ -2089,7 +2182,45 @@ def api_delete_property(prop_id):
 
 
 # ═══════════════════════════════════════════════
-# 2g. ACTIVITY LOG — query and create entries
+# 2g. PROPERTY ACTIVITY LOG — activity history for a specific property
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/properties/<int:prop_id>/activity", methods=["GET"])
+def api_property_activity(prop_id):
+    """Return paginated activity log entries for a specific property."""
+    page = int_param(request.args.get("page"), default=1)
+    limit = int_param(request.args.get("per_page", 50), default=50)
+    offset = (page - 1) * limit
+
+    db = get_dict_db()
+    try:
+        # Verify property exists
+        prop = db.execute("SELECT id FROM properties WHERE id = ?", (prop_id,)).fetchone()
+        if not prop:
+            return json_error("Property not found", 404)
+
+        total = db.execute(
+            "SELECT COUNT(*) AS cnt FROM activity_log "
+            "WHERE entity_type = 'property' AND entity_id = ?",
+            (prop_id,)
+        ).fetchone()["cnt"]
+
+        rows = db.execute(
+            "SELECT * FROM activity_log "
+            "WHERE entity_type = 'property' AND entity_id = ? "
+            "ORDER BY created DESC LIMIT ? OFFSET ?",
+            (prop_id, limit, offset)
+        ).fetchall()
+
+        return json_success(rows, total=total, page=page, per_page=limit)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 2h. ACTIVITY LOG — query and create entries
 # ═══════════════════════════════════════════════
 
 @banksia_os_bp.route("/activity", methods=["GET"])
