@@ -444,17 +444,18 @@ def banksia_legacy_redirect(subpath=""):
         target += f"?{qs}"
     return redirect(target, code=301)
 
-# ── Banksia OS frontend route (new HMO Operations dashboard) ──
+# ── Banksia OS frontend route — redirect to Next.js app ──
 @app.route("/banksia-os")
 @app.route("/banksia-os/<path:subpath>")
 @require_auth
 def banksia_os_dashboard(subpath=""):
-    # Parse the subpath: /properties/123 → page=properties, resource_id=123
-    parts = subpath.strip("/").split("/") if subpath else []
-    page = parts[0] if parts else ""
-    resource_id = parts[1] if len(parts) > 1 else ""
-    return render_template("banksia_os.html", user=request.current_user,
-                           initial_page=page, initial_resource_id=resource_id)
+    # Preserve query parameters during redirect
+    qs = request.query_string.decode() if request.query_string else ""
+    target = f"/{subpath}" if subpath else "/"
+    if qs:
+        target += f"?{qs}"
+    return redirect(target, code=307)
+
 
 # ── Document Upload Portal route ──
 @app.route("/upload-docs")

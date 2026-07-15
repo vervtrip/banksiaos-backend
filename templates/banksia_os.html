@@ -8,8 +8,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
+@font-face{font-family:'Inter Fallback';size-adjust:107%;ascent-override:90%;descent-override:22%;src:local('Arial')}
+</style>
+<style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',-apple-system,sans-serif;background:#f1f5f9;color:#1e293b;min-height:100vh;display:flex;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+body{font-family:'Inter','Inter Fallback',-apple-system,sans-serif;background:#f1f5f9;color:#1e293b;min-height:100dvh;display:flex;overflow-x:hidden;-webkit-font-smoothing:antialiased}
 a{color:#334155;text-decoration:none}
 
 /* SIDEBAR */
@@ -670,7 +673,7 @@ code{background:#f1f5f9;padding:2px 6px;border-radius:3px;font-size:12px;color:#
       <button class="btn btn-ghost btn-sm" onclick="doLogout()" style="margin-left:8px" title="Sign out">Logout</button>
     </div>
   </div>
-  <div class="content" id="page-content"></div>
+  <div class="content" id="page-content"><div class="loading"><div class="spinner"></div>Loading...</div></div>
 </div>
 
 <!-- DETAIL PANEL -->

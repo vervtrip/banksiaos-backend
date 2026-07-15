@@ -66,6 +66,19 @@ def json_error(msg, status=400):
     return jsonify({"success": False, "error": msg}), status
 
 
+# ── User helpers ──
+USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
+
+def _load_users():
+    if not os.path.exists(USERS_FILE):
+        return {"Sami": {"password": "Newpassword1323!", "role": "super_admin"}}
+    return json.load(open(USERS_FILE))
+
+def _save_users(users):
+    with open(USERS_FILE, "w") as f:
+        json.dump(users, f, indent=2)
+
+
 def int_param(val, default=1):
     try:
         return max(1, int(val))
@@ -185,13 +198,19 @@ def api_dashboard():
             "SELECT COUNT(*) AS cnt FROM applicants WHERE status IN ('Active', 'active', 'Pending', 'pending', 'New', 'new', 'Viewing', 'viewing', 'Application', 'application', 'Referencing', 'referencing')"
         ).fetchone()["cnt"]
 
-        # Deposits — currently held (active tenancies only) vs all time
-        active_deposits = db.execute(
-            f"SELECT COALESCE(SUM(deposit_registered_amount), 0) AS total FROM tenancies "
-            f"WHERE status IN ({active_statuses}) AND deposit_registered_amount > 0"
+        # Deposits — currently held (from deposits table)
+        currently_held = db.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS total FROM deposits WHERE current_status = 'held'"
         ).fetchone()["total"]
 
-        # Moving in/out this month
+        all_time_deposits = db.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS total FROM deposits"
+        ).fetchone()["total"]
+
+        deposits_unregistered = db.execute(
+            "SELECT COUNT(*) AS cnt FROM deposits WHERE protection_status != 'protected' AND current_status = 'held'"
+        ).fetchone()["cnt"]
+
         now = datetime.now(timezone.utc)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
         if now.month == 12:
@@ -213,16 +232,6 @@ def api_dashboard():
             "AND status IN ('Active', 'active', 'Periodic', 'periodic')",
             (month_start, month_end)
         ).fetchone()["cnt"]
-
-        # Deposits unregistered
-        deposits_unregistered = db.execute(
-            "SELECT COUNT(*) AS cnt FROM tenancies WHERE deposit_registered = 0"
-        ).fetchone()["cnt"]
-
-        # Total deposits held
-        total_deposits_held = db.execute(
-            "SELECT COALESCE(SUM(deposit_registered_amount), 0) AS total FROM tenancies WHERE deposit_registered_amount > 0"
-        ).fetchone()["total"]
 
         # Unit occupancy rate
         unit_occupancy_rate = round((occupied_units / total_units * 100) if total_units > 0 else 0, 1)
@@ -273,7 +282,7 @@ def api_dashboard():
             "FROM units u "
             "JOIN properties p ON u.property_id = p.id "
             "WHERE u.unit_vacant = 1 "
-            "ORDER BY p.name ASC, u.unit_ref ASC"
+            "ORDER BY p.name ASC, u.sort_order ASC, u.unit_ref ASC"
         ).fetchall()
 
         # Upcoming move-ins with tenant/property/unit details (this calendar month only)
@@ -370,8 +379,9 @@ def api_dashboard():
             "monthly_rent_roll": round(monthly_rent_roll, 2),
             "monthly_rent_income": round(monthly_rent_roll, 2),
             "total_arrears": round(total_arrears, 2),
-            "total_deposits_held": round(active_deposits, 2),
-            "total_deposits_all_time": round(total_deposits_held, 2),
+            "total_deposits_held": round(currently_held, 2),
+            "total_deposits": round(currently_held, 2),
+            "total_deposits_all_time": round(all_time_deposits, 2),
             "pending_applicants": pending_applicants,
             "total_pending_applicants": pending_applicants,
             "unit_occupancy_rate": unit_occupancy_rate,
@@ -1428,15 +1438,16 @@ def api_property(prop_id):
         if not prop:
             return json_error("Property not found", 404)
 
-        units = db.execute("SELECT * FROM units WHERE property_id = ? ORDER BY unit_ref ASC", (prop_id,)).fetchall()
+        units = db.execute("SELECT * FROM units WHERE property_id = ? ORDER BY sort_order ASC, unit_ref ASC", (prop_id,)).fetchall()
         # Enrich units with active tenancy and tenant info
         for u in units:
             tn = db.execute("SELECT * FROM tenancies WHERE unit_id=? AND status IN ('Active','active','Periodic','periodic') ORDER BY id DESC LIMIT 1", (u["id"],)).fetchone()
             if tn:
                 u["tenant_name"] = tn.get("main_tenant_name") or ""
                 u["tenancy_id"] = tn["id"]
-                u["tenancy_rent"] = tn.get("rent_amount", 0)
-                u["tenancy_status"] = tn.get("status", "")
+                u['tenancy_rent'] = tn.get('rent_amount', 0)
+                u['tenancy_status'] = tn.get('status', '')
+                u['deposit_amount'] = tn.get('deposit_registered_amount', 0) or 0
                 # Count tenants on this tenancy
                 cnt = db.execute("SELECT COUNT(*) AS cnt FROM tenants WHERE tenancy_id=?", (tn["id"],)).fetchone()
                 u["occupant_count"] = cnt["cnt"] if cnt else 0
@@ -1547,7 +1558,7 @@ def api_units():
         f"(SELECT t.main_tenant_name FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenant_name, "
         f"(SELECT t.start_date FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_start_date, "
         f"(SELECT t.end_date FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_end_date "
-        f"FROM units u WHERE {where} ORDER BY unit_ref ASC",
+        f"FROM units u WHERE {where} ORDER BY sort_order ASC, unit_ref ASC",
         f"SELECT COUNT(*) AS cnt FROM units u WHERE {where}",
         params, page, per_page
     )
@@ -1661,8 +1672,10 @@ def api_tenancies():
 
     rows, total = paginate(
         f"SELECT t.*, "
-        f"(SELECT p.name FROM properties p WHERE p.id = t.property_id) AS property_name, "
+        f"(SELECT COALESCE(NULLIF(p.name, 'multi'), p.address_line_1) FROM properties p WHERE p.id = t.property_id) AS property_name, "
+        f"(SELECT p.address_line_1 FROM properties p WHERE p.id = t.property_id) AS property_address, "
         f"(SELECT u.unit_ref FROM units u WHERE u.id = t.unit_id) AS unit_ref, "
+        f"(SELECT u.unit_type FROM units u WHERE u.id = t.unit_id) AS unit_type_name, "
         f"t.deposit_registered_amount AS deposit_amount "
         f"FROM tenancies t WHERE {where} ORDER BY start_date DESC",
         f"SELECT COUNT(*) AS cnt FROM tenancies t WHERE {where}",
@@ -1687,12 +1700,21 @@ def api_tenancy(ten_id):
 
         bool_fields(ten, "deposit_registered", "section_21_served", "is_renewed")
 
-        # Tenant info
-        tenants = db.execute(
-            "SELECT * FROM tenants WHERE tenancy_id = ? ORDER BY main_tenant DESC",
+        # Tenant info — from tenants table (NOT JSON string), with full detail
+        tenant_rows = db.execute(
+            "SELECT id, first_name, last_name, email, mobile, phone_home, phone_work, "
+            "date_of_birth, gender, citizen, ni_number, passport_number, "
+            "main_tenant, status, has_guarantor, "
+            "guarantor_first_name, guarantor_last_name, guarantor_email, guarantor_mobile, "
+            "employment_company, employment_salary, student_status, university, "
+            "move_in_date, move_out_date, applicant_note, manager_note, "
+            "created, modified "
+            "FROM tenants WHERE tenancy_id = ? ORDER BY main_tenant DESC",
             (ten_id,)
         ).fetchall()
-        ten["tenants"] = tenants
+        for t in tenant_rows:
+            bool_fields(t, "main_tenant", "has_guarantor")
+        ten["tenants"] = tenant_rows
 
         # Transactions
         transactions = db.execute(
@@ -1703,13 +1725,16 @@ def api_tenancy(ten_id):
             bool_fields(t, "is_overdue", "is_outstanding")
         ten["transactions"] = transactions
 
-        # Property info
+        # Property info — with address display name
         if ten.get("property_id"):
             prop = db.execute(
-                "SELECT id, ref, name, address_line_1, city, postcode FROM properties WHERE id = ?",
+                "SELECT id, ref, name, address_line_1, address_line_2, city, postcode, property_type FROM properties WHERE id = ?",
                 (ten["property_id"],)
             ).fetchone()
-            ten["property"] = prop
+            if prop:
+                # Use address_line_1 if name is 'multi'
+                display_name = prop["address_line_1"] if prop["name"] == "multi" else prop["name"]
+                ten["property"] = {**prop, "display_name": display_name}
 
         # Unit info
         if ten.get("unit_id"):
@@ -1718,6 +1743,18 @@ def api_tenancy(ten_id):
                 (ten["unit_id"],)
             ).fetchone()
             ten["unit"] = unit
+
+        # Linked maintenance jobs (by property_id)
+        maintenance_jobs = db.execute(
+            "SELECT id, reference, title, status, priority, type AS category, created, "
+            "contractor AS assigned_to, total_cost, "
+            "(SELECT COUNT(*) FROM ll_communications WHERE job_id = maintenance_jobs.id) AS ll_comms_count "
+            "FROM maintenance_jobs "
+            "WHERE property_id = ? "
+            "ORDER BY created DESC LIMIT 20",
+            (ten.get("property_id"),)
+        ).fetchall()
+        ten["maintenance_jobs"] = maintenance_jobs
 
         return json_success(ten)
     except Exception as e:
@@ -1809,6 +1846,477 @@ def api_tenancies_moving_out():
 
 
 # ═══════════════════════════════════════════════
+# 4a. HMO OCCUPANCY / PROPERTY TENANCY OVERVIEW
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/tenancies/property/<int:property_id>")
+def api_tenancies_by_property(property_id):
+    """All active tenancies + vacant units for a property. HMO room-level overview."""
+    db = get_dict_db()
+    try:
+        active_statuses = ("'Current', 'current', 'Periodic', 'periodic', 'Active', 'active'")
+
+        # Get property
+        prop = db.execute(
+            "SELECT id, name, address_line_1, address_line_2, city, postcode, property_type, "
+            "total_units, rentable_units, max_occupancy, bathrooms, bedrooms "
+            "FROM properties WHERE id = ?", (property_id,)
+        ).fetchone()
+        if not prop:
+            return json_error("Property not found", 404)
+
+        display_name = prop["address_line_1"] if prop["name"] == "multi" else prop["name"]
+        prop_data = dict(prop)
+        prop_data["display_name"] = display_name
+
+        # All units at this property
+        units = db.execute(
+            "SELECT id, unit_ref, unit_type, unit_status, unit_vacant, max_occupancy, "
+            "market_rent, deposit_amount, short_description, features "
+            "FROM units WHERE property_id = ? ORDER BY sort_order ASC, unit_ref", (property_id,)
+        ).fetchall()
+
+        # Active tenancies with tenant info
+        tenancies = db.execute(f"""
+            SELECT t.id, t.ref, t.unit_id, t.main_tenant_name, t.rent_amount, t.rent_frequency,
+                   t.status, t.start_date, t.end_date, t.move_in_date, t.move_out_date,
+                   t.deposit_registered_amount, t.deposit_registered, t.notice_period,
+                   t.break_clause_date, t.section_21_served
+            FROM tenancies t
+            WHERE t.property_id = ? AND t.status IN ({active_statuses})
+            ORDER BY t.unit_id, t.start_date DESC
+        """, (property_id,)).fetchall()
+
+        for t in tenancies:
+            bool_fields(t, "deposit_registered", "section_21_served")
+            # Get tenants for this tenancy
+            t["tenant_list"] = db.execute(
+                "SELECT id, first_name, last_name, email, mobile, main_tenant, status, "
+                "date_of_birth, employment_company, student_status "
+                "FROM tenants WHERE tenancy_id = ? ORDER BY main_tenant DESC",
+                (t["id"],)
+            ).fetchall()
+
+        # Enrich units with active tenancy info
+        unit_data = []
+        for u in units:
+            unit_dict = dict(u)
+            tenancy = next((t for t in tenancies if t["unit_id"] == u["id"]), None)
+            unit_dict["active_tenancy"] = tenancy
+            unit_dict["occupied"] = tenancy is not None
+            unit_data.append(unit_dict)
+
+        # Vacant unit count
+        occupied = sum(1 for u in unit_data if u["occupied"])
+        vacant = sum(1 for u in unit_data if not u["occupied"])
+
+        # Summary
+        total_rent = sum(t["rent_amount"] or 0 for t in tenancies)
+
+        return json_success({
+            "property": prop_data,
+            "units": unit_data,
+            "tenancies": tenancies,
+            "summary": {
+                "total_units": len(unit_data),
+                "occupied": occupied,
+                "vacant": vacant,
+                "occupancy_pct": round(occupied / len(unit_data) * 100, 1) if unit_data else 0,
+                "active_tenancies": len(tenancies),
+                "total_monthly_rent": round(total_rent, 2),
+            }
+        })
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 4b. SHORT-ALIAS ROUTES (flat paths for Next.js frontend)
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/financials")
+def api_financials():
+    db = get_dict_db()
+    try:
+        # Active statuses matching dashboard logic
+        active_statuses = ("'Current', 'current', 'Periodic', 'periodic', 'Active', 'active'")
+        # Total monthly rent
+        rent_row = db.execute(
+            f"SELECT COALESCE(SUM(rent_amount),0) as total FROM tenancies WHERE status IN ({active_statuses})"
+        ).fetchone()
+        # Arrears — from transactions outstanding (same as dashboard)
+        arrears_row = db.execute(
+            "SELECT COALESCE(SUM(amount_outstanding), 0) AS total FROM transactions WHERE is_outstanding = 1"
+        ).fetchone()
+        # Count tenancies with outstanding transactions
+        arrears_count = db.execute(
+            "SELECT COUNT(DISTINCT t.id) as cnt FROM tenancies t WHERE EXISTS (SELECT 1 FROM transactions tx WHERE tx.tenancy_id = t.arthur_id AND tx.is_outstanding = 1 AND tx.amount_outstanding > 0)"
+        ).fetchone()
+        # Deposits
+        dep_count = db.execute("SELECT COUNT(*) as c FROM tenancies WHERE deposit_registered = 1").fetchone()
+        dep_total = db.execute("SELECT COALESCE(SUM(deposit_registered_amount),0) as t FROM tenancies WHERE deposit_registered = 1").fetchone()
+        dep_unreg = db.execute("SELECT COUNT(*) as c FROM tenancies WHERE deposit_registered = 0 AND deposit_registered IS NOT NULL").fetchone()
+        
+        # Active tenancy count
+        active_count = db.execute(
+            f"SELECT COUNT(*) as cnt FROM tenancies WHERE status IN ({active_statuses})"
+        ).fetchone()
+        total_count = db.execute("SELECT COUNT(*) as cnt FROM tenancies").fetchone()
+        
+        return json_success({
+            "monthly_rent_income": rent_row["total"],
+            "monthly_rent_roll": rent_row["total"],
+            "total_arrears": arrears_row["total"],
+            "total_deposits": dep_total["t"],
+            "total_deposits_held": dep_total["t"],
+            "deposits_registered": dep_count["c"],
+            "deposits_total": dep_total["t"],
+            "deposits_unregistered": dep_unreg["c"],
+            "tenancies_in_arrears_count": arrears_count["cnt"],
+            "unit_occupancy_rate": round(active_count["cnt"] / total_count["cnt"] * 100, 1) if total_count["cnt"] else 0,
+            "payment_dates": [],
+            "rent_collected": 0,
+            "rent_outstanding": 0,
+            "metrics": {
+                "total_tenancies": total_count["cnt"],
+                "active_tenancies": active_count["cnt"],
+                "in_arrears": arrears_count["cnt"]
+            }
+        })
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/arrears")
+def api_arrears():
+    page = int_param(request.args.get("page"))
+    per_page = int_param(request.args.get("per_page"), 20)
+    db = get_dict_db()
+    try:
+        # Get tenancies with outstanding transactions (tenancy_id in transactions
+        # maps to arthur_id in tenancies, not the local id)
+        rows, total = paginate(
+            "SELECT t.id, t.ref, t.full_address, t.main_tenant_name, t.rent_amount, t.rent_frequency, "
+            "COALESCE((SELECT SUM(amount_outstanding) FROM transactions tx WHERE tx.tenancy_id = t.arthur_id AND tx.is_outstanding = 1), 0) as arrears_amount, "
+            "t.status, (SELECT p.name FROM properties p WHERE p.id = t.property_id) AS property_name "
+            "FROM tenancies t WHERE EXISTS (SELECT 1 FROM transactions tx WHERE tx.tenancy_id = t.arthur_id AND tx.is_outstanding = 1 AND tx.amount_outstanding > 0) "
+            "ORDER BY arrears_amount DESC",
+            "SELECT COUNT(DISTINCT t.id) as cnt FROM tenancies t WHERE EXISTS (SELECT 1 FROM transactions tx WHERE tx.tenancy_id = t.arthur_id AND tx.is_outstanding = 1 AND tx.amount_outstanding > 0)",
+            [], page, per_page
+        )
+        return json_success(rows, total, page, per_page)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+
+@banksia_os_bp.route("/maintenance")
+def api_maintenance_list():
+    db = get_dict_db()
+    try:
+        page = int_param(request.args.get("page"))
+        per_page = int_param(request.args.get("per_page"), 50)
+        search = (request.args.get("search") or "").strip()
+        status_filter = request.args.get("status", "")
+        type_filter = request.args.get("type", "")
+        priority_filter = request.args.get("priority", "")
+        contractor_filter = request.args.get("contractor", "")
+
+        where = ["1=1"]
+        params = []
+
+        if status_filter:
+            where.append("mj.status = ?")
+            params.append(status_filter)
+        if type_filter:
+            where.append("mj.type = ?")
+            params.append(type_filter)
+        if priority_filter:
+            where.append("mj.priority = ?")
+            params.append(priority_filter)
+        if contractor_filter:
+            where.append("mj.contractor = ?")
+            params.append(contractor_filter)
+        if search:
+            where.append("(mj.title LIKE ? OR mj.description LIKE ? OR mj.address LIKE ? OR mj.reference LIKE ? OR mj.contractor LIKE ? OR mj.type LIKE ? OR mj.reporter_name LIKE ? OR mj.team_notes LIKE ?)")
+            s = f"%{search}%"
+            params.extend([s, s, s, s, s, s, s, s])
+
+        where_clause = " AND ".join(where)
+
+        total = db.execute(
+            f"SELECT COUNT(*) AS cnt FROM maintenance_jobs mj WHERE {where_clause}",
+            params
+        ).fetchone()["cnt"]
+
+        offset = (page - 1) * per_page
+        rows = db.execute(
+            f"""SELECT mj.*, p.name AS property_name
+                FROM maintenance_jobs mj
+                LEFT JOIN properties p ON mj.property_id = p.id
+                WHERE {where_clause}
+                ORDER BY
+                    CASE mj.priority
+                        WHEN 'Emergency' THEN 0 WHEN 'Critical' THEN 1
+                        WHEN 'High' THEN 2 WHEN 'Medium' THEN 3 WHEN 'Low' THEN 4
+                    END,
+                    mj.created DESC
+                LIMIT ? OFFSET ?""",
+            params + [per_page, offset]
+        ).fetchall()
+
+        for r in rows:
+            r["bill_ll"] = bool(r["bill_ll"])
+            r["emergency"] = bool(r["emergency"])
+            r["ll_informed"] = bool(r["ll_informed"])
+            o = db.execute(
+                "SELECT COUNT(*) AS cnt FROM maintenance_orders WHERE job_id = ?",
+                [r["id"]]
+            ).fetchone()
+            r["order_count"] = o["cnt"] if o else 0
+
+        counts = {}
+        for s in MAINT_STATUSES:
+            c = db.execute("SELECT COUNT(*) AS cnt FROM maintenance_jobs WHERE status = ?", [s]).fetchone()
+            counts[s] = c["cnt"] if c else 0
+
+        return json_success(rows, total=total, page=page, per_page=per_page)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/maintenance/<int:job_id>")
+def api_maintenance_detail(job_id):
+    db = get_dict_db()
+    try:
+        job = db.execute(
+            """SELECT mj.*, p.name AS property_name
+               FROM maintenance_jobs mj
+               LEFT JOIN properties p ON mj.property_id = p.id
+               WHERE mj.id = ?""",
+            [job_id]
+        ).fetchone()
+        if not job:
+            return json_error("Job not found", 404)
+        orders = db.execute(
+            "SELECT * FROM maintenance_orders WHERE job_id = ? ORDER BY created DESC",
+            [job_id]
+        ).fetchall()
+        ll_comms = db.execute(
+            "SELECT * FROM ll_communications WHERE job_id = ? ORDER BY sent_at DESC",
+            [job_id]
+        ).fetchall()
+        result = dict(job)
+        result["orders"] = [dict(o) for o in orders]
+        result["ll_comms"] = [dict(c) for c in ll_comms]
+        result["bill_ll"] = bool(result["bill_ll"])
+        result["emergency"] = bool(result["emergency"])
+        result["ll_informed"] = bool(result["ll_informed"])
+        return json_success(result)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/maintenance/<int:job_id>/emails")
+def api_maintenance_job_emails(job_id):
+    """Return Missive emails related to a maintenance job by matching property address."""
+    import subprocess, json
+    db = get_dict_db()
+    try:
+        job = db.execute(
+            """SELECT mj.*, p.name as property_name, p.address_line_1, p.address_line_2,
+                      p.city, p.postcode, p.property_owner_name
+               FROM maintenance_jobs mj
+               LEFT JOIN properties p ON mj.property_id = p.id
+               WHERE mj.id = ?""",
+            [job_id]
+        ).fetchone()
+        if not job:
+            return json_error("Job not found", 404)
+
+        # Call the fetch_job_emails helper script
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "fetch_job_emails.py")
+        if os.path.exists(script_path):
+            try:
+                result = subprocess.run(
+                    [sys.executable, script_path, str(job_id)],
+                    capture_output=True, text=True, timeout=30
+                )
+                if result.returncode == 0 and result.stdout:
+                    data = json.loads(result.stdout)
+                    if data.get("success"):
+                        return json_success(data["data"])
+                    else:
+                        # Script returned error — degrade to empty
+                        return json_success({
+                            "emails": [],
+                            "property_owner": job.get("property_owner_name"),
+                            "property_address": job.get("address_line_1"),
+                            "total_matched": 0,
+                            "error": data.get("error")
+                        })
+                else:
+                    # Script failed — degrade gracefully
+                    return json_success({
+                        "emails": [],
+                        "property_owner": job.get("property_owner_name"),
+                        "property_address": job.get("address_line_1"),
+                        "total_matched": 0,
+                        "error": result.stderr[:200] if result.stderr else "Script execution failed"
+                    })
+            except (subprocess.TimeoutExpired, Exception) as e:
+                return json_success({
+                    "emails": [],
+                    "property_owner": job.get("property_owner_name"),
+                    "property_address": job.get("address_line_1"),
+                    "total_matched": 0,
+                    "error": str(e)[:200]
+                })
+        else:
+            return json_success({
+                "emails": [],
+                "property_owner": job.get("property_owner_name"),
+                "property_address": job.get("address_line_1"),
+                "total_matched": 0
+            })
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ── Order Emails (Missive Orders inbox) ─────────────────────────
+@banksia_os_bp.route("/maintenance/<int:job_id>/order-emails")
+def api_maintenance_job_order_emails(job_id):
+    """Return Missive Orders inbox emails matched to this job."""
+    import subprocess, json
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "fetch_job_orders.py")
+    try:
+        result = subprocess.run(
+            [sys.executable, script_path, str(job_id)],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            return json_success({"orders": [], "total_matched": 0, "error": result.stderr.strip()})
+        parsed = json.loads(result.stdout)
+        if not parsed.get("success"):
+            return json_success({"orders": [], "total_matched": 0, "error": parsed.get("error", "Script failed")})
+        return json_success(parsed["data"])
+    except subprocess.TimeoutExpired:
+        return json_success({"orders": [], "total_matched": 0, "error": "Timed out"})
+    except Exception as e:
+        return json_success({"orders": [], "total_matched": 0, "error": str(e)})
+
+
+# ═══════════════════════════════════════════════
+#  CONVERSATION TIMELINE — WhatsApp contractor chats per job
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/maintenance/<int:job_id>/conversations")
+def api_maintenance_job_conversations(job_id):
+    """Return WhatsApp group conversations related to a maintenance job."""
+    db = get_dict_db()
+    try:
+        # Check job exists
+        job = db.execute(
+            "SELECT id, reference, title, contractor, address FROM maintenance_jobs WHERE id = ?",
+            (job_id,)
+        ).fetchone()
+        if not job:
+            return json_error("Job not found", 404)
+
+        # Get conversation timeline entries
+        rows = db.execute("""
+            SELECT id, sender_name, body, message_timestamp, source_group_name,
+                   linked_contractor
+            FROM conversation_timeline
+            WHERE job_id = ?
+            ORDER BY message_timestamp ASC
+        """, (job_id,)).fetchall()
+
+        conversations = []
+        for r in rows:
+            conversations.append({
+                "id": r["id"],
+                "sender": r["sender_name"],
+                "body": r["body"],
+                "timestamp": r["message_timestamp"],
+                "source_group": r["source_group_name"],
+                "contractor": r["linked_contractor"],
+            })
+
+        return json_success({
+            "job": {
+                "id": job["id"],
+                "reference": job["reference"],
+                "title": job["title"],
+                "contractor": job["contractor"],
+                "address": job["address"],
+            },
+            "conversations": conversations,
+            "count": len(conversations),
+        })
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/maintenance/orders/scan")
+def api_scan_orders_inbox():
+    """Scan Orders inbox and return all non-marketing order emails."""
+    import subprocess, json
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "fetch_job_orders.py")
+    try:
+        result = subprocess.run(
+            [sys.executable, script_path, "0"],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            return json_success({"orders": [], "total_matched": 0, "error": result.stderr.strip()})
+        parsed = json.loads(result.stdout)
+        if not parsed.get("success"):
+            return json_success({"orders": [], "total_matched": 0, "error": parsed.get("error", "Script failed")})
+        return json_success(parsed["data"])
+    except subprocess.TimeoutExpired:
+        return json_success({"orders": [], "total_matched": 0, "error": "Timed out"})
+    except Exception as e:
+        return json_success({"orders": [], "total_matched": 0, "error": str(e)})
+
+
+@banksia_os_bp.route("/activity")
+def api_activity():
+    page = int_param(request.args.get("page"))
+    per_page = int_param(request.args.get("per_page"), 30)
+    db = get_dict_db()
+    try:
+        rows = db.execute("""
+            SELECT 'tenant' as type, id, first_name || ' ' || last_name as title, modified as timestamp, 'Modified' as action FROM tenants WHERE modified IS NOT NULL
+            UNION ALL
+            SELECT 'tenancy' as type, id, ref as title, modified as timestamp, 'Modified' as action FROM tenancies WHERE modified IS NOT NULL
+            UNION ALL
+            SELECT 'applicant' as type, id, first_name || ' ' || last_name as title, modified as timestamp, 'Modified' as action FROM applicants WHERE modified IS NOT NULL
+            ORDER BY timestamp DESC LIMIT ? OFFSET ?
+        """, [per_page, (page-1)*per_page]).fetchall()
+        total = db.execute("SELECT COUNT(*) as cnt FROM (SELECT modified FROM tenants WHERE modified IS NOT NULL UNION ALL SELECT modified FROM tenancies WHERE modified IS NOT NULL UNION ALL SELECT modified FROM applicants WHERE modified IS NOT NULL)").fetchone()["cnt"]
+        return json_success(rows, total, page, per_page)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
 # 5. TENANTS
 # ═══════════════════════════════════════════════
 
@@ -1839,18 +2347,18 @@ def api_tenants():
     where = " AND ".join(where_parts)
 
     rows, total = paginate(
-        f"SELECT id, arthur_id, arthur_person_id, tenancy_id, unit_id, property_id, "
-        f"full_address, title, first_name, last_name, date_of_birth, gender, citizen, "
-        f"email, phone_home, phone_work, mobile AS phone, passport_number, visa_number, visa_type, "
-        f"visa_years, country_of_origin, ni_number, main_tenant, status, has_guarantor, "
-        f"guarantor_first_name, guarantor_last_name, guarantor_email, "
-        f"employment_company, student_status, university, "
-        f"bank_name, latest_credit_score, latest_credit_description, "
-        f"applicant_note, manager_note, move_in_date, move_out_date, modified, created, "
-        f"(SELECT COUNT(*) FROM tenancies WHERE tenants.tenancy_id = tenancies.id) AS tenancy_count, "
-        f"(SELECT p.name FROM properties p WHERE p.arthur_id = CAST(tenants.property_id AS TEXT)) AS property_name, "
-        f"(SELECT u.unit_ref FROM units u WHERE u.arthur_id = CAST(tenants.unit_id AS TEXT)) AS unit_ref "
-        f"FROM tenants WHERE {where} ORDER BY last_name ASC, first_name ASC",
+        f"SELECT tn.id, tn.arthur_id, tn.arthur_person_id, tn.tenancy_id, tn.unit_id, tn.property_id, "
+        f"tn.full_address, tn.title, tn.first_name, tn.last_name, tn.date_of_birth, tn.gender, tn.citizen, "
+        f"tn.email, tn.phone_home, tn.phone_work, tn.mobile AS phone, tn.passport_number, tn.visa_number, tn.visa_type, "
+        f"tn.visa_years, tn.country_of_origin, tn.ni_number, tn.main_tenant, tn.status, tn.has_guarantor, "
+        f"tn.guarantor_first_name, tn.guarantor_last_name, tn.guarantor_email, "
+        f"tn.employment_company, tn.student_status, tn.university, "
+        f"tn.bank_name, tn.latest_credit_score, tn.latest_credit_description, "
+        f"tn.applicant_note, tn.manager_note, tn.move_in_date, tn.move_out_date, tn.modified, tn.created, "
+        f"COALESCE((SELECT COUNT(*) FROM tenancies t2 WHERE t2.id = tn.tenancy_id), 0) AS tenancy_count, "
+        f"COALESCE((SELECT COALESCE(NULLIF(p2.name, 'multi'), p2.address_line_1) FROM properties p2 WHERE p2.arthur_id = CAST(tn.property_id AS TEXT)), '') AS property_name, "
+        f"COALESCE((SELECT u2.unit_ref FROM units u2 WHERE u2.arthur_id = CAST(tn.unit_id AS TEXT)), '') AS unit_ref "
+        f"FROM tenants tn WHERE {where} ORDER BY tn.last_name ASC, tn.first_name ASC",
         f"SELECT COUNT(*) AS cnt FROM tenants WHERE {where}",
         params, page, per_page
     )
@@ -1890,11 +2398,13 @@ def api_tenant(tenant_id):
         else:
             tenant["tenancy"] = None
 
-        # Linked property
+        # Linked property — tenants.property_id stores arthur_id, match via properties.arthur_id
         if tenant.get("property_id"):
             prop = db.execute(
-                "SELECT id, ref, name, address_line_1, city, postcode FROM properties WHERE id = ?",
-                (tenant["property_id"],)
+                "SELECT id, ref, name, address_line_1, address_line_2, city, postcode, property_type, "
+                "COALESCE(NULLIF(name, 'multi'), address_line_1) AS display_name "
+                "FROM properties WHERE arthur_id = CAST(? AS TEXT) OR id = ?",
+                (tenant["property_id"], tenant["property_id"])
             ).fetchone()
             tenant["property"] = prop
 
@@ -2244,15 +2754,24 @@ def api_finance_overview():
             "WHERE is_overdue = 1"
         ).fetchone()
 
-        # Deposit summary
-        registered_deposits = db.execute(
-            "SELECT COUNT(*) AS cnt, COALESCE(SUM(deposit_registered_amount), 0) AS total FROM tenancies "
-            "WHERE deposit_registered = 1"
-        ).fetchone()
+        # Deposit summary from deposits table
+        currently_held = db.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS total FROM deposits WHERE current_status = 'held'"
+        ).fetchone()["total"]
 
-        unregistered_deposits = db.execute(
-            "SELECT COUNT(*) AS cnt FROM tenancies WHERE deposit_registered = 0"
-        ).fetchone()
+        protected = db.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS total FROM deposits WHERE protection_status = 'protected' AND current_status = 'held'"
+        ).fetchone()["total"]
+
+        unprotected = currently_held - protected
+
+        deposit_count = db.execute(
+            "SELECT COUNT(*) AS cnt FROM deposits WHERE current_status = 'held'"
+        ).fetchone()["cnt"]
+
+        protected_count = db.execute(
+            "SELECT COUNT(*) AS cnt FROM deposits WHERE protection_status = 'protected' AND current_status = 'held'"
+        ).fetchone()["cnt"]
 
         # Total transactions
         total_transactions = db.execute(
@@ -2275,12 +2794,14 @@ def api_finance_overview():
             "overdue_total": round(overdue["total"], 2),
             "total_collected": round(total_collected, 2),
             "total_transactions": total_transactions,
-            "total_deposits_held": round(registered_deposits["total"], 2),
-            "total_deposits": round(registered_deposits["total"], 2),
+            "total_deposits_held": round(currently_held, 2),
+            "total_deposits": round(currently_held, 2),
             "deposits": {
-                "registered_count": registered_deposits["cnt"],
-                "registered_total": round(registered_deposits["total"], 2),
-                "unregistered_count": unregistered_deposits["cnt"],
+                "currently_held_count": deposit_count,
+                "currently_held_total": round(currently_held, 2),
+                "protected_count": protected_count,
+                "protected_total": round(protected, 2),
+                "unprotected_total": round(unprotected, 2),
             },
         })
     except Exception as e:
@@ -2414,6 +2935,276 @@ def api_deposits():
                 "ref": u.get("ref") or "",
             })
         return json_success(all_deposits)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# DEPOSITS — Authoritative deposits table endpoints
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/deposits", methods=["GET"])
+def api_banksia_deposits():
+    """Paginated deposit list with summary stats."""
+    page = int_param(request.args.get("page"))
+    per_page = int_param(request.args.get("per_page"), 20)
+    search = request.args.get("search", "").strip()
+    status_filter = request.args.get("status", "").strip()
+    protection_filter = request.args.get("protection", "").strip()
+
+    where_parts = ["1=1"]
+    params = []
+
+    if status_filter:
+        where_parts.append("d.current_status = ?")
+        params.append(status_filter)
+    if protection_filter:
+        where_parts.append("d.protection_status = ?")
+        params.append(protection_filter)
+    if search:
+        where_parts.append("(COALESCE(t.main_tenant_name, '') LIKE ? OR COALESCE(p.ref, '') LIKE ? OR COALESCE(p.address_line_1, '') LIKE ?)")
+        like_val = f"%{search}%"
+        params.extend([like_val, like_val, like_val])
+
+    where = " AND ".join(where_parts)
+
+    db = get_dict_db()
+    try:
+        # Stats
+        currently_held = db.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt FROM deposits WHERE current_status = 'held'"
+        ).fetchone()
+        protected_total = db.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt FROM deposits WHERE protection_status = 'protected' AND current_status = 'held'"
+        ).fetchone()
+        awaiting_protection = db.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt FROM deposits WHERE protection_status = 'unprotected' AND current_status = 'held'"
+        ).fetchone()
+        historic = db.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt FROM deposits WHERE current_status IN ('returned', 'deducted')"
+        ).fetchone()
+        returned_total = db.execute(
+            "SELECT COALESCE(SUM(amount_returned), 0) AS total FROM deposits WHERE current_status = 'returned'"
+        ).fetchone()
+        deduction_total = db.execute(
+            "SELECT COALESCE(SUM(deductions), 0) AS total FROM deposits"
+        ).fetchone()
+
+        # Paginated list
+        total = db.execute(
+            f"SELECT COUNT(*) AS cnt FROM deposits d LEFT JOIN tenancies t ON d.tenancy_id = t.id LEFT JOIN properties p ON d.property_id = p.id WHERE {where}",
+            params
+        ).fetchone()["cnt"]
+
+        offset = (page - 1) * per_page
+        rows = db.execute(
+            f"SELECT d.*, "
+            f"t.main_tenant_name, t.ref AS tenancy_ref, t.status AS tenancy_status, "
+            f"tn.first_name AS tenant_first_name, tn.last_name AS tenant_last_name, "
+            f"COALESCE(NULLIF(p.ref, ''), NULLIF(p.address_line_1, ''), p.name) AS property_name, "
+            f"u.unit_ref "
+            f"FROM deposits d "
+            f"LEFT JOIN tenancies t ON d.tenancy_id = t.id "
+            f"LEFT JOIN tenants tn ON d.tenant_id = tn.id "
+            f"LEFT JOIN properties p ON d.property_id = p.id "
+            f"LEFT JOIN units u ON d.unit_id = u.id "
+            f"WHERE {where} ORDER BY d.created DESC LIMIT ? OFFSET ?",
+            params + [per_page, offset]
+        ).fetchall()
+
+        return json_success({
+            "deposits": rows,
+            "stats": {
+                "currently_held": round(currently_held["total"], 2),
+                "currently_held_count": currently_held["cnt"],
+                "protected_total": round(protected_total["total"], 2),
+                "protected_count": protected_total["cnt"],
+                "awaiting_protection": round(awaiting_protection["total"], 2),
+                "awaiting_protection_count": awaiting_protection["cnt"],
+                "historic_total": round(historic["total"], 2),
+                "historic_count": historic["cnt"],
+                "returned_total": round(returned_total["total"], 2),
+                "deduction_total": round(deduction_total["total"], 2),
+            }
+        }, total, page, per_page)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/deposits/reconciliation", methods=["GET"])
+def api_deposits_reconciliation():
+    """Returns the reconciliation report for deposits."""
+    db = get_dict_db()
+    try:
+        # Currently held
+        currently_held = db.execute(
+            "SELECT COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS total FROM deposits WHERE current_status = 'held'"
+        ).fetchone()
+        protected = db.execute(
+            "SELECT COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS total FROM deposits WHERE protection_status = 'protected' AND current_status = 'held'"
+        ).fetchone()
+        unprotected = db.execute(
+            "SELECT COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS total FROM deposits WHERE protection_status = 'unprotected' AND current_status = 'held'"
+        ).fetchone()
+
+        # Historic
+        historic = db.execute(
+            "SELECT COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS total FROM deposits WHERE current_status IN ('returned', 'deducted')"
+        ).fetchone()
+
+        # Orphans — deposits without a linked tenancy
+        orphans = db.execute(
+            "SELECT d.*, COALESCE(NULLIF(p.ref, ''), NULLIF(p.address_line_1, ''), p.name) AS property_name "
+            "FROM deposits d "
+            "LEFT JOIN properties p ON d.property_id = p.id "
+            "WHERE d.tenancy_id IS NULL OR d.tenancy_id NOT IN (SELECT id FROM tenancies)"
+        ).fetchall()
+
+        # Tenancies without a deposit record
+        tenancies_without_deposit = db.execute(
+            "SELECT t.id, t.ref, t.main_tenant_name, t.status, "
+            "COALESCE(NULLIF(p.ref, ''), NULLIF(p.address_line_1, ''), p.name) AS property_name, "
+            "t.deposit_registered_amount "
+            "FROM tenancies t "
+            "LEFT JOIN properties p ON t.property_id = p.id "
+            "WHERE t.id NOT IN (SELECT tenancy_id FROM deposits WHERE tenancy_id IS NOT NULL) "
+            "AND (t.deposit_registered_amount IS NOT NULL AND t.deposit_registered_amount > 0)"
+        ).fetchall()
+
+        # Mismatches — tenancy deposit_registered_amount != deposit record amount
+        mismatches = db.execute(
+            "SELECT t.id AS tenancy_id, t.ref AS tenancy_ref, t.main_tenant_name, "
+            "t.deposit_registered_amount AS tenancy_amount, "
+            "d.id AS deposit_id, d.amount AS deposit_amount, "
+            "ABS(COALESCE(t.deposit_registered_amount, 0) - COALESCE(d.amount, 0)) AS difference "
+            "FROM tenancies t "
+            "JOIN deposits d ON d.tenancy_id = t.id "
+            "WHERE ABS(COALESCE(t.deposit_registered_amount, 0) - COALESCE(d.amount, 0)) > 0.01"
+        ).fetchall()
+
+        # Totals
+        total_all_time = db.execute(
+            "SELECT COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS total FROM deposits"
+        ).fetchone()
+
+        return json_success({
+            "currently_held": {
+                "count": currently_held["cnt"],
+                "total": round(currently_held["total"], 2),
+                "protected": {
+                    "count": protected["cnt"],
+                    "total": round(protected["total"], 2),
+                },
+                "unprotected": {
+                    "count": unprotected["cnt"],
+                    "total": round(unprotected["total"], 2),
+                },
+            },
+            "historic": {
+                "count": historic["cnt"],
+                "total": round(historic["total"], 2),
+            },
+            "orphans": orphans,
+            "tenancies_without_deposit": tenancies_without_deposit,
+            "mismatches": mismatches,
+            "total_all_time": total_all_time["cnt"],
+            "corrected_total": round(total_all_time["total"], 2),
+        })
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/deposits/migrate", methods=["POST"])
+def api_deposits_migrate():
+    """One-time migration: populate deposits from existing tenancy data.
+    Idempotent — skips tenancy_ids that already have a deposit record."""
+    db = get_dict_db()
+    try:
+        active_statuses = ("'Active', 'active', 'Periodic', 'periodic', 'Current', 'current'")
+        # Find tenancies with deposit data that don't have a deposit record yet
+        tenancies_to_migrate = db.execute(
+            f"SELECT t.id, t.unit_id, t.property_id, t.deposit_registered_amount, "
+            f"t.deposit_scheme, t.deposit_registered, t.main_tenant_name, "
+            f"t.ref, t.start_date, t.status "
+            f"FROM tenancies t "
+            f"WHERE t.id NOT IN (SELECT tenancy_id FROM deposits WHERE tenancy_id IS NOT NULL) "
+            f"AND t.deposit_registered_amount IS NOT NULL AND t.deposit_registered_amount > 0 "
+            f"AND t.status IN ({active_statuses})"
+        ).fetchall()
+
+        inserted = 0
+        skipped = 0
+        for t in tenancies_to_migrate:
+            tenancy_id = t["id"]
+            amount = t["deposit_registered_amount"] or 0
+            scheme = t["deposit_scheme"]
+            protection_status = "protected" if t["deposit_registered"] else "unprotected"
+            deposit_type = "cash"
+
+            # Find the primary tenant for this tenancy
+            primary_tenant = db.execute(
+                "SELECT id FROM tenants WHERE tenancy_id = ? AND main_tenant = 1 LIMIT 1",
+                (tenancy_id,)
+            ).fetchone()
+            tenant_id = primary_tenant["id"] if primary_tenant else None
+
+            db.execute(
+                "INSERT INTO deposits (tenancy_id, tenant_id, unit_id, property_id, "
+                "amount, deposit_type, scheme, protection_status, date_received, "
+                "current_status, source) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'held', 'migration')",
+                (tenancy_id, tenant_id, t["unit_id"], t["property_id"],
+                 amount, deposit_type, scheme, protection_status, t["start_date"])
+            )
+            inserted += 1
+
+        db.commit()
+
+        return json_success({
+            "message": f"Migration complete. Inserted {inserted} deposit records, skipped {skipped} (already present).",
+            "inserted": inserted,
+            "skipped": skipped,
+        })
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/deposits/<int:deposit_id>", methods=["GET"])
+def api_deposits_detail(deposit_id):
+    """Single deposit detail with linked tenancy/tenant/property info."""
+    db = get_dict_db()
+    try:
+        deposit = db.execute(
+            "SELECT d.*, "
+            "t.main_tenant_name, t.ref AS tenancy_ref, t.status AS tenancy_status, "
+            "t.start_date AS tenancy_start_date, t.end_date AS tenancy_end_date, "
+            "t.rent_amount, t.rent_frequency, "
+            "tn.first_name AS tenant_first_name, tn.last_name AS tenant_last_name, "
+            "tn.email AS tenant_email, tn.mobile AS tenant_mobile, "
+            "COALESCE(NULLIF(p.ref, ''), NULLIF(p.address_line_1, ''), p.name) AS property_name, "
+            "p.address_line_1, p.address_line_2, p.city, p.postcode, "
+            "u.unit_ref, u.unit_type "
+            "FROM deposits d "
+            "LEFT JOIN tenancies t ON d.tenancy_id = t.id "
+            "LEFT JOIN tenants tn ON d.tenant_id = tn.id "
+            "LEFT JOIN properties p ON d.property_id = p.id "
+            "LEFT JOIN units u ON d.unit_id = u.id "
+            "WHERE d.id = ?",
+            (deposit_id,)
+        ).fetchone()
+
+        if not deposit:
+            return json_error("Deposit not found", 404)
+
+        return json_success(deposit)
     except Exception as e:
         return json_error(str(e), 500)
     finally:
@@ -3240,6 +4031,105 @@ def api_mark_read():
         return json_error(str(e), 500)
     finally:
         db.close()
+
+
+@banksia_os_bp.route("/users", methods=["GET"])
+def api_users():
+    import json as jm
+    uf = os.path.join(os.path.dirname(__file__),"users.json")
+    users_list = []
+    if os.path.exists(uf):
+        with open(uf) as f:
+            users = jm.load(f)
+            for username, info in users.items():
+                users_list.append({
+                    "username": username,
+                    "role": info.get("role", "user"),
+                    "email": info.get("email", ""),
+                    "biography": info.get("biography", ""),
+                })
+    return json_success(users_list)
+
+
+@banksia_os_bp.route("/users", methods=["POST"])
+def api_add_user():
+    user = session.get("user", {})
+    role = user.get("role", "")
+    if role not in ("super_admin", "admin"):
+        return json_error("Forbidden — admin or super admin only", 403)
+    data = request.get_json()
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+    new_role = data.get("role", "admin").strip()
+    if not username or not password:
+        return json_error("username and password required", 400)
+    if new_role not in ("admin", "super_admin", "projects"):
+        new_role = "admin"
+    # Only super_admin can create other super_admin accounts
+    if new_role == "super_admin" and role != "super_admin":
+        return json_error("Only super admins can create super admin accounts", 403)
+    users = _load_users()
+    users[username] = {"password": password, "role": new_role}
+    _save_users(users)
+    return json_success({"user": {"username": username, "role": new_role}})
+
+
+@banksia_os_bp.route("/users/<username>", methods=["PATCH"])
+def api_update_user(username):
+    data = request.get_json(silent=True)
+    if not data:
+        return json_error("No data", 400)
+    users = _load_users()
+    if username not in users:
+        return json_error("User not found", 404)
+    current_user = session.get("user", {})
+    current_role = current_user.get("role", "")
+    is_super = current_role == "super_admin"
+    is_admin = current_role in ("super_admin", "admin")
+    is_self = current_user.get("username") == username
+    # Super admin can edit anyone. Admin can edit themselves or non-super_admin users.
+    target = users[username] if isinstance(users[username], dict) else {}
+    target_role = target.get("role", "admin") if isinstance(target, dict) else "admin"
+    if is_super:
+        pass  # can edit anyone
+    elif is_admin and is_self:
+        pass  # can edit self
+    elif is_admin and target_role != "super_admin":
+        pass  # admin can edit non-super_admin users
+    else:
+        return json_error("Forbidden", 403)
+    allowed_fields = ["email", "phone", "date_of_birth", "biography", "department", "position"]
+    for f in allowed_fields:
+        if f in data:
+            users[username][f] = data[f]
+    # Only super admin can change role
+    if is_super and "role" in data:
+        users[username]["role"] = data["role"]
+    # Password update handled separately by change-password endpoint
+    if "password" in data and data["password"]:
+        users[username]["password"] = data["password"]
+    _save_users(users)
+    return json_success({"user": {"username": username, "role": users[username].get("role")}})
+
+
+@banksia_os_bp.route("/users/<username>", methods=["DELETE"])
+def api_delete_user(username):
+    current = session.get("user", {})
+    current_role = current.get("role", "")
+    if current_role not in ("super_admin", "admin"):
+        return json_error("Forbidden", 403)
+    if username == "Sami":
+        return json_error("Cannot delete super admin", 400)
+    users = _load_users()
+    target = users.get(username, {})
+    target_role = target.get("role", "admin") if isinstance(target, dict) else "admin"
+    # Admins can only delete non-super_admin users
+    if current_role == "admin" and target_role == "super_admin":
+        return json_error("Admins cannot delete super admins", 403)
+    if username in users:
+        del users[username]
+        _save_users(users)
+    return json_success({"deleted": True})
 
 
 @banksia_os_bp.route("/users/autocomplete", methods=["GET"])

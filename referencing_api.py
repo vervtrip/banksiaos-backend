@@ -2084,7 +2084,7 @@ def api_property_rent_detail(property_id):
             FROM tenancies t
             JOIN units u ON t.unit_id = u.id
             WHERE t.property_id = ? AND t.status IN ('Active', 'periodic')
-            ORDER BY u.unit_ref""",
+            ORDER BY u.sort_order ASC, u.unit_ref""",
             [property_id]
         ).fetchall()
 
@@ -2555,7 +2555,7 @@ def api_available_units():
             f"""SELECT u.id, u.unit_ref, u.unit_status, u.market_rent, u.market_rent_frequency,
                        u.deposit_amount, u.property_id, u.full_address, p.name AS property_name
                 FROM units u LEFT JOIN properties p ON u.property_id = p.id
-                {where} ORDER BY u.full_address, u.unit_ref LIMIT 500""",
+                {where} ORDER BY u.full_address, u.sort_order ASC, u.unit_ref LIMIT 500""",
             params,
         ).fetchall()
         return json_success(rows, count=len(rows))

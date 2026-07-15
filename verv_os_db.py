@@ -453,6 +453,37 @@ CREATE TABLE IF NOT EXISTS ll_communications (
     responded_at    TEXT,
     created         TEXT DEFAULT (datetime('now'))
 );
+
+-- ── 12. DEPOSITS ─────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS deposits (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenancy_id          INTEGER NOT NULL REFERENCES tenancies(id) ON DELETE CASCADE,
+    tenant_id           INTEGER REFERENCES tenants(id) ON DELETE SET NULL,
+    unit_id             INTEGER REFERENCES units(id) ON DELETE SET NULL,
+    property_id         INTEGER REFERENCES properties(id) ON DELETE SET NULL,
+    amount              REAL NOT NULL DEFAULT 0,
+    deposit_type        TEXT NOT NULL DEFAULT 'cash',  -- 'cash', 'reposit', 'guarantee'
+    scheme              TEXT,  -- 'MyDeposits', 'DPS', 'TDS', 'Reposit'
+    protection_status   TEXT NOT NULL DEFAULT 'unprotected',  -- 'protected', 'unprotected', 'returned', 'deducted'
+    protection_reference TEXT,
+    date_received       TEXT,
+    date_protected      TEXT,
+    date_returned       TEXT,
+    amount_returned     REAL DEFAULT 0,
+    deductions          REAL DEFAULT 0,
+    current_status      TEXT NOT NULL DEFAULT 'held',  -- 'held', 'returned', 'deducted', 'pending'
+    source              TEXT DEFAULT 'tenancy',  -- 'tenancy', 'manual', 'migration'
+    notes               TEXT,
+    created             TEXT NOT NULL DEFAULT (datetime('now')),
+    modified            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_deposits_tenancy_id   ON deposits(tenancy_id);
+CREATE INDEX IF NOT EXISTS idx_deposits_tenant_id    ON deposits(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_deposits_unit_id      ON deposits(unit_id);
+CREATE INDEX IF NOT EXISTS idx_deposits_property_id  ON deposits(property_id);
+CREATE INDEX IF NOT EXISTS idx_deposits_current_status ON deposits(current_status);
+CREATE INDEX IF NOT EXISTS idx_deposits_protection_status ON deposits(protection_status);
 """
 
 def init_db():
