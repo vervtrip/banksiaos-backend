@@ -1,21 +1,33 @@
-comments.json
-*.pyc
 __pycache__/
-
-# Regression database backup and snapshot (keep outside version control)
-regression_backup_*.db
-regression_snapshot_*.json
-regression_config_*.json
-
-# Temporary test files
-concurrency_test_v2.py
-regression_smoke_test.py
-
-# Route extractor (development aid only)
-extract_routes.py
-
-# Browser test screenshots / artifacts
-/tmp/banksia_test.png
-regression_*.png
-regression_*.html
-regression_*.log
+*.pyc
+*.pyo
+*.db
+*.db.*
+verv_os.db
+banksia.db
+verv.db
+dashboard.db
+*.log
+.env
+*_token.txt
+credentials.json
+secrets/
+__pycache__/
+*.bak.*
+snapshots/
+temp/
+*.ct_state.json
+sync_transactions.py
+audit_dashboard_fields.py
+Arthur OS.md
+test_arthur.py
+_test_arthur.py
+regression_playwright.py
+create_baseline.py
+run_regression.py
+snapshot.py
+nextract_routes.py
+conversation_timeline.py
+run_data_migration.py
+monday_push.py
+run_push.py
