@@ -1925,7 +1925,20 @@ def _create_activity_log(db, action, resource_id, description, user=None):
 
 
 # ── Sensitive fields that must be redacted from activity logs ──
-SENSITIVE_FIELDS = {"keybox_code", "smart_lock_code", "alarm_code", "wifi_password"}
+SENSITIVE_FIELDS = {
+    "keybox_code",
+    "smart_lock_code",
+    "alarm_code",
+    "wifi_password",
+    "alarm_details",
+    "emergency_access_notes",
+    "passport_number",
+    "ni_number",
+    "visa_number",
+    "bank_name",
+    "bank_account",
+    "bank_sort_code",
+}
 
 
 def _redact_if_sensitive(val):
@@ -7630,6 +7643,17 @@ def _derive_timeline_type(action, entity_type, field_changed):
     return (f"{entity_type}_{action}", "circle")
 
 
+def _redact_sensitive_fields(item_dict):
+    """Replace sensitive field values with '[REDACTED]' in-place.
+    
+    Uses the SENSITIVE_FIELDS set defined near _log_activity.
+    """
+    for field in SENSITIVE_FIELDS:
+        if field in item_dict and item_dict[field] is not None:
+            item_dict[field] = "[REDACTED]"
+    return item_dict
+
+
 def _enhance_timeline_item(item):
     """Add derived type, icon, and entity_label to an activity log row."""
     row = dict(item)
@@ -7640,6 +7664,7 @@ def _enhance_timeline_item(item):
     )
     row["type"] = ttype
     row["icon"] = icon
+    _redact_sensitive_fields(row)
     return row
 
 
