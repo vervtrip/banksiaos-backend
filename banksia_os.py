@@ -1469,6 +1469,412 @@ def api_property(prop_id):
         db.close()
 
 
+# ═══════════════════════════════════════════════
+# 2b. PROPERTY DEPENDENCIES — for archive/delete UI
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/properties/<int:prop_id>/dependencies", methods=["GET"])
+def api_property_dependencies(prop_id):
+    """Return counts of linked entities for archive/delete pre-checks."""
+    db = get_dict_db()
+    try:
+        prop = db.execute("SELECT id FROM properties WHERE id = ?", (prop_id,)).fetchone()
+        if not prop:
+            return json_error("Property not found", 404)
+
+        units = db.execute("SELECT COUNT(*) AS cnt FROM units WHERE property_id = ?", (prop_id,)).fetchone()["cnt"]
+
+        active_statuses = ("'Current','current','Periodic','periodic','Active','active'")
+        active_tenancies = db.execute(
+            f"SELECT COUNT(*) AS cnt FROM tenancies WHERE property_id = ? AND status IN ({active_statuses})",
+            (prop_id,)
+        ).fetchone()["cnt"]
+
+        total_tenancies = db.execute(
+            "SELECT COUNT(*) AS cnt FROM tenancies WHERE property_id = ?",
+            (prop_id,)
+        ).fetchone()["cnt"]
+
+        tenants = db.execute(
+            "SELECT COUNT(*) AS cnt FROM tenants WHERE property_id = ?",
+            (prop_id,)
+        ).fetchone()["cnt"]
+
+        # applicants don't have a property_id column — skip them
+        applicants = 0
+
+        documents = db.execute(
+            "SELECT COUNT(*) AS cnt FROM documents WHERE related_to = 'property' AND related_id = ?",
+            (str(prop_id),)
+        ).fetchone()["cnt"]
+
+        maintenance_jobs = db.execute(
+            "SELECT COUNT(*) AS cnt FROM maintenance_jobs WHERE property_id = ?",
+            (prop_id,)
+        ).fetchone()["cnt"]
+
+        # Also check for images
+        images = db.execute(
+            "SELECT COUNT(*) AS cnt FROM property_images WHERE property_id = ?",
+            (prop_id,)
+        ).fetchone()["cnt"]
+
+        return json_success({
+            "units": units,
+            "active_tenancies": active_tenancies,
+            "total_tenancies": total_tenancies,
+            "tenants": tenants,
+            "applicants": applicants,
+            "documents": documents,
+            "maintenance_jobs": maintenance_jobs,
+            "images": images,
+            "has_active_tenancies": active_tenancies > 0,
+            "has_any_records": any([
+                units, total_tenancies, tenants, applicants,
+                documents, maintenance_jobs, images
+            ]),
+        })
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 2c. CREATE FULL PROPERTY — transactional multi-step
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/properties/create-full", methods=["POST"])
+def api_create_property_full():
+    """Complete multi-step property creation in one transactional request.
+    Creates the property record, optional units, access records, and property info.
+    Rolls back entirely on any failure."""
+    data = request.get_json(force=True, silent=True) or {}
+    if not data:
+        return json_error("No data provided")
+
+    # Validate required fields
+    required = ["name", "address_line_1", "postcode"]
+    missing = [f for f in required if not data.get(f)]
+    if missing:
+        return json_error(f"Missing required fields: {', '.join(missing)}")
+
+    db = get_dict_db()
+    try:
+        # ── 1. Build property insert ──
+        property_fields = [
+            "name", "address_line_1", "address_line_2", "city", "county",
+            "postcode", "country", "property_ref", "property_type", "status",
+            "acquisition_date", "property_owner_id", "owner_company",
+            "management_type", "monthly_property_rent", "management_fee",
+            "contract_start", "contract_end", "notice_period_days",
+            "deposit_paid_to_landlord", "responsible_manager",
+            "bedrooms", "bathrooms", "kitchens", "floors", "max_occupancy",
+            "is_hmo", "licence_number", "licence_expiry",
+            "notes",
+        ]
+        ins_cols = []
+        ins_vals = []
+        for f in property_fields:
+            if f in data and data[f] is not None:
+                val = data[f]
+                if f == "is_hmo":
+                    val = 1 if val else 0
+                ins_cols.append(f)
+                ins_vals.append(val)
+
+        placeholders = ",".join(["?"] * len(ins_cols))
+        cursor = db.execute(
+            f"INSERT INTO properties ({','.join(ins_cols)}) VALUES ({placeholders})",
+            ins_vals
+        )
+        property_id = cursor.lastrowid
+
+        # ── 2. Create units if provided ──
+        units_data = data.get("units", [])
+        if units_data and isinstance(units_data, list):
+            unit_fields = [
+                "unit_ref", "unit_type", "floor", "bedrooms", "capacity",
+                "market_rent", "furnished", "status", "unit_vacant", "sort_order",
+            ]
+            for u_data in units_data:
+                u_ins_cols = ["property_id"]
+                u_ins_vals = [property_id]
+                for f in unit_fields:
+                    if f in u_data and u_data[f] is not None:
+                        val = u_data[f]
+                        if f == "furnished":
+                            val = 1 if val else 0
+                        if f == "unit_vacant":
+                            val = 1 if val else 0
+                        u_ins_cols.append(f)
+                        u_ins_vals.append(val)
+                u_placeholders = ",".join(["?"] * len(u_ins_cols))
+                db.execute(
+                    f"INSERT INTO units ({','.join(u_ins_cols)}) VALUES ({u_placeholders})",
+                    u_ins_vals
+                )
+
+        # ── 3. Create access record if provided ──
+        access_data = data.get("access")
+        if access_data and isinstance(access_data, dict):
+            # Map the frontend fields to DB access_records columns
+            access_field_map = {
+                "main_door_instructions": "label",
+                "keybox_location": "identifier",
+                "keybox_code": "notes",
+                "smart_lock_provider": "notes",
+                "smart_lock_code": "notes",
+                "intercom_details": "label",
+                "alarm_details": "label",
+                "keys_count": "notes",
+                "key_holder": "assigned_to",
+                "emergency_access_notes": "notes",
+            }
+            # Build a combined notes string and label from access data
+            access_parts = []
+            for k, v in access_data.items():
+                if v and isinstance(v, str) and v.strip():
+                    label = k.replace("_", " ").title()
+                    access_parts.append(f"{label}: {v}")
+            combined_notes = "; ".join(access_parts)
+
+            db.execute(
+                "INSERT INTO access_records (property_id, type, label, notes) VALUES (?, 'property_access', ?, ?)",
+                [property_id, "Main Access", combined_notes]
+            )
+
+        # ── 4. Store property_info as notes if provided ──
+        info_data = data.get("property_info")
+        if info_data and isinstance(info_data, dict):
+            info_parts = []
+            for k, v in info_data.items():
+                if v and isinstance(v, str) and v.strip():
+                    label = k.replace("_", " ").title()
+                    info_parts.append(f"{label}: {v}")
+            if info_parts:
+                info_str = "; ".join(info_parts)
+                existing_notes = db.execute(
+                    "SELECT notes FROM properties WHERE id = ?", (property_id,)
+                ).fetchone()
+                current_notes = existing_notes["notes"] or "" if existing_notes else ""
+                if current_notes:
+                    info_str = current_notes + "\n\n" + info_str
+                db.execute(
+                    "UPDATE properties SET notes = ? WHERE id = ?",
+                    [info_str, property_id]
+                )
+
+        # ── 5. Create activity log ──
+        _create_activity_log(db, "property_created", property_id,
+                             f"Property '{data.get('name', '')}' created with {len(units_data) if units_data else 0} units")
+
+        db.commit()
+        return json_success({
+            "id": property_id,
+            "message": "Property created successfully",
+            "units_created": len(units_data) if units_data else 0,
+        }), 201
+
+    except Exception as e:
+        db.rollback()
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+def _create_activity_log(db, action, resource_id, description, user=None):
+    """Create an activity log entry. Uses the activity table if it exists,
+    otherwise writes to a simple log via database-level fallback."""
+    if user is None:
+        user = getattr(request, "current_user", {}).get("username", "system")
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        # Try activity table first
+        try:
+            db.execute(
+                "INSERT INTO activity (action, resource_type, resource_id, description, user, created_at) "
+                "VALUES (?, 'property', ?, ?, ?, ?)",
+                [action, resource_id, description, user, now]
+            )
+        except Exception:
+            # activity table doesn't exist — fall back to inserting into
+            # a generic log table if available, or just pass silently
+            try:
+                db.execute(
+                    "INSERT INTO notifications (type, title, message, created_at) "
+                    "VALUES ('activity', ?, ?, ?)",
+                    [f"{action}: {description}", f"Property #{resource_id}", now]
+                )
+            except Exception:
+                pass  # No logging table at all — benign
+    except Exception:
+        pass  # Never let logging crash the main operation
+
+
+# ═══════════════════════════════════════════════
+# 2d. ARCHIVE PROPERTY — soft delete with dependency check
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/properties/<int:prop_id>/archive", methods=["POST"])
+def api_archive_property(prop_id):
+    """Archive (soft delete) a property. Checks for active tenancies first."""
+    db = get_dict_db()
+    try:
+        prop = db.execute("SELECT * FROM properties WHERE id = ?", (prop_id,)).fetchone()
+        if not prop:
+            return json_error("Property not found", 404)
+
+        # Check for active tenancies on units under this property
+        active_statuses = ("'Current','current','Periodic','periodic','Active','active'")
+        active_tenancies = db.execute(
+            f"SELECT id, ref, main_tenant_name, unit_id, status FROM tenancies "
+            f"WHERE property_id = ? AND status IN ({active_statuses})",
+            (prop_id,)
+        ).fetchall()
+
+        if active_tenancies:
+            return json_error({
+                "message": "Cannot archive property with active tenancies",
+                "code": "ACTIVE_TENANCIES_EXIST",
+                "active_tenancies": [dict(t) for t in active_tenancies],
+            }, 409)
+
+        # Check for active maintenance jobs
+        active_jobs = db.execute(
+            "SELECT COUNT(*) AS cnt FROM maintenance_jobs "
+            "WHERE property_id = ? AND status NOT IN ('COMPLETED', 'CANCELLED', 'No Invoice Found')",
+            (prop_id,)
+        ).fetchone()["cnt"]
+
+        if active_jobs > 0:
+            return json_error({
+                "message": "Cannot archive property with active maintenance jobs",
+                "code": "ACTIVE_MAINTENANCE_EXISTS",
+                "active_maintenance_count": active_jobs,
+            }, 409)
+
+        # Set status to 'archived'
+        db.execute(
+            "UPDATE properties SET status = 'archived', modified = ? WHERE id = ?",
+            [datetime.now(timezone.utc).isoformat(), prop_id]
+        )
+
+        _create_activity_log(db, "property_archived", prop_id,
+                             f"Property '{prop.get('name', '') or prop.get('ref', '')}' archived")
+
+        db.commit()
+        return json_success({
+            "id": prop_id,
+            "message": "Property archived successfully",
+            "status": "archived",
+        })
+
+    except Exception as e:
+        db.rollback()
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 2e. DELETE PROPERTY — permanent removal (super_admin only)
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/properties/<int:prop_id>/delete", methods=["POST"])
+def api_delete_property(prop_id):
+    """Permanently delete a property. Requires super_admin role and
+    no remaining operational records."""
+    user = session.get("user", {})
+    if user.get("role") != "super_admin":
+        return json_error("Only super admins can permanently delete properties", 403)
+
+    db = get_dict_db()
+    try:
+        prop = db.execute("SELECT * FROM properties WHERE id = ?", (prop_id,)).fetchone()
+        if not prop:
+            return json_error("Property not found", 404)
+
+        # Check for any remaining records
+        dependencies = {}
+
+        units_count = db.execute(
+            "SELECT COUNT(*) AS cnt FROM units WHERE property_id = ?", (prop_id,)
+        ).fetchone()["cnt"]
+        dependencies["units"] = units_count
+
+        tenancies_count = db.execute(
+            "SELECT COUNT(*) AS cnt FROM tenancies WHERE property_id = ?", (prop_id,)
+        ).fetchone()["cnt"]
+        dependencies["tenancies"] = tenancies_count
+
+        tenants_count = db.execute(
+            "SELECT COUNT(*) AS cnt FROM tenants WHERE property_id = ?", (prop_id,)
+        ).fetchone()["cnt"]
+        dependencies["tenants"] = tenants_count
+
+        # applicants don't have a property_id column — skip them
+        applicants_count = 0
+        dependencies["applicants"] = applicants_count
+
+        documents_count = db.execute(
+            "SELECT COUNT(*) AS cnt FROM documents WHERE related_to = 'property' AND related_id = ?",
+            (str(prop_id),)
+        ).fetchone()["cnt"]
+        dependencies["documents"] = documents_count
+
+        maintenance_count = db.execute(
+            "SELECT COUNT(*) AS cnt FROM maintenance_jobs WHERE property_id = ?", (prop_id,)
+        ).fetchone()["cnt"]
+        dependencies["maintenance_jobs"] = maintenance_count
+
+        images_count = db.execute(
+            "SELECT COUNT(*) AS cnt FROM property_images WHERE property_id = ?", (prop_id,)
+        ).fetchone()["cnt"]
+        dependencies["images"] = images_count
+
+        # Check access_records
+        access_count = db.execute(
+            "SELECT COUNT(*) AS cnt FROM access_records WHERE property_id = ?", (prop_id,)
+        ).fetchone()["cnt"]
+        dependencies["access_records"] = access_count
+
+        # Check transactions
+        try:
+            transactions_count = db.execute(
+                "SELECT COUNT(*) AS cnt FROM transactions WHERE property_id = ?", (prop_id,)
+            ).fetchone()["cnt"]
+        except Exception:
+            transactions_count = 0
+        dependencies["transactions"] = transactions_count
+
+        has_history = any(v > 0 for v in dependencies.values())
+        if has_history:
+            return json_error({
+                "message": "Cannot delete property with operational history",
+                "code": "HAS_OPERATIONAL_HISTORY",
+                "dependencies": dependencies,
+            }, 409)
+
+        # Delete the property — CASCADE handles units, access_records, property_images
+        db.execute("DELETE FROM properties WHERE id = ?", (prop_id,))
+
+        _create_activity_log(db, "property_deleted", prop_id,
+                             f"Property '{prop.get('name', '') or prop.get('ref', '')}' permanently deleted by {user.get('username', 'unknown')}")
+
+        db.commit()
+        return json_success({
+            "id": prop_id,
+            "message": "Property permanently deleted",
+        })
+
+    except Exception as e:
+        db.rollback()
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
 @banksia_os_bp.route("/properties/<int:prop_id>/images")
 def api_property_images(prop_id):
     db = get_dict_db()
