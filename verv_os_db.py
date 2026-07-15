@@ -27,6 +27,17 @@ def get_db():
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA busy_timeout=5000")
         _vos_local.conn = conn
+    try:
+        _vos_local.conn.execute("SELECT 1")
+    except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+        # Connection was closed (e.g. by init_db). Reopen it.
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=5000")
+        _vos_local.conn = conn
     return _vos_local.conn
 
 
@@ -452,6 +463,7 @@ def init_db():
             conn.commit()
         finally:
             conn.close()
+            _vos_local.conn = None
 
 
 def dict_from_row(row):
