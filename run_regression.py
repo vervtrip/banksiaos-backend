@@ -12,6 +12,7 @@ Architecture:
 import concurrent.futures
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -261,6 +262,131 @@ if code == 200:
 # Connections status
 code, data, err = req(AUTH, f"{BASE}/api/connections/status")
 ok("Connections status loads", code == 200, detail=err)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 2b. DASHBOARD — NEW ADDITIONS (vacant units, move-ins/outs, pipeline, arrears)
+# ══════════════════════════════════════════════════════════════════════════
+print("\n--- 2b. DASHBOARD NEW ADDITIONS ---")
+
+ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")   # exact YYYY-MM-DD
+ISO_TS = re.compile(r"^\d{4}-\d{2}-\d{2}")       # ISO datetime prefix
+
+code, data, err = req(AUTH, f"{BASE}/api/banksia-os/dashboard")
+ok("Dashboard reloads for new-additions checks", code == 200, detail=err)
+db = data if "total_properties" in data else data.get("data", {})
+
+# 1. vacant_units_list — list; property name, unit_ref, numeric market_rent; count sane
+vul = db.get("vacant_units_list")
+ok("vacant_units_list is a list", is_list(vul), detail=f"type {type(vul).__name__}")
+ok("vacant_units_list count is sane (>=0)", isinstance(vul, list) and len(vul) >= 0)
+if is_nonempty_list(vul):
+    ok("vacant_units_list items have property name",
+       all(isinstance(x.get("property_name"), str) and x.get("property_name") for x in vul),
+       detail=f"keys: {list(vul[0].keys())}")
+    ok("vacant_units_list items have unit_ref", all("unit_ref" in x for x in vul))
+    ok("vacant_units_list market_rent is numeric",
+       all(isinstance(x.get("market_rent"), (int, float)) for x in vul))
+
+# 2. upcoming_move_ins — list; tenant, property, unit, ISO move_in_date
+umi = db.get("upcoming_move_ins")
+ok("upcoming_move_ins is a list", is_list(umi), detail=f"type {type(umi).__name__}")
+if is_nonempty_list(umi):
+    ok("upcoming_move_ins items have tenant/property/unit",
+       all(all(k in x for k in ("tenant_name", "property_name", "unit_ref")) for x in umi),
+       detail=f"keys: {list(umi[0].keys())}")
+    ok("upcoming_move_ins move_in_date is ISO YYYY-MM-DD",
+       all(isinstance(x.get("move_in_date"), str) and ISO_DATE.match(x["move_in_date"]) for x in umi))
+
+# 3. upcoming_move_outs — list; tenant, property, unit, ISO move_out date
+umo = db.get("upcoming_move_outs")
+ok("upcoming_move_outs is a list", is_list(umo), detail=f"type {type(umo).__name__}")
+if is_nonempty_list(umo):
+    ok("upcoming_move_outs items have tenant/property/unit",
+       all(all(k in x for k in ("tenant_name", "property_name", "unit_ref")) for x in umo),
+       detail=f"keys: {list(umo[0].keys())}")
+    ok("upcoming_move_outs move_out_date is ISO YYYY-MM-DD",
+       all(isinstance(x.get("move_out_date"), str) and ISO_DATE.match(x["move_out_date"]) for x in umo))
+
+# 4. referencing_pipeline — dict of numeric stage counts, total == sum of stages
+rp = db.get("referencing_pipeline")
+ok("referencing_pipeline is a dict", is_dict(rp), detail=f"type {type(rp).__name__}")
+if is_dict(rp):
+    ok("referencing_pipeline has integer total", isinstance(rp.get("total"), int),
+       detail=f"total={rp.get('total')!r}")
+    stage_vals = [v for k, v in rp.items() if k != "total"]
+    ok("referencing_pipeline stage counts are integers", all(isinstance(v, int) for v in stage_vals))
+    ok("referencing_pipeline total == sum of stages",
+       isinstance(rp.get("total"), int) and rp["total"] == sum(stage_vals),
+       detail=f"total={rp.get('total')} sum_stages={sum(stage_vals)}")
+
+# 5. tenancies_in_arrears_count — integer >= 0
+tac = db.get("tenancies_in_arrears_count")
+ok("tenancies_in_arrears_count is int >= 0", isinstance(tac, int) and tac >= 0,
+   detail=f"got {tac!r}")
+
+# 6. arrears_by_tenancy — non-empty list; real tenant/property names, numeric amount > 0
+abt = db.get("arrears_by_tenancy")
+ok("arrears_by_tenancy is a non-empty list", is_nonempty_list(abt),
+   detail=f"len {len(abt) if isinstance(abt, list) else 'n/a'}")
+if is_nonempty_list(abt):
+    ok("arrears_by_tenancy tenant_name is a non-null real string (JOIN populated)",
+       all(isinstance(x.get("tenant_name"), str) and x.get("tenant_name").strip() for x in abt),
+       detail="empty/mismatched names indicate the old JOIN bug")
+    ok("arrears_by_tenancy property_name is a non-null real string",
+       all(isinstance(x.get("property_name"), str) and x.get("property_name").strip() for x in abt))
+    ok("arrears_by_tenancy arrears amount is numeric > 0",
+       all(isinstance(x.get("arrears_total"), (int, float)) and x.get("arrears_total") > 0 for x in abt))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 2c. DASHBOARD ACTIVITY FEED (/dashboard/activity)
+# ══════════════════════════════════════════════════════════════════════════
+print("\n--- 2c. DASHBOARD ACTIVITY FEED ---")
+
+# Requires auth
+code, data, err = req(GUEST, f"{BASE}/api/banksia-os/dashboard/activity")
+ok("Activity feed 401 without auth", code == 401, detail=f"got {code}: {err}")
+
+code, data, err = req(AUTH, f"{BASE}/api/banksia-os/dashboard/activity")
+ok("Activity feed loads authed (200)", code == 200, detail=err)
+if code == 200:
+    events = data.get("data") if isinstance(data, dict) else data
+    ok("Activity feed body is a list of events", is_list(events),
+       detail=f"type {type(events).__name__}")
+    if is_nonempty_list(events):
+        ok("Activity events have stable integer id",
+           all(isinstance(e.get("id"), int) for e in events),
+           detail=f"keys: {list(events[0].keys())}")
+        ok("Activity events have event type (event_type str)",
+           all(isinstance(e.get("event_type"), str) and e.get("event_type") for e in events))
+        ok("Activity events have record type (link_type str)",
+           all(isinstance(e.get("link_type"), str) and e.get("link_type") for e in events))
+        ok("Activity events have record id (link_id int)",
+           all(isinstance(e.get("link_id"), int) for e in events))
+        ok("Activity events have title (str)",
+           all(isinstance(e.get("title"), str) for e in events))
+        ok("Activity events have real ISO timestamp (ts)",
+           all(isinstance(e.get("ts"), str) and ISO_TS.match(e["ts"]) for e in events))
+        # Backend sorts chronologically descending. Source tables emit two ts
+        # shapes (tz-aware ISO 'YYYY-MM-DDTHH:MM:SS+00:00' and naive
+        # 'YYYY-MM-DD HH:MM:SS'); normalise both to 'YYYY-MM-DD HH:MM:SS' before
+        # comparing so we assert true chronological order, not raw byte order.
+        def _norm_ts(ts):
+            ts = (ts or "").replace("T", " ")
+            if len(ts) >= 20 and ts[19] in "+-":
+                ts = ts[:19]
+            elif ts.endswith("Z"):
+                ts = ts[:-1]
+            return ts[:19]
+        ts_list = [_norm_ts(e["ts"]) for e in events]
+        ok("Activity events sorted descending by ts (chronological)",
+           all(ts_list[i] >= ts_list[i + 1] for i in range(len(ts_list) - 1)),
+           detail="feed not in descending chronological order")
+        # No duplicate (event_type, record_id) pairs
+        pairs = [(e["event_type"], e["link_id"]) for e in events]
+        ok("Activity events have no duplicate (type,record_id) pairs",
+           len(pairs) == len(set(pairs)), detail=f"{len(pairs) - len(set(pairs))} duplicate(s)")
 
 
 # ══════════════════════════════════════════════════════════════════════════

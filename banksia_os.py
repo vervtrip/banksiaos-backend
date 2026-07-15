@@ -264,6 +264,100 @@ def api_dashboard():
             "GROUP BY p.id ORDER BY total_rent DESC LIMIT 1"
         ).fetchone()
 
+        # ── Phase 2 additions ──
+
+        # Vacant units list with property names
+        vacant_units_list = db.execute(
+            "SELECT u.id, u.unit_ref, u.market_rent, u.property_id, "
+            "COALESCE(NULLIF(p.ref, ''), NULLIF(p.address_line_1, ''), p.name) AS property_name "
+            "FROM units u "
+            "JOIN properties p ON u.property_id = p.id "
+            "WHERE u.unit_vacant = 1 "
+            "ORDER BY p.name ASC, u.unit_ref ASC"
+        ).fetchall()
+
+        # Upcoming move-ins with tenant/property/unit details (this calendar month only)
+        month_end_exclusive = next_month.isoformat()
+        upcoming_move_ins = db.execute(
+            "SELECT t.id AS tenancy_id, t.move_in_date, t.main_tenant_name, "
+            "t.property_id, t.unit_id, "
+            "COALESCE(NULLIF(p.ref, ''), NULLIF(p.address_line_1, ''), p.name) AS property_name, "
+            "u.unit_ref "
+            "FROM tenancies t "
+            "JOIN properties p ON t.property_id = p.id "
+            "JOIN units u ON t.unit_id = u.id "
+            "WHERE t.move_in_date >= ? AND t.move_in_date < ? "
+            "AND t.status IN ('Active', 'active', 'Periodic', 'periodic') "
+            "ORDER BY t.move_in_date ASC",
+            (month_start, month_end_exclusive)
+        ).fetchall()
+
+        # Upcoming move-outs with tenant/property/unit details (this calendar month only)
+        upcoming_move_outs = db.execute(
+            "SELECT t.id AS tenancy_id, t.move_out_date, t.main_tenant_name, "
+            "t.property_id, t.unit_id, "
+            "COALESCE(NULLIF(p.ref, ''), NULLIF(p.address_line_1, ''), p.name) AS property_name, "
+            "u.unit_ref "
+            "FROM tenancies t "
+            "JOIN properties p ON t.property_id = p.id "
+            "JOIN units u ON t.unit_id = u.id "
+            "WHERE t.move_out_date >= ? AND t.move_out_date < ? "
+            "AND t.status IN ('Active', 'active', 'Periodic', 'periodic') "
+            "ORDER BY t.move_out_date ASC",
+            (month_start, month_end_exclusive)
+        ).fetchall()
+
+        # Referencing pipeline breakdown
+        referencing_pipeline_raw = db.execute(
+            "SELECT status, COUNT(*) AS count FROM referencing_forms GROUP BY status"
+        ).fetchall()
+        pipeline_map = {}
+        for r in referencing_pipeline_raw:
+            st = (r["status"] or "unknown").lower()
+            pipeline_map[st] = r["count"]
+        referencing_pipeline = {
+            "new": pipeline_map.get("draft", 0) + pipeline_map.get("sent", 0),
+            "submitted": pipeline_map.get("submitted", 0),
+            "under_review": pipeline_map.get("under_review", 0),
+            "approved": pipeline_map.get("approved", 0),
+            "rejected": pipeline_map.get("rejected", 0),
+            "declined": pipeline_map.get("rejected", 0) + pipeline_map.get("declined", 0),
+            "tenancy_created": pipeline_map.get("tenancy_created", 0),
+            "total": sum(pipeline_map.values()),
+        }
+
+        # Arrears by tenancy — count of affected tenancies and top arrears list
+        tenancies_in_arrears_count = db.execute(
+            "SELECT COUNT(DISTINCT tenancy_id) AS cnt FROM transactions "
+            "WHERE is_outstanding = 1 AND tenancy_id IS NOT NULL "
+            "AND amount_outstanding > 0"
+        ).fetchone()["cnt"]
+
+        arrears_by_tenancy = db.execute(
+            "SELECT txn.tenancy_id, t.id AS local_tenancy_id, t.ref AS tenancy_ref, "
+            "t.main_tenant_name, "
+            "COALESCE(NULLIF(p.ref, ''), NULLIF(p.address_line_1, ''), p.name) AS property_name, "
+            "SUM(COALESCE(txn.amount_outstanding, 0)) AS arrears_total "
+            "FROM transactions txn "
+            "LEFT JOIN tenancies t ON t.arthur_id = txn.tenancy_id "
+            "LEFT JOIN properties p ON t.property_id = p.id "
+            "WHERE txn.is_outstanding = 1 AND txn.amount_outstanding > 0 "
+            "AND txn.tenancy_id IS NOT NULL "
+            "GROUP BY txn.tenancy_id "
+            "ORDER BY arrears_total DESC "
+            "LIMIT 20"
+        ).fetchall()
+        arrears_by_tenancy_list = [
+            {
+                "tenancy_id": r["tenancy_id"],
+                "tenancy_ref": r["tenancy_ref"],
+                "tenant_name": r["main_tenant_name"],
+                "property_name": r["property_name"],
+                "arrears_total": round(r["arrears_total"], 2),
+            }
+            for r in arrears_by_tenancy
+        ]
+
         return json_success({
             "total_properties": total_properties,
             "total_units": total_units,
@@ -292,7 +386,130 @@ def api_dashboard():
             "open_message_threads": open_message_threads,
             "pending_document_uploads": pending_document_uploads,
             "new_submissions_total": new_submissions_total,
+            # Phase 2 additions
+            "vacant_units_list": [{"id": r["id"], "unit_ref": r["unit_ref"], "market_rent": r["market_rent"], "property_id": r["property_id"], "property_name": r["property_name"]} for r in vacant_units_list],
+            "upcoming_move_ins": [{"tenancy_id": r["tenancy_id"], "move_in_date": r["move_in_date"], "tenant_name": r["main_tenant_name"], "property_name": r["property_name"], "property_id": r["property_id"], "unit_ref": r["unit_ref"], "unit_id": r["unit_id"]} for r in upcoming_move_ins],
+            "upcoming_move_outs": [{"tenancy_id": r["tenancy_id"], "move_out_date": r["move_out_date"], "tenant_name": r["main_tenant_name"], "property_name": r["property_name"], "property_id": r["property_id"], "unit_ref": r["unit_ref"], "unit_id": r["unit_id"]} for r in upcoming_move_outs],
+            "referencing_pipeline": referencing_pipeline,
+            "tenancies_in_arrears_count": tenancies_in_arrears_count,
+            "arrears_by_tenancy": arrears_by_tenancy_list,
         })
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 1a. RECENT ACTIVITY FEED
+#     Synthetic union of recent events across submissions, referencing,
+#     maintenance requests, and tenancy changes. No new table required.
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/dashboard/activity")
+def api_dashboard_activity():
+    db = get_dict_db()
+    try:
+        limit = int_param(request.args.get("limit", 30), 30)
+        since = request.args.get("since")
+        activity = []
+        has_since = bool(since)
+
+        # Build the WHERE/NULLIF based on whether 'since' param is provided
+        def build_activity_query(base_select, base_from, date_col, extra_where="", extra_join=""):
+            if has_since:
+                where_clause = f"WHERE {date_col} IS NOT NULL AND {date_col} >= ?{extra_where}"
+                params = [since]
+            else:
+                where_clause = f"WHERE {date_col} IS NOT NULL{extra_where}"
+                params = []
+            return f"{base_select} FROM {base_from} {extra_join} {where_clause}", params
+
+        # 1. Referencing form submissions
+        sql, params = build_activity_query(
+            "SELECT id, 'referencing_submitted' AS event_type, submitted_at AS ts, "
+            "COALESCE(NULLIF(first_name, ''), 'Applicant') || ' ' || COALESCE(NULLIF(last_name, ''), '') AS title, "
+            "'Referencing form submitted' AS description, "
+            "'referencing' AS category, 'referencing_form' AS link_type, id AS link_id, "
+            "applicant_id AS related_id",
+            "referencing_forms", "submitted_at"
+        )
+        rows = db.execute(sql, params).fetchall()
+        for r in rows:
+            activity.append(dict(r))
+
+        # 2. Referencing reviews
+        sql, params = build_activity_query(
+            "SELECT id, 'referencing_reviewed' AS event_type, reviewed_at AS ts, "
+            "COALESCE(NULLIF(first_name, ''), 'Applicant') || ' ' || COALESCE(NULLIF(last_name, ''), '') AS title, "
+            "'Referencing reviewed by ' || COALESCE(reviewed_by, 'team') AS description, "
+            "'referencing' AS category, 'referencing_form' AS link_type, id AS link_id, "
+            "applicant_id AS related_id",
+            "referencing_forms", "reviewed_at"
+        )
+        rows = db.execute(sql, params).fetchall()
+        for r in rows:
+            activity.append(dict(r))
+
+        # 3. Maintenance requests
+        sql, params = build_activity_query(
+            "SELECT id, 'maintenance_created' AS event_type, created AS ts, "
+            "COALESCE(title, 'Maintenance request') AS title, "
+            "COALESCE(category, 'General') || ' - ' || COALESCE(reporter_name, 'Tenant') AS description, "
+            "'maintenance' AS category, 'maintenance_request' AS link_type, id AS link_id, "
+            "property_id AS related_id",
+            "maintenance_requests", "created"
+        )
+        rows = db.execute(sql, params).fetchall()
+        for r in rows:
+            activity.append(dict(r))
+
+        # 4. Tenancy changes (new tenancies created)
+        sql, params = build_activity_query(
+            "SELECT t.id, 'tenancy_created' AS event_type, t.created AS ts, "
+            "COALESCE(t.main_tenant_name, 'Tenant') || ' - ' || "
+            "COALESCE(NULLIF(p.ref, ''), NULLIF(p.address_line_1, ''), p.name) AS title, "
+            "'New tenancy created' AS description, "
+            "'tenancy' AS category, 'tenancy' AS link_type, t.id AS link_id, "
+            "t.property_id AS related_id",
+            "tenancies t", "t.created",
+            extra_join="JOIN properties p ON t.property_id = p.id"
+        )
+        rows = db.execute(sql, params).fetchall()
+        for r in rows:
+            activity.append(dict(r))
+
+        # 5. Message threads
+        sql, params = build_activity_query(
+            "SELECT id, 'message_created' AS event_type, created AS ts, "
+            "COALESCE(title, 'Message thread') AS title, "
+            "'New message thread opened' AS description, "
+            "'message' AS category, 'message_thread' AS link_type, id AS link_id, "
+            "property_id AS related_id",
+            "message_threads", "created"
+        )
+        rows = db.execute(sql, params).fetchall()
+        for r in rows:
+            activity.append(dict(r))
+
+        # Sort by timestamp descending and limit.
+        # Timestamps arrive in two shapes across source tables: tz-aware ISO
+        # ('2026-07-12T17:06:22+00:00') and naive ('2026-07-12 17:28:05').
+        # Normalise both to 'YYYY-MM-DD HH:MM:SS' so same-day events from
+        # different sources order truly chronologically, not by raw byte value.
+        def _norm_ts(item):
+            ts = item.get("ts") or ""
+            ts = ts.replace("T", " ")
+            if len(ts) >= 20 and ts[19] in "+-":
+                ts = ts[:19]
+            elif ts.endswith("Z"):
+                ts = ts[:-1]
+            return ts[:19]
+
+        activity.sort(key=_norm_ts, reverse=True)
+        activity = activity[:limit]
+
+        return json_success(activity, total=len(activity), page=1, per_page=limit)
     except Exception as e:
         return json_error(str(e), 500)
     finally:
