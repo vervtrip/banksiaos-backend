@@ -309,6 +309,25 @@ def health_check():
         db_ok = cur.fetchone() is not None
     except Exception:
         db_ok = False
+    return jsonify({"status": "ok", "database": "connected" if db_ok else "error", "uptime_seconds": 0})
+
+@app.route("/api/favicon")
+def favicon():
+    import base64
+    from flask import Response
+    favicon_path = os.path.join(os.path.dirname(__file__), "..", "verv-platform", "apps", "banksia-os", "public", "favicon.ico")
+    alt_path = "/root/verv-platform/apps/banksia-os/public/favicon.ico"
+    for p in [favicon_path, alt_path]:
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                data = f.read()
+            return Response(data, mimetype="image/x-icon")
+    return ("", 204)
+    try:
+        cur = get_db().execute("SELECT 1")
+        db_ok = cur.fetchone() is not None
+    except Exception:
+        db_ok = False
     return jsonify({
         "status": "ok" if db_ok else "degraded",
         "database": "connected" if db_ok else "error",

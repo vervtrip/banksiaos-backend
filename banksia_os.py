@@ -1376,7 +1376,9 @@ def api_properties():
     rows, total = paginate(
         f"SELECT *, "
         f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id) AS actual_units, "
-        f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id AND u.unit_vacant = 0) AS occupied_units "
+        f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id AND u.unit_vacant = 0) AS occupied_units, "
+        f"COALESCE((SELECT SUM(t.rent_amount) FROM tenancies t WHERE t.property_id = properties.id AND t.status IN ('Current','current','Periodic','periodic','Active','active')), 0) AS monthly_rent, "
+        f"CASE WHEN (SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id AND u.unit_vacant = 0) > 0 THEN 'Active' ELSE 'Vacant' END AS property_status "
         f"FROM properties WHERE {base_where} ORDER BY ref ASC",
         f"SELECT COUNT(*) AS cnt FROM properties WHERE {base_where}",
         base_params, page, per_page
@@ -1540,8 +1542,13 @@ def api_units():
     where = " AND ".join(where_parts)
 
     rows, total = paginate(
-        f"SELECT * FROM units WHERE {where} ORDER BY unit_ref ASC",
-        f"SELECT COUNT(*) AS cnt FROM units WHERE {where}",
+        f"SELECT u.*, "
+        f"(SELECT p.name FROM properties p WHERE p.id = u.property_id) AS property_name, "
+        f"(SELECT t.main_tenant_name FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenant_name, "
+        f"(SELECT t.start_date FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_start_date, "
+        f"(SELECT t.end_date FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_end_date "
+        f"FROM units u WHERE {where} ORDER BY unit_ref ASC",
+        f"SELECT COUNT(*) AS cnt FROM units u WHERE {where}",
         params, page, per_page
     )
 
@@ -1653,8 +1660,12 @@ def api_tenancies():
     where = " AND ".join(where_parts)
 
     rows, total = paginate(
-        f"SELECT * FROM tenancies WHERE {where} ORDER BY start_date DESC",
-        f"SELECT COUNT(*) AS cnt FROM tenancies WHERE {where}",
+        f"SELECT t.*, "
+        f"(SELECT p.name FROM properties p WHERE p.id = t.property_id) AS property_name, "
+        f"(SELECT u.unit_ref FROM units u WHERE u.id = t.unit_id) AS unit_ref, "
+        f"t.deposit_registered_amount AS deposit_amount "
+        f"FROM tenancies t WHERE {where} ORDER BY start_date DESC",
+        f"SELECT COUNT(*) AS cnt FROM tenancies t WHERE {where}",
         params, page, per_page
     )
 
@@ -1830,13 +1841,15 @@ def api_tenants():
     rows, total = paginate(
         f"SELECT id, arthur_id, arthur_person_id, tenancy_id, unit_id, property_id, "
         f"full_address, title, first_name, last_name, date_of_birth, gender, citizen, "
-        f"email, phone_home, phone_work, mobile, passport_number, visa_number, visa_type, "
+        f"email, phone_home, phone_work, mobile AS phone, passport_number, visa_number, visa_type, "
         f"visa_years, country_of_origin, ni_number, main_tenant, status, has_guarantor, "
         f"guarantor_first_name, guarantor_last_name, guarantor_email, "
         f"employment_company, student_status, university, "
         f"bank_name, latest_credit_score, latest_credit_description, "
         f"applicant_note, manager_note, move_in_date, move_out_date, modified, created, "
-        f"(SELECT COUNT(*) FROM tenancies WHERE tenants.tenancy_id = tenancies.arthur_id OR tenants.unit_id = tenancies.unit_id) AS tenancy_count "
+        f"(SELECT COUNT(*) FROM tenancies WHERE tenants.tenancy_id = tenancies.id) AS tenancy_count, "
+        f"(SELECT p.name FROM properties p WHERE p.arthur_id = CAST(tenants.property_id AS TEXT)) AS property_name, "
+        f"(SELECT u.unit_ref FROM units u WHERE u.arthur_id = CAST(tenants.unit_id AS TEXT)) AS unit_ref "
         f"FROM tenants WHERE {where} ORDER BY last_name ASC, first_name ASC",
         f"SELECT COUNT(*) AS cnt FROM tenants WHERE {where}",
         params, page, per_page
@@ -1854,7 +1867,15 @@ def api_tenant(tenant_id):
         return api_update_resource("tenants", tenant_id)
     db = get_dict_db()
     try:
-        tenant = db.execute("SELECT * FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
+        tenant = db.execute("SELECT id, arthur_id, arthur_person_id, tenancy_id, unit_id, property_id, "
+            "full_address, title, first_name, last_name, date_of_birth, gender, citizen, "
+            "email, phone_home, phone_work, mobile AS phone, passport_number, visa_number, visa_type, "
+            "visa_years, country_of_origin, ni_number, main_tenant, status, has_guarantor, "
+            "guarantor_first_name, guarantor_last_name, guarantor_email, "
+            "employment_company, student_status, university, "
+            "bank_name, latest_credit_score, latest_credit_description, "
+            "applicant_note, manager_note, move_in_date, move_out_date, modified, created "
+            "FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
         if not tenant:
             return json_error("Tenant not found", 404)
 
@@ -1886,6 +1907,244 @@ def api_tenant(tenant_id):
             tenant["unit"] = unit
 
         return json_success(tenant)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 5b. GUARANTORS (from tenants table)
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/guarantors")
+def api_guarantors():
+    page = int_param(request.args.get("page"))
+    per_page = int_param(request.args.get("per_page"), 20)
+    search = request.args.get("search", "").strip()
+
+    where_parts = [
+        "(t.has_guarantor = 1 OR (t.guarantor_first_name IS NOT NULL AND t.guarantor_first_name != ''))"
+    ]
+    params = []
+
+    if search:
+        search_clause, search_params = build_search_clause(
+            ["t.guarantor_first_name", "t.guarantor_last_name",
+             "t.guarantor_email", "t.guarantor_mobile"], search
+        )
+        where_parts.append(search_clause)
+        params.extend(search_params)
+
+    where = " AND ".join(where_parts)
+
+    base_cols = (
+        "t.id, "
+        "t.guarantor_first_name AS first_name, "
+        "t.guarantor_last_name AS last_name, "
+        "t.guarantor_email AS email, "
+        "t.guarantor_mobile AS phone, "
+        "t.guarantor_mobile AS mobile, "
+        "t.guarantor_relation AS relationship, "
+        "t.status, "
+        "t.first_name || ' ' || t.last_name AS linked_applicant_name, "
+        "t.first_name || ' ' || t.last_name AS linked_tenant_name, "
+        "(SELECT p.name FROM properties p WHERE p.arthur_id = CAST(t.property_id AS TEXT)) AS property_name, "
+        "t.employment_salary AS annual_income, "
+        "t.employment_company AS employer_name"
+    )
+
+    rows, total = paginate(
+        f"SELECT {base_cols} FROM tenants t WHERE {where} ORDER BY t.guarantor_last_name ASC, t.guarantor_first_name ASC",
+        f"SELECT COUNT(*) AS cnt FROM tenants t WHERE {where}",
+        params, page, per_page
+    )
+
+    return json_success(rows, total, page, per_page)
+
+
+@banksia_os_bp.route("/guarantors/<int:guarantor_id>")
+def api_guarantor(guarantor_id):
+    db = get_dict_db()
+    try:
+        tenant = db.execute(
+            "SELECT id, arthur_id, arthur_person_id, tenancy_id, unit_id, property_id, "
+            "full_address, title, first_name, last_name, date_of_birth, gender, citizen, "
+            "email, phone_home, phone_work, mobile AS phone, passport_number, visa_number, visa_type, "
+            "visa_years, country_of_origin, ni_number, main_tenant, status, has_guarantor, "
+            "guarantor_first_name, guarantor_last_name, guarantor_date_of_birth, "
+            "guarantor_address, guarantor_city, guarantor_postcode, guarantor_country, "
+            "guarantor_phone, guarantor_mobile, guarantor_email, guarantor_relation, "
+            "guarantor_profession, guarantor_home_owner, "
+            "employment_company, employment_salary, employment_length, student_status, university, "
+            "bank_name, latest_credit_score, latest_credit_description, "
+            "applicant_note, manager_note, move_in_date, move_out_date, modified, created "
+            "FROM tenants WHERE id = ?",
+            (guarantor_id,)
+        ).fetchone()
+        if not tenant:
+            return json_error("Guarantor not found", 404)
+
+        bool_fields(tenant, "main_tenant", "has_guarantor", "guarantor_home_owner")
+
+        # Add the computed fields from the list endpoint
+        tenant["first_name_display"] = tenant.get("guarantor_first_name") or ""
+        tenant["last_name_display"] = tenant.get("guarantor_last_name") or ""
+        tenant["email_display"] = tenant.get("guarantor_email") or ""
+        tenant["phone_display"] = tenant.get("guarantor_mobile") or ""
+        tenant["mobile_display"] = tenant.get("guarantor_mobile") or ""
+        tenant["relationship"] = tenant.get("guarantor_relation") or ""
+        tenant["linked_applicant_name"] = (tenant.get("first_name") or "") + " " + (tenant.get("last_name") or "")
+        tenant["linked_tenant_name"] = tenant["linked_applicant_name"]
+        tenant["annual_income"] = tenant.get("employment_salary")
+        tenant["employer_name"] = tenant.get("employment_company")
+
+        if tenant.get("property_id"):
+            prop = db.execute(
+                "SELECT p.name FROM properties p WHERE p.arthur_id = CAST(? AS TEXT)",
+                (tenant["property_id"],)
+            ).fetchone()
+            tenant["property_name"] = prop["name"] if prop else None
+            prop_full = db.execute(
+                "SELECT id, ref, name, address_line_1, city, postcode FROM properties WHERE id = ?",
+                (tenant["property_id"],)
+            ).fetchone()
+            tenant["property"] = prop_full
+        else:
+            tenant["property_name"] = None
+            tenant["property"] = None
+
+        # Linked tenancy
+        if tenant.get("tenancy_id"):
+            tenancy = db.execute("SELECT * FROM tenancies WHERE id = ?", (tenant["tenancy_id"],)).fetchone()
+            if tenancy:
+                bool_fields(tenancy, "deposit_registered", "section_21_served", "is_renewed")
+            tenant["tenancy"] = tenancy
+        else:
+            tenant["tenancy"] = None
+
+        # Linked unit
+        if tenant.get("unit_id"):
+            unit = db.execute(
+                "SELECT id, unit_ref, unit_type, full_address FROM units WHERE id = ?",
+                (tenant["unit_id"],)
+            ).fetchone()
+            tenant["unit"] = unit
+
+        return json_success(tenant)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 5c. REFERENCING
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/referencing")
+def api_referencing():
+    page = int_param(request.args.get("page"))
+    per_page = int_param(request.args.get("per_page"), 20)
+    search = request.args.get("search", "").strip()
+
+    where_parts = ["1=1"]
+    params = []
+
+    if search:
+        search_clause, search_params = build_search_clause(
+            ["rf.first_name", "rf.last_name", "rf.email"], search
+        )
+        where_parts.append(search_clause)
+        params.extend(search_params)
+
+    where = " AND ".join(where_parts)
+
+    query = (
+        "SELECT rf.id, rf.first_name, rf.last_name, rf.email, rf.status, "
+        "rf.created, rf.submitted_at, "
+        "'' AS assigned_to "
+        "FROM referencing_forms rf "
+        f"WHERE {where} ORDER BY rf.created DESC"
+    )
+
+    count_query = f"SELECT COUNT(*) AS cnt FROM referencing_forms rf WHERE {where}"
+
+    db = get_dict_db()
+    try:
+        total = db.execute(count_query, params).fetchone()["cnt"]
+        offset = (page - 1) * per_page
+        rows = db.execute(query + " LIMIT ? OFFSET ?", params + [per_page, offset]).fetchall()
+
+        stats = db.execute("""
+            SELECT
+                SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) as new,
+                SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) as submitted,
+                SUM(CASE WHEN status = 'under_review' THEN 1 ELSE 0 END) as under_review,
+                SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
+            FROM referencing_forms
+        """).fetchone()
+        stats["tenancy_created"] = 0
+        stats["total"] = stats["new"] + stats["submitted"] + stats["under_review"] + stats["approved"] + stats["rejected"]
+
+        return json_success({"items": rows, "stats": stats}, total=total, page=page, per_page=per_page)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/referencing/<int:ref_id>")
+def api_referencing_detail(ref_id):
+    db = get_dict_db()
+    try:
+        form = db.execute("SELECT * FROM referencing_forms WHERE id = ?", (ref_id,)).fetchone()
+        if not form:
+            return json_error("Referencing form not found", 404)
+
+        bool_fields(form, "has_guarantor", "guarantor_homeowner", "housing_benefit",
+                     "has_pet", "has_ccj", "has_iva", "has_bankruptcy",
+                     "has_eviction", "declaration_confirmed")
+
+        # Linked applicant info
+        if form.get("applicant_id"):
+            applicant = db.execute(
+                "SELECT id, first_name, last_name, email, mobile, status, "
+                "employment_company, employment_salary, has_guarantor, "
+                "guarantor_first_name, guarantor_last_name, "
+                "created, modified "
+                "FROM applicants WHERE id = ?",
+                (form["applicant_id"],)
+            ).fetchone()
+            if applicant:
+                bool_fields(applicant, "has_guarantor")
+            form["applicant"] = applicant
+        else:
+            form["applicant"] = None
+
+        # Check results
+        checks = db.execute(
+            "SELECT id, form_id, check_type, status, checked_at, details, "
+            "confidence, summary, created "
+            "FROM referencing_checks WHERE form_id = ? ORDER BY check_type",
+            (ref_id,)
+        ).fetchall()
+        form["checks"] = checks
+
+        # Documents
+        docs = db.execute(
+            "SELECT id, form_id, category, original_filename, stored_filename, "
+            "file_size, mime_type, uploaded_by, uploaded_at, is_verified, "
+            "ai_analysis, ai_verified, ai_confidence, ai_flagged, ai_flag_reason "
+            "FROM referencing_documents WHERE form_id = ? ORDER BY category",
+            (ref_id,)
+        ).fetchall()
+        for d in docs:
+            bool_fields(d, "is_verified", "ai_verified", "ai_flagged")
+        form["documents"] = docs
+
+        return json_success(form)
     except Exception as e:
         return json_error(str(e), 500)
     finally:
