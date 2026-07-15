@@ -1431,7 +1431,7 @@ def api_create_property():
 @banksia_os_bp.route("/properties/<int:prop_id>", methods=["GET", "PATCH"])
 def api_property(prop_id):
     if request.method == "PATCH":
-        return api_update_resource("properties", prop_id)
+        return _api_patch_property(prop_id)
     db = get_dict_db()
     try:
         prop = db.execute("SELECT * FROM properties WHERE id = ?", (prop_id,)).fetchone()
@@ -1464,6 +1464,133 @@ def api_property(prop_id):
         prop["units"] = units
         return json_success(prop)
     except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ── Allowed fields for PATCH on properties (mass-assignment protection) ──
+ALLOWED_PROPERTY_FIELDS = {
+    "name", "ref", "address_line_1", "address_line_2", "city", "county",
+    "postcode", "country", "lat", "lng", "property_type", "total_units",
+    "rentable_units", "property_owner_id", "property_owner_name",
+    "max_occupancy", "bathrooms", "bedrooms", "council_tax_band",
+    "council_account_no", "main_image_url", "image_urls", "epc_urls",
+    "floor_plan_urls", "thumbnail_urls", "features", "notes", "tags",
+    "custom_fields",
+}
+
+SYNC_TABLES = {"properties", "units", "tenancies", "tenants", "applicants"}
+
+
+def _api_patch_property(prop_id):
+    """PATCH endpoint for properties with concurrency protection and audit logging."""
+    data = request.get_json(silent=True)
+    if not data:
+        return json_error("No data provided", 400)
+
+    # Separate concurrency token from payload
+    provided_modified = data.pop("modified", None)
+
+    db = get_dict_db()
+    try:
+        # 1. Fetch current property state
+        prop = db.execute("SELECT * FROM properties WHERE id = ?", (prop_id,)).fetchone()
+        if not prop:
+            return json_error("Property not found", 404)
+
+        # 2. Optimistic concurrency check
+        if provided_modified is not None:
+            current_modified = prop.get("modified")
+            if current_modified and current_modified != provided_modified:
+                return json_error({
+                    "message": "Property was modified by another user. Please refresh and try again.",
+                    "code": "CONCURRENCY_CONFLICT",
+                    "current_modified": current_modified,
+                    "your_modified": provided_modified,
+                }, 409)
+
+        # 3. Filter to allowed fields only (mass-assignment protection)
+        real_cols = {r["name"] for r in db.execute("PRAGMA table_info(properties)").fetchall()}
+        protected = {"id", "sync_dirty", "local_modified", "sync_origin", "pushed_at", "arthur_id"}
+
+        updates = {}
+        ignored = []
+        for key, val in data.items():
+            if key in protected:
+                continue
+            if key not in ALLOWED_PROPERTY_FIELDS:
+                ignored.append(key)
+                continue
+            if key not in real_cols:
+                continue
+            updates[key] = val
+
+        if not updates:
+            return json_error(f"No valid fields to update (ignored: {', '.join(ignored) or 'none'})", 400)
+
+        # 4. Build per-field activity descriptions and track changes
+        activity_entries = []
+        for key, val in updates.items():
+            old_val = prop.get(key)
+            # Convert to string for logging comparison
+            old_str = str(old_val) if old_val is not None else None
+            new_str = str(val) if val is not None else None
+            if old_str != new_str:
+                activity_entries.append({
+                    "field_changed": key,
+                    "old_value": old_str,
+                    "new_value": new_str,
+                })
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        # 5. Apply update with sync tracking
+        set_parts = [f"{k} = ?" for k in updates]
+        params = list(updates.values())
+
+        set_parts.append("modified = ?")
+        params.append(now)
+
+        if "properties" in SYNC_TABLES:
+            set_parts.append("sync_dirty = ?")
+            params.append(1)
+            set_parts.append("local_modified = ?")
+            params.append(now)
+            set_parts.append("sync_origin = ?")
+            params.append("banksia_os")
+
+        params.append(prop_id)
+        db.execute(
+            f"UPDATE properties SET {', '.join(set_parts)} WHERE id = ?",
+            params
+        )
+        db.commit()
+
+        # 6. Log activity for each changed field
+        user_name = getattr(request, "current_user", {}).get("username", "system")
+        for entry in activity_entries:
+            _log_activity(
+                entity_type="property",
+                entity_id=prop_id,
+                action="update",
+                field_changed=entry["field_changed"],
+                old_value=entry["old_value"],
+                new_value=entry["new_value"],
+                notes=f"Property '{prop.get('name', '') or prop.get('ref', '')}' updated",
+                db=db,
+            )
+        db.commit()
+
+        return json_success({
+            "updated": True,
+            "id": prop_id,
+            "fields": list(updates.keys()),
+            "ignored": ignored,
+            "modified": now,
+        })
+    except Exception as e:
+        db.rollback()
         return json_error(str(e), 500)
     finally:
         db.close()
@@ -1712,6 +1839,47 @@ def _create_activity_log(db, action, resource_id, description, user=None):
         pass  # Never let logging crash the main operation
 
 
+# ── Sensitive fields that must be redacted from activity logs ──
+SENSITIVE_FIELDS = {"keybox_code", "smart_lock_code", "alarm_code", "wifi_password"}
+
+
+def _redact_if_sensitive(val):
+    """Return '[REDACTED]' if val looks sensitive or is one of the sensitive fields."""
+    return "[REDACTED]" if val is not None else None
+
+
+def _log_activity(entity_type, entity_id, action, field_changed=None,
+                  old_value=None, new_value=None, notes=None, db=None):
+    """Log an activity entry to the activity_log table.
+
+    Automatically redacts sensitive field values.
+    If no db connection is provided, creates one (for use outside request context).
+    """
+    # Redact sensitive fields
+    if field_changed and field_changed in SENSITIVE_FIELDS:
+        old_value = _redact_if_sensitive(old_value)
+        new_value = _redact_if_sensitive(new_value)
+
+    user_name = getattr(request, "current_user", {}).get("username", "system")
+    own_conn = db is None
+    if own_conn:
+        db = get_dict_db()
+    try:
+        db.execute(
+            "INSERT INTO activity_log (entity_type, entity_id, action, field_changed, "
+            "old_value, new_value, user_name, notes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [entity_type, entity_id, action, field_changed, old_value, new_value, user_name, notes]
+        )
+        if own_conn:
+            db.commit()
+    except Exception:
+        pass  # Never let logging crash the main operation
+    finally:
+        if own_conn:
+            db.close()
+
+
 # ═══════════════════════════════════════════════
 # 2d. ARCHIVE PROPERTY — soft delete with dependency check
 # ═══════════════════════════════════════════════
@@ -1778,7 +1946,52 @@ def api_archive_property(prop_id):
 
 
 # ═══════════════════════════════════════════════
-# 2e. DELETE PROPERTY — permanent removal (super_admin only)
+# 2e. RESTORE PROPERTY — undo archive
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/properties/<int:prop_id>/restore", methods=["POST"])
+def api_restore_property(prop_id):
+    """Restore an archived property back to 'active' status."""
+    db = get_dict_db()
+    try:
+        prop = db.execute("SELECT * FROM properties WHERE id = ?", (prop_id,)).fetchone()
+        if not prop:
+            return json_error("Property not found", 404)
+
+        current_status = prop.get("status")
+        if current_status != "archived":
+            return json_error({
+                "message": f"Property is not archived (current status: '{current_status}'). Only archived properties can be restored.",
+                "code": "NOT_ARCHIVED",
+                "current_status": current_status,
+            }, 409)
+
+        # Restore to active
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "UPDATE properties SET status = 'active', modified = ? WHERE id = ?",
+            [now, prop_id]
+        )
+
+        _create_activity_log(db, "property_restored", prop_id,
+                             f"Property '{prop.get('name', '') or prop.get('ref', '')}' restored from archive")
+
+        db.commit()
+        return json_success({
+            "id": prop_id,
+            "message": "Property restored successfully",
+            "status": "active",
+        })
+
+    except Exception as e:
+        db.rollback()
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 2f. DELETE PROPERTY — permanent removal (super_admin only)
 # ═══════════════════════════════════════════════
 
 @banksia_os_bp.route("/properties/<int:prop_id>/delete", methods=["POST"])
@@ -1874,6 +2087,82 @@ def api_delete_property(prop_id):
     finally:
         db.close()
 
+
+# ═══════════════════════════════════════════════
+# 2g. ACTIVITY LOG — query and create entries
+# ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/activity", methods=["GET"])
+def api_get_activity():
+    """Query activity log. Supports filtering by entity_type + entity_id and pagination."""
+    entity_type = request.args.get("entity_type", "")
+    entity_id_str = request.args.get("entity_id", "")
+    entity_id = int(entity_id_str) if entity_id_str and entity_id_str.isdigit() else None
+    limit = int_param(request.args.get("limit", 50), default=50)
+    page = int_param(request.args.get("page", 1), default=1)
+    offset = (page - 1) * limit
+
+    db = get_dict_db()
+    try:
+        if entity_type and entity_id is not None:
+            total = db.execute(
+                "SELECT COUNT(*) AS cnt FROM activity_log WHERE entity_type = ? AND entity_id = ?",
+                (entity_type, entity_id)
+            ).fetchone()["cnt"]
+            rows = db.execute(
+                "SELECT * FROM activity_log WHERE entity_type = ? AND entity_id = ? "
+                "ORDER BY created DESC LIMIT ? OFFSET ?",
+                (entity_type, entity_id, limit, offset)
+            ).fetchall()
+        else:
+            total = db.execute("SELECT COUNT(*) AS cnt FROM activity_log").fetchone()["cnt"]
+            rows = db.execute(
+                "SELECT * FROM activity_log ORDER BY created DESC LIMIT ? OFFSET ?",
+                (limit, offset)
+            ).fetchall()
+
+        return json_success(rows, total=total, page=page, per_page=limit)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/activity", methods=["POST"])
+def api_create_activity():
+    """Create an activity log entry programmatically."""
+    data = request.get_json(silent=True)
+    if not data:
+        return json_error("No data provided", 400)
+
+    entity_type = data.get("entity_type")
+    entity_id = data.get("entity_id")
+    action = data.get("action")
+
+    if not all([entity_type, entity_id, action]):
+        return json_error("entity_type, entity_id, and action are required", 400)
+
+    field_changed = data.get("field_changed")
+    old_value = data.get("old_value")
+    new_value = data.get("new_value")
+    notes = data.get("notes")
+
+    _log_activity(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        action=action,
+        field_changed=field_changed,
+        old_value=old_value,
+        new_value=new_value,
+        notes=notes,
+    )
+
+    return json_success({"message": "Activity logged"})
+
+
+# ═══════════════════════════════════════════════
+# 2h. PROPERTY IMAGES — list images for a property
+# ═══════════════════════════════════════════════
 
 @banksia_os_bp.route("/properties/<int:prop_id>/images")
 def api_property_images(prop_id):
@@ -3529,11 +3818,55 @@ def api_deposits_reconciliation():
 @banksia_os_bp.route("/deposits/migrate", methods=["POST"])
 def api_deposits_migrate():
     """One-time migration: populate deposits from existing tenancy data.
-    Idempotent — skips tenancy_ids that already have a deposit record."""
+    Idempotent — skips tenancy_ids that already have a deposit record.
+
+    Requires super_admin role. Guarded by migration_log to prevent re-runs.
+    """
+    import hashlib
+    from datetime import datetime, timezone
+
+    # ── Super admin check ──
+    user = session.get("user", {})
+    if user.get("role") != "super_admin":
+        return json_error("Only super admins can run deposit migration", 403)
+
     db = get_dict_db()
+    log_id = None
     try:
+        # ── Migration log guard ──
+        existing = db.execute(
+            "SELECT id, status, checksum FROM migration_log WHERE name = ?",
+            ("deposit_migration_v1",)
+        ).fetchone()
+        if existing and existing["status"] == "completed":
+            return json_error(
+                f"Migration already completed (id={existing['id']}, checksum={existing['checksum']})",
+                409
+            )
+
+        # ── Create or resume migration log entry ──
+        now_iso = datetime.now(timezone.utc).isoformat()
+        requester = user.get("username", "unknown")
+        if existing and existing["status"] == "failed":
+            # Reset a previously failed migration
+            db.execute(
+                "UPDATE migration_log SET status='in_progress', notes=?, start_time=? WHERE id=?",
+                ("Retry after failure", now_iso, existing["id"])
+            )
+            log_id = existing["id"]
+        elif not existing:
+            cursor = db.execute(
+                "INSERT INTO migration_log (name, version, start_time, user_process, status) "
+                "VALUES (?, ?, ?, ?, 'in_progress')",
+                ("deposit_migration_v1", "1.0", now_iso, requester)
+            )
+            log_id = cursor.lastrowid
+        else:
+            # Already 'in_progress' — continue
+            log_id = existing["id"]
+
+        # ── Run the migration ──
         active_statuses = ("'Active', 'active', 'Periodic', 'periodic', 'Current', 'current'")
-        # Find tenancies with deposit data that don't have a deposit record yet
         tenancies_to_migrate = db.execute(
             f"SELECT t.id, t.unit_id, t.property_id, t.deposit_registered_amount, "
             f"t.deposit_scheme, t.deposit_registered, t.main_tenant_name, "
@@ -3544,40 +3877,78 @@ def api_deposits_migrate():
             f"AND t.status IN ({active_statuses})"
         ).fetchall()
 
+        total_reviewed = len(tenancies_to_migrate)
         inserted = 0
         skipped = 0
+        errors = 0
+
         for t in tenancies_to_migrate:
-            tenancy_id = t["id"]
-            amount = t["deposit_registered_amount"] or 0
-            scheme = t["deposit_scheme"]
-            protection_status = "protected" if t["deposit_registered"] else "unprotected"
-            deposit_type = "cash"
+            try:
+                tenancy_id = t["id"]
+                amount = t["deposit_registered_amount"] or 0
+                scheme = t["deposit_scheme"]
+                protection_status = "protected" if t["deposit_registered"] else "unprotected"
+                deposit_type = "cash"
 
-            # Find the primary tenant for this tenancy
-            primary_tenant = db.execute(
-                "SELECT id FROM tenants WHERE tenancy_id = ? AND main_tenant = 1 LIMIT 1",
-                (tenancy_id,)
-            ).fetchone()
-            tenant_id = primary_tenant["id"] if primary_tenant else None
+                primary_tenant = db.execute(
+                    "SELECT id FROM tenants WHERE tenancy_id = ? AND main_tenant = 1 LIMIT 1",
+                    (tenancy_id,)
+                ).fetchone()
+                tenant_id = primary_tenant["id"] if primary_tenant else None
 
-            db.execute(
-                "INSERT INTO deposits (tenancy_id, tenant_id, unit_id, property_id, "
-                "amount, deposit_type, scheme, protection_status, date_received, "
-                "current_status, source) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'held', 'migration')",
-                (tenancy_id, tenant_id, t["unit_id"], t["property_id"],
-                 amount, deposit_type, scheme, protection_status, t["start_date"])
-            )
-            inserted += 1
+                db.execute(
+                    "INSERT INTO deposits (tenancy_id, tenant_id, unit_id, property_id, "
+                    "amount, deposit_type, scheme, protection_status, date_received, "
+                    "current_status, source) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'held', 'migration')",
+                    (tenancy_id, tenant_id, t["unit_id"], t["property_id"],
+                     amount, deposit_type, scheme, protection_status, t["start_date"])
+                )
+                inserted += 1
+            except Exception:
+                errors += 1
+                continue
 
         db.commit()
 
+        # ── Update migration log on success ──
+        completion_iso = datetime.now(timezone.utc).isoformat()
+        # Compute a simple checksum over the deposits table
+        checksum_data = db.execute(
+            "SELECT COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS total FROM deposits"
+        ).fetchone()
+        checksum_input = f"deposit_migration_v1|{checksum_data['cnt']}|{checksum_data['total']}|{completion_iso}"
+        checksum = hashlib.sha256(checksum_input.encode()).hexdigest()[:16]
+
+        db.execute(
+            "UPDATE migration_log SET "
+            "status='completed', completion_time=?, records_reviewed=?, "
+            "records_inserted=?, records_skipped=?, errors=?, checksum=? "
+            "WHERE id=?",
+            (completion_iso, total_reviewed, inserted, skipped, errors, checksum, log_id)
+        )
+        db.commit()
+
         return json_success({
-            "message": f"Migration complete. Inserted {inserted} deposit records, skipped {skipped} (already present).",
+            "message": f"Migration complete. Inserted {inserted} deposit records, skipped {skipped} (already present), errors {errors}.",
             "inserted": inserted,
             "skipped": skipped,
+            "errors": errors,
+            "log_id": log_id,
+            "checksum": checksum,
         })
+
     except Exception as e:
+        # ── Update migration log on failure ──
+        try:
+            if log_id is not None:
+                db.execute(
+                    "UPDATE migration_log SET status='failed', completion_time=?, notes=? WHERE id=?",
+                    (datetime.now(timezone.utc).isoformat(), f"Error: {str(e)}", log_id)
+                )
+                db.commit()
+        except Exception:
+            pass
         return json_error(str(e), 500)
     finally:
         db.close()

@@ -107,7 +107,8 @@ CREATE TABLE IF NOT EXISTS properties (
     tags            TEXT,
     custom_fields   TEXT,
     modified        TEXT,
-    created         TEXT
+    created         TEXT,
+    status          TEXT DEFAULT 'active'
 );
 
 -- ── 2. UNITS ──────────────────────────────────────────────────
@@ -484,6 +485,40 @@ CREATE INDEX IF NOT EXISTS idx_deposits_unit_id      ON deposits(unit_id);
 CREATE INDEX IF NOT EXISTS idx_deposits_property_id  ON deposits(property_id);
 CREATE INDEX IF NOT EXISTS idx_deposits_current_status ON deposits(current_status);
 CREATE INDEX IF NOT EXISTS idx_deposits_protection_status ON deposits(protection_status);
+
+-- ── 13. MIGRATION LOG ────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS migration_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    version TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    completion_time TEXT,
+    user_process TEXT,
+    records_reviewed INTEGER DEFAULT 0,
+    records_inserted INTEGER DEFAULT 0,
+    records_skipped INTEGER DEFAULT 0,
+    records_updated INTEGER DEFAULT 0,
+    errors INTEGER DEFAULT 0,
+    checksum TEXT,
+    status TEXT NOT NULL DEFAULT 'in_progress',
+    notes TEXT
+);
+
+-- ── 14. ACTIVITY LOG ───────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS activity_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    field_changed TEXT,
+    old_value TEXT,
+    new_value TEXT,
+    user_name TEXT NOT NULL DEFAULT 'system',
+    notes TEXT,
+    created TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_activity_entity ON activity_log(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_log(created);
 """
 
 def init_db():
