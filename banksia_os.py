@@ -4,7 +4,7 @@ Banksia OS — HMO Operations API Blueprint.
 Provides all HMO operations endpoints for daily team use.
 Mounts at /api/banksia-os/
 """
-import json, os, sys
+import json, os, sys, re
 from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -45,6 +45,22 @@ def _require_banksia_auth():
             return jsonify({
                 "success": False,
                 "error": "You do not have permission to access this data",
+            }), 403
+
+    # ── Destructive-action guard ──
+    # Only super_admin may permanently delete a CORE ENTITY (property, owner,
+    # unit, tenancy, tenant, applicant). This mirrors the frontend permission
+    # map (roles.ts), where 'delete' is granted to super_admin only, and makes
+    # the backend the source of truth so the API can't be bypassed when the UI
+    # hides the button. Operational sub-resource deletes (documents, images,
+    # tags, messages, invoices, referencing) are intentionally NOT covered here
+    # so admins can still manage day-to-day records.
+    if request.method == "DELETE" and role != "super_admin":
+        rel = request.path[len("/api/banksia-os"):] or "/"
+        if re.match(r"^/(properties|property-owners|units|tenancies|tenants|applicants)/\d+/?$", rel):
+            return jsonify({
+                "success": False,
+                "error": "Only super admins can permanently delete this record",
             }), 403
 
 
@@ -1480,7 +1496,7 @@ def api_properties():
     rent_min = float_param(request.args.get("rent_min"))
     rent_max = float_param(request.args.get("rent_max"))
 
-    base_where = "1=1"
+    base_where = "(status IS NULL OR status = '' OR status = 'Active')"
     base_params = []
 
     if search:
@@ -3809,15 +3825,23 @@ def api_tenant(tenant_id):
         else:
             tenant["tenancy"] = None
 
-        # Linked property — tenants.property_id stores arthur_id, match via properties.arthur_id
-        if tenant.get("property_id"):
+        # Linked property — robust path first: tenant -> tenancy.property_id -> properties.id
+        # (all clean integer FKs). Fall back to the legacy Arthur-ID text match only for
+        # tenants that have no linked tenancy, so nothing regresses.
+        prop_cols = (
+            "SELECT id, ref, name, address_line_1, address_line_2, city, postcode, property_type, "
+            "COALESCE(NULLIF(name, 'multi'), address_line_1) AS display_name FROM properties "
+        )
+        prop = None
+        linked_tenancy = tenant.get("tenancy")
+        if linked_tenancy and linked_tenancy.get("property_id"):
+            prop = db.execute(prop_cols + "WHERE id = ?", (linked_tenancy["property_id"],)).fetchone()
+        if prop is None and tenant.get("property_id"):
             prop = db.execute(
-                "SELECT id, ref, name, address_line_1, address_line_2, city, postcode, property_type, "
-                "COALESCE(NULLIF(name, 'multi'), address_line_1) AS display_name "
-                "FROM properties WHERE arthur_id = CAST(? AS TEXT) OR id = ?",
+                prop_cols + "WHERE arthur_id = CAST(? AS TEXT) OR id = ?",
                 (tenant["property_id"], tenant["property_id"])
             ).fetchone()
-            tenant["property"] = prop
+        tenant["property"] = prop
 
         # Linked unit
         if tenant.get("unit_id"):
@@ -3870,7 +3894,10 @@ def api_guarantors():
         "t.status, "
         "t.first_name || ' ' || t.last_name AS linked_applicant_name, "
         "t.first_name || ' ' || t.last_name AS linked_tenant_name, "
-        "(SELECT p.name FROM properties p WHERE p.arthur_id = CAST(t.property_id AS TEXT)) AS property_name, "
+        "COALESCE("
+        "(SELECT p.name FROM properties p JOIN tenancies tn ON tn.property_id = p.id WHERE tn.id = t.tenancy_id), "
+        "(SELECT p.name FROM properties p WHERE p.arthur_id = CAST(t.property_id AS TEXT))"
+        ") AS property_name, "
         "t.employment_salary AS annual_income, "
         "t.employment_company AS employer_name"
     )
@@ -6596,10 +6623,10 @@ def api_create_property_owner():
                 "notes": f"Auto-created from owner: {data['name']}"
             }
             ins_parts = ",".join(["?"]*len(ins_prop))
-            db.execute(f"INSERT INTO properties ({','.join(ins_prop.keys())}) VALUES ({ins_parts})",
+            prop_cursor = db.execute(f"INSERT INTO properties ({','.join(ins_prop.keys())}) VALUES ({ins_parts})",
                        list(ins_prop.values()))
             db.commit()
-            created_property = {"id": cursor.lastrowid, "name": prop_name}
+            created_property = {"id": prop_cursor.lastrowid, "name": prop_name}
 
         return json_success({"id": owner_id, "message": "Owner created", "created_property": created_property}), 201
     except Exception as e:
