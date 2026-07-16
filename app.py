@@ -1020,6 +1020,7 @@ def api_user_preferences():
     return jsonify({"success": True, "preferences": users[username]["preferences"]})
 
 @app.route("/api/user/change-password", methods=["POST"])
+@app.route("/api/auth/change-password", methods=["POST"])
 @require_auth
 def api_user_change_password():
     data = request.get_json()

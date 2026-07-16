@@ -116,11 +116,24 @@ def clean_none(row):
 # ── User helpers ──
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
 
+_PBKDF2_ITERATIONS = 210_000  # OWASP floor — must match app.py
+
 def _hash_password(password: str) -> str:
-    """SHA-256 with a random salt (matches app.py)."""
+    """PBKDF2-HMAC-SHA256 with per-password random salt — identical format to app.py.
+    Format: pbkdf2$<iterations>$<salt_hex>$<hash_hex>"""
     import hashlib, secrets
-    salt = hashlib.sha256(secrets.token_bytes(32)).hexdigest()[:16]
-    return salt + ":" + hashlib.sha256((salt + password).encode()).hexdigest()
+    salt = secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, _PBKDF2_ITERATIONS)
+    return f"pbkdf2${_PBKDF2_ITERATIONS}${salt.hex()}${dk.hex()}"
+
+def _validate_password_strength(pw: str):
+    """(ok, error_message). Policy: >=10 chars, at least one letter and one digit. Matches app.py."""
+    import re as _re
+    if not pw or len(pw) < 10:
+        return False, "Password must be at least 10 characters"
+    if not _re.search(r"[A-Za-z]", pw) or not _re.search(r"\d", pw):
+        return False, "Password must contain at least one letter and one number"
+    return True, ""
 
 def _load_users():
     if not os.path.exists(USERS_FILE):
@@ -5766,10 +5779,16 @@ def api_users():
         with open(uf) as f:
             users = jm.load(f)
             for username, info in users.items():
+                if not isinstance(info, dict):
+                    info = {}
                 users_list.append({
                     "username": username,
                     "role": info.get("role", "user"),
                     "email": info.get("email", ""),
+                    "phone": info.get("phone", ""),
+                    "date_of_birth": info.get("date_of_birth", ""),
+                    "department": info.get("department", ""),
+                    "position": info.get("position", ""),
                     "biography": info.get("biography", ""),
                 })
     return json_success(users_list)
@@ -5787,6 +5806,11 @@ def api_add_user():
     new_role = data.get("role", "admin").strip()
     if not username or not password:
         return json_error("username and password required", 400)
+    ok, msg = _validate_password_strength(password)
+    if not ok:
+        return json_error(msg, 400)
+    if username in _load_users():
+        return json_error("A user with that username already exists", 409)
     if new_role not in ("admin", "super_admin", "projects"):
         new_role = "admin"
     # Only super_admin can create other super_admin accounts
@@ -5829,8 +5853,14 @@ def api_update_user(username):
     # Only super admin can change role
     if is_super and "role" in data:
         users[username]["role"] = data["role"]
-    # Password update
+    # Password update / reset.
+    # A user may reset their own password; only super_admin may reset ANOTHER user's password.
     if "password" in data and data["password"]:
+        if not is_self and not is_super:
+            return json_error("Only a super admin can reset another user's password", 403)
+        ok, msg = _validate_password_strength(data["password"])
+        if not ok:
+            return json_error(msg, 400)
         users[username]["password"] = _hash_password(data["password"])
     _save_users(users)
     return json_success({"user": {"username": username, "role": users[username].get("role")}})
