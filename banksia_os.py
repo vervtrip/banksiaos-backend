@@ -1498,6 +1498,57 @@ def api_sync_from_monday():
 # 2. PROPERTIES
 # ═══════════════════════════════════════════════
 
+def _ensure_landlord_link(db, data):
+    """Guarantee every property is linked to a landlord row in property_owners.
+
+    Resolves ``data['property_owner_id']`` to a valid ``property_owners.id`` and
+    keeps ``property_owner_name`` in sync. Auto-creates the landlord when needed
+    so a property can never exist without a linked landlord. Mutates + returns data.
+    """
+    raw_id = data.get("property_owner_id")
+    oid = str(raw_id).strip() if raw_id not in (None, "") else ""
+    oname = (data.get("property_owner_name") or "").strip()
+
+    # 1. An id was supplied
+    if oid:
+        row = db.execute(
+            "SELECT id, name FROM property_owners WHERE id = CAST(? AS INTEGER)", (oid,)
+        ).fetchone()
+        if row:
+            data["property_owner_id"] = str(row["id"])
+            if not oname:
+                data["property_owner_name"] = row["name"]
+            return data
+        # id given but no matching landlord row — create it, preserving the id
+        nm = oname or f"Landlord {oid}"
+        db.execute(
+            "INSERT INTO property_owners (id, name, status) VALUES (CAST(? AS INTEGER), ?, 'active')",
+            (oid, nm),
+        )
+        data["property_owner_id"] = oid
+        data["property_owner_name"] = nm
+        return data
+
+    # 2. Only a name was supplied — match existing (case-insensitive) or create
+    if oname:
+        row = db.execute(
+            "SELECT id, name FROM property_owners WHERE LOWER(name) = LOWER(?)", (oname,)
+        ).fetchone()
+        if row:
+            data["property_owner_id"] = str(row["id"])
+            data["property_owner_name"] = row["name"]
+            return data
+        cur = db.execute(
+            "INSERT INTO property_owners (name, status) VALUES (?, 'active')", (oname,)
+        )
+        data["property_owner_id"] = str(cur.lastrowid)
+        data["property_owner_name"] = oname
+        return data
+
+    # 3. Nothing to link — caller should have validated already
+    raise ValueError("A landlord is required — every property must be linked to a landlord.")
+
+
 @banksia_os_bp.route("/properties", methods=["GET", "POST"])
 def api_properties():
     if request.method == "POST":
@@ -1574,11 +1625,16 @@ def api_create_property():
         if not data.get(r):
             return json_error(f"'{r}' is required")
 
+    # Every property must be linked to a landlord.
+    if not data.get("property_owner_id") and not (data.get("property_owner_name") or "").strip():
+        return json_error("A landlord is required — every property must be linked to a landlord.")
+
     db = get_dict_db()
     try:
+        data = _ensure_landlord_link(db, data)
         cols = ["ref", "name", "address_line_1", "address_line_2", "city", "county", "postcode", "country",
                 "property_type", "total_units", "bedrooms", "bathrooms", "council_tax_band",
-                "council_account_no", "property_owner_name", "features", "notes"]
+                "council_account_no", "property_owner_id", "property_owner_name", "features", "notes"]
         ins_cols = [c for c in cols if c in data]
         ins_vals = [data[c] for c in ins_cols]
         placeholders = ",".join(["?"] * len(ins_cols))
@@ -1943,8 +1999,15 @@ def api_create_property_full():
     if missing:
         return json_error(f"Missing required fields: {', '.join(missing)}")
 
+    # A property cannot exist without a landlord. Accept either a linked
+    # landlord id or a landlord name (which we auto-create + link below).
+    if not data.get("property_owner_id") and not (data.get("property_owner_name") or "").strip():
+        return json_error("A landlord is required — every property must be linked to a landlord.")
+
     db = get_dict_db()
     try:
+        # ── 0. Resolve/auto-create landlord so the property is always linked ──
+        data = _ensure_landlord_link(db, data)
         # ── 1. Build property insert ──
         property_fields = [
             "name", "address_line_1", "address_line_2", "city", "county",
