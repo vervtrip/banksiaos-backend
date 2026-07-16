@@ -6,9 +6,33 @@ from functools import wraps
 from flask import Flask, render_template, request, jsonify, redirect, session
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "verv-ops-dash-2026-secure")
+
+def _load_secret_key() -> str:
+    """Use FLASK_SECRET_KEY if set; otherwise persist a random key to disk.
+    Never ship a hardcoded default — a known key allows session-cookie forgery."""
+    env_key = os.environ.get("FLASK_SECRET_KEY")
+    if env_key:
+        return env_key
+    key_path = os.path.join(os.path.dirname(__file__), ".flask_secret_key")
+    try:
+        if os.path.exists(key_path):
+            with open(key_path) as f:
+                k = f.read().strip()
+            if k:
+                return k
+        k = secrets.token_hex(32)
+        with open(key_path, "w") as f:
+            f.write(k)
+        os.chmod(key_path, 0o600)
+        return k
+    except Exception:
+        # Last resort — random per-process key (logs everyone out on restart, but never a known constant)
+        return secrets.token_hex(32)
+
+app.secret_key = _load_secret_key()
 app.config.update(
-    SESSION_COOKIE_SECURE=False,  # Traefik terminates TLS, internal traffic is HTTP
+    # Browser<->Traefik is HTTPS; ProxyFix trusts X-Forwarded-Proto so Flask sees it as secure.
+    SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
     SESSION_COOKIE_NAME='banksia_os_sid',
@@ -120,8 +144,13 @@ import traceback
 def require_auth(f):
     @wraps(f)
     def wrap(*a, **k):
-        if not session.get("user"):
-            return jsonify({"error": "Not logged in"}), 401
+        user = session.get("user")
+        if not user:
+            # API callers get JSON 401; page routes get redirected to login
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Not logged in"}), 401
+            return redirect("/")
+        request.current_user = user
         return f(*a, **k)
     return wrap
 
@@ -151,26 +180,56 @@ _login_attempts: dict[str, list[float]] = {}
 MAX_LOGIN_ATTEMPTS = 10
 LOGIN_WINDOW = 300  # 5 minutes
 
+import hmac as _hmac
+
+_PBKDF2_ITERATIONS = 210_000  # OWASP-recommended floor for PBKDF2-HMAC-SHA256
+
 def _hash_password(password: str) -> str:
-    """SHA-256 with a random salt. Note: bcrypt/argon2 preferred for production."""
-    salt = hashlib.sha256(secrets.token_bytes(32)).hexdigest()[:16]
-    return salt + ":" + hashlib.sha256((salt + password).encode()).hexdigest()
+    """PBKDF2-HMAC-SHA256 with per-password random salt and key stretching.
+    Format: pbkdf2$<iterations>$<salt_hex>$<hash_hex>"""
+    salt = secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, _PBKDF2_ITERATIONS)
+    return f"pbkdf2${_PBKDF2_ITERATIONS}${salt.hex()}${dk.hex()}"
 
 def _check_password(password: str, stored: str) -> bool:
-    if ":" not in stored:
-        return stored == password  # legacy plaintext fallback
-    salt, h = stored.split(":", 1)
-    return hashlib.sha256((salt + password).encode()).hexdigest() == h
+    """Verify against pbkdf2 (current), legacy salt:sha256, or legacy plaintext.
+    Uses constant-time comparison to avoid timing side-channels."""
+    stored = str(stored or "")
+    if stored.startswith("pbkdf2$"):
+        try:
+            _, iters, salt_hex, hash_hex = stored.split("$", 3)
+            dk = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt_hex), int(iters))
+            return _hmac.compare_digest(dk.hex(), hash_hex)
+        except Exception:
+            return False
+    if ":" in stored:
+        # Legacy salt:sha256 format
+        salt, h = stored.split(":", 1)
+        calc = hashlib.sha256((salt + password).encode()).hexdigest()
+        return _hmac.compare_digest(calc, h)
+    # Legacy plaintext fallback (transitional only)
+    return _hmac.compare_digest(stored, password)
+
+def _needs_rehash(stored: str) -> bool:
+    """True if the stored password is not in the current pbkdf2 format."""
+    return not str(stored or "").startswith("pbkdf2$")
 
 def _migrate_password_to_hash(users, username, password):
-    """Upgrade a plaintext password to hashed on successful login."""
+    """Upgrade any legacy password (plaintext or salt:sha256) to pbkdf2 on successful login."""
     stored = str(users[username].get("password", ""))
-    if ":" not in stored:
-        # Still plaintext — hash it now
+    if _needs_rehash(stored):
         users[username]["password"] = _hash_password(password)
         _save_users(users)
         return True
     return False
+
+def _validate_password_strength(pw: str):
+    """Return (ok, error_message). Policy: >=10 chars, with letters and digits."""
+    if not pw or len(pw) < 10:
+        return False, "Password must be at least 10 characters"
+    if not re.search(r"[A-Za-z]", pw) or not re.search(r"\d", pw):
+        return False, "Password must contain at least one letter and one number"
+    return True, ""
 
 def _check_rate_limit(ip: str) -> bool:
     now = time.time()
@@ -216,21 +275,13 @@ def _authenticate(username, password):
             return {"username": uname, "role": data.get("role", "admin"), "email": data.get("email", "")}
     return None
 
-def require_auth(f):
-    @wraps(f)
-    def wrap(*a, **k):
-        user = session.get("user")
-        if not user:
-            return redirect("/")
-        request.current_user = user
-        return f(*a, **k)
-    return wrap
-
 def require_super_admin(f):
     @wraps(f)
     def wrap(*a, **k):
         user = session.get("user")
         if not user:
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Not logged in"}), 401
             return redirect("/")
         if user.get("role") != "super_admin":
             return jsonify({"error": "Forbidden — super admin only"}), 403
@@ -452,7 +503,8 @@ def api_forgot_password():
     # Generate reset token
     token = uuid.uuid4().hex[:32]
     RESET_TOKENS[email] = {"token": token, "expires": time.time() + 3600, "username": found}
-    reset_url = f"http://187.124.170.214:5050/reset-password?token={token}&email={email}"
+    base_url = os.environ.get("BANKSIA_OS_BASE_URL", "https://ops.srv1744186.hstgr.cloud")
+    reset_url = f"{base_url}/reset-password?token={token}&email={email}"
     
     # Try sending email via SMTP
     import smtplib
@@ -496,9 +548,10 @@ def api_reset_password():
     
     if not email or not token or not new_password:
         return jsonify({"error": "Email, token, and new password are required"}), 400
-    if len(new_password) < 6:
-        return jsonify({"error": "Password must be at least 6 characters"}), 400
-    
+    ok, msg = _validate_password_strength(new_password)
+    if not ok:
+        return jsonify({"error": msg}), 400
+
     stored = RESET_TOKENS.get(email)
     if not stored or stored["token"] != token or stored["expires"] < time.time():
         return jsonify({"error": "Invalid or expired reset token"}), 400
@@ -816,6 +869,9 @@ def api_add_user():
     new_role = data.get("role", "admin").strip()
     if not username or not password:
         return jsonify({"error": "username and password required"}), 400
+    ok, msg = _validate_password_strength(password)
+    if not ok:
+        return jsonify({"error": msg}), 400
     if new_role not in ("admin", "super_admin", "projects"):
         new_role = "admin"
     # Only super_admin can create other super_admin accounts
@@ -976,8 +1032,9 @@ def api_user_change_password():
         return jsonify({"error": "current_password and new_password required"}), 400
     if new_password != confirm_password:
         return jsonify({"error": "Passwords do not match"}), 400
-    if len(new_password) < 6:
-        return jsonify({"error": "Password must be at least 6 characters"}), 400
+    ok, msg = _validate_password_strength(new_password)
+    if not ok:
+        return jsonify({"error": msg}), 400
     user = session.get("user", {})
     username = user.get("username")
     if not username:
