@@ -1502,21 +1502,23 @@ async function renderProperties() {
   try {
     const {page,perPage,search,conditionFilter} = propsState;
     let url = `/properties/enhanced?page=${page}&per_page=${perPage}&search=${encodeURIComponent(search)}`;
-    if (conditionFilter && conditionFilter.length > 0) url += `&conditions=${conditionFilter.join(',')}`;
+    if (conditionFilter && conditionFilter.length > 0) url += `&condition=${conditionFilter.join(',')}`;
     const res = await api(url);
     propsState.total = res.total;
     const items = res.data || [];
     let html = '<div class="table-wrap"><div class="table-toolbar"><div class="left">';
     html += `<input placeholder="Search properties..." value="${escHtml(search)}" onkeyup="if(event.key==='Enter'){propsState.search=this.value;propsState.page=1;renderProperties()}" style="width:220px">`;
-    html += ` <label style="font-size:12px;color:#888;display:inline-flex;align-items:center;gap:4px"><input type="checkbox" value="HMO" ${propsState.conditionFilter&&propsState.conditionFilter.includes('HMO')?'checked':''} onchange="toggleConditionFilter('HMO')"> HMO</label>`;
-    html += ` <label style="font-size:12px;color:#888;display:inline-flex;align-items:center;gap:4px"><input type="checkbox" value="Residential" ${propsState.conditionFilter&&propsState.conditionFilter.includes('Residential')?'checked':''} onchange="toggleConditionFilter('Residential')"> Residential</label>`;
+    html += ` <label style="font-size:12px;color:#888;display:inline-flex;align-items:center;gap:4px"><input type="checkbox" value="HMOGuaranteed" ${propsState.conditionFilter&&propsState.conditionFilter.includes('HMOGuaranteed')?'checked':''} onchange="toggleConditionFilter('HMOGuaranteed')"> HMO Guaranteed</label>`;
+    html += ` <label style="font-size:12px;color:#888;display:inline-flex;align-items:center;gap:4px"><input type="checkbox" value="HMOManagement" ${propsState.conditionFilter&&propsState.conditionFilter.includes('HMOManagement')?'checked':''} onchange="toggleConditionFilter('HMOManagement')"> HMO Management</label>`;
+    html += ` <label style="font-size:12px;color:#888;display:inline-flex;align-items:center;gap:4px"><input type="checkbox" value="SingleGuaranteed" ${propsState.conditionFilter&&propsState.conditionFilter.includes('SingleGuaranteed')?'checked':''} onchange="toggleConditionFilter('SingleGuaranteed')"> Single Guaranteed</label>`;
+    html += ` <label style="font-size:12px;color:#888;display:inline-flex;align-items:center;gap:4px"><input type="checkbox" value="SingleManagement" ${propsState.conditionFilter&&propsState.conditionFilter.includes('SingleManagement')?'checked':''} onchange="toggleConditionFilter('SingleManagement')"> Single Management</label>`;
     html += '</div><div class="right"><button class="btn btn-primary btn-sm" onclick="showNewPropertyForm()">+ New Property</button></div></div>';
     if (items.length===0) {
       html += '<div class="empty-state"><div class="icon">◧</div><h3>No properties found</h3></div>';
     } else {
       html += '<table><thead><tr><th>Ref</th><th>Property Name</th><th>Type</th><th>Address</th><th>City</th><th>Owner</th><th>Condition</th><th>Units</th></tr></thead><tbody>';
       items.forEach(p => {
-        const typeLabel = p.property_type === 'multi' ? 'Multi-unit' : (p.property_type === 'single' ? 'Single Property' : escHtml(p.property_type||p.name||'—'));
+        const typeLabel = p.property_type === 'HMO / Guaranteed' ? 'HMO / Guaranteed' : (p.property_type === 'HMO / Management' ? 'HMO / Management' : (p.property_type === 'Single / Guaranteed' ? 'Single / Guaranteed' : (p.property_type === 'Single / Management' ? 'Single / Management' : escHtml(p.property_type||'—'))));
         const tags = (p.tags_list || []).map(t => `<span class="tag-badge">${escHtml(t)}</span>`).join('');
         const unitsStr = `${p.occupied_units||0} of ${p.total_units||0} units`;
         const conditionStr = p.condition ? `<span class="tag-badge tag-${(p.condition||'').toLowerCase()}">${escHtml(p.condition)}</span>` : '—';
@@ -1576,6 +1578,25 @@ async function saveField(table, id, field) {
     showToast('Failed: ' + e.message, 'error');
   }
 }
+function editTypeField(id, currentVal) {
+  const el = document.getElementById(`val-properties-${id}-property_type`);
+  if (!el) return;
+  const options = ['HMO / Guaranteed','HMO / Management','Single / Guaranteed','Single / Management'];
+  const opts = options.map(o => `<option value="${escHtml(o)}"${o===currentVal?' selected':''}>${escHtml(o)}</option>`).join('');
+  el.innerHTML = `<select id="edit-input">${opts}</select><button class="save-btn" onclick="saveTypeField(${id})">Save</button><button class="cancel-btn" onclick="cancelEdit('properties',${id},'property_type','${escHtml(currentVal)}')">Cancel</button>`;
+}
+async function saveTypeField(id) {
+  const inp = document.getElementById('edit-input');
+  if (!inp) return;
+  const val = inp.value;
+  try {
+    await api(`/properties/${id}`, { method:'PATCH', body:JSON.stringify({property_type: val}) });
+    showToast('Updated ✓');
+    closeDetail(); setTimeout(() => showProperty(id), 200);
+  } catch(e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
+}
 
 async function showProperty(id) {
   try {
@@ -1594,8 +1615,7 @@ async function showProperty(id) {
     const addrFields = [
       ['address_line_1','Address Line 1','text'],['city','City','text'],
       ['county','County','text'],['postcode','Postcode','text'],
-      ['country','Country','text'],['property_type','Type','text'],
-      ['total_units','Total Units','number'],['bedrooms','Bedrooms','number'],
+      ['country','Country','text'],['total_units','Total Units','number'],['bedrooms','Bedrooms','number'],
       ['bathrooms','Bathrooms','number'],['council_tax_band','Council Tax Band','text'],
       ['council_account_no','Council Account No','text'],
       ['features','Features','text']
@@ -1603,6 +1623,10 @@ async function showProperty(id) {
     addrFields.forEach(([f,l,t]) => {
       const v = p[f]; if (v!=null && v!=='') html += makeEditable('properties',id,f,l,v,t);
     });
+    // Type field with dropdown
+    const typeOptions = ['HMO / Guaranteed','HMO / Management','Single / Guaranteed','Single / Management'];
+    const currentType = p.property_type || '';
+    if (currentType) html += `<div class="detail-field"><div class="label">Type</div><div class="val" id="val-properties-${id}-property_type" onclick="editTypeField(${id},'${escHtml(currentType)}')">${escHtml(currentType)}</div></div>`;
     html += '</div></div>';
     // Notes section - parse JSON notes array
     html += '<div class="detail-section"><h3>Notes</h3><div style="margin-bottom:10px">';
@@ -3008,7 +3032,7 @@ async function submitUploadImage(propId) {
 async function showNewPropertyForm() {
   openModal(`<h2>New Property</h2><div class="sub">Add a property with onboarding details</div>
     <div class="form-row"><div class="form-group"><label>Property Name / Ref</label><input type="text" id="newprop-ref" placeholder="e.g. 123 High Street"></div>
-    <div class="form-group"><label>Type</label><select id="newprop-type"><option value="multi">Multi-unit</option><option value="single">Single Property</option></select></div></div>
+    <div class="form-group"><label>Type</label><select id="newprop-type"><option value="HMO / Guaranteed">HMO / Guaranteed</option><option value="HMO / Management">HMO / Management</option><option value="Single / Guaranteed">Single / Guaranteed</option><option value="Single / Management">Single / Management</option></select></div></div>
     <div class="form-row"><div class="form-group"><label>Address Line 1</label><input type="text" id="newprop-addr1"></div>
     <div class="form-group"><label>Address Line 2</label><input type="text" id="newprop-addr2"></div></div>
     <div class="form-row"><div class="form-group"><label>City</label><input type="text" id="newprop-city"></div>
@@ -3029,7 +3053,7 @@ async function showNewPropertyForm() {
 async function submitNewProperty() {
   const payload = {
     ref: document.getElementById('newprop-ref').value,
-    name: document.getElementById('newprop-type').value,
+    property_type: document.getElementById('newprop-type').value,
     address_line_1: document.getElementById('newprop-addr1').value,
     address_line_2: document.getElementById('newprop-addr2').value,
     city: document.getElementById('newprop-city').value,
@@ -3316,7 +3340,7 @@ function showNewOwnerForm() {
     <div id="newowner-prop-fields">
       <div class="form-group"><label>Property Name *</label><input type="text" id="newowner-prop-name" value=""></div>
       <div class="form-row"><div class="form-group"><label>Ref (optional)</label><input type="text" id="newowner-prop-ref"></div>
-        <div class="form-group"><label>Type</label><select id="newowner-prop-type"><option value="single">Single</option><option value="multi">Multi-unit / HMO</option></select></div></div>
+        <div class="form-group"><label>Type</label><select id="newowner-prop-type"><option value="Single / Guaranteed">Single / Guaranteed</option><option value="Single / Management">Single / Management</option><option value="HMO / Guaranteed">HMO / Guaranteed</option><option value="HMO / Management">HMO / Management</option></select></div></div>
       <div class="form-row"><div class="form-group"><label>Address</label><input type="text" id="newowner-prop-address"></div>
         <div class="form-group"><label>City</label><input type="text" id="newowner-prop-city"></div></div>
       <div class="form-row"><div class="form-group"><label>Postcode</label><input type="text" id="newowner-prop-postcode"></div>

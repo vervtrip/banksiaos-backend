@@ -6982,7 +6982,7 @@ def api_properties_enhanced():
     page = int_param(request.args.get("page"))
     per_page = int_param(request.args.get("per_page"), 20)
     search = request.args.get("search","").strip()
-    condition = request.args.get("condition","").strip()  # HMO/Residential
+    condition = request.args.get("condition","").strip()  # Comma-separated filter codes
     tag_filter = request.args.get("tag","").strip()
 
     where_parts = ["1=1"]
@@ -6992,8 +6992,24 @@ def api_properties_enhanced():
         where_parts.append("(ref LIKE ? OR address_line_1 LIKE ? OR city LIKE ? OR postcode LIKE ?)")
         params.extend([like]*4)
     if condition:
-        where_parts.append("property_type=?")
-        params.append(condition)
+        # Map filter codes to LIKE patterns
+        # HMOGuaranteed → "HMO / Guaranteed", HMOManagement → "HMO / Management"
+        # SingleGuaranteed → "Single / Guaranteed", SingleManagement → "Single / Management"
+        code_map = {
+            "HMOGuaranteed": "HMO / Guaranteed",
+            "HMOManagement": "HMO / Management",
+            "SingleGuaranteed": "Single / Guaranteed",
+            "SingleManagement": "Single / Management",
+        }
+        codes = [c.strip() for c in condition.split(",") if c.strip()]
+        like_clauses = []
+        for code in codes:
+            mapped = code_map.get(code)
+            if mapped:
+                like_clauses.append("property_type=?")
+                params.append(mapped)
+        if like_clauses:
+            where_parts.append("(" + " OR ".join(like_clauses) + ")")
     if tag_filter:
         where_parts.append("tags LIKE ?")
         params.append(f"%{tag_filter}%")
