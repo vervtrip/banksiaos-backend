@@ -31,3 +31,7 @@ conversation_timeline.py
 run_data_migration.py
 monday_push.py
 run_push.py
+
+# Credentials — never commit
+users.json
+users.json.bak.*

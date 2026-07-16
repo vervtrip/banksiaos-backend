@@ -280,6 +280,10 @@ def require_team_auth(f):
     def wrap(*args, **kwargs):
         if "user" not in flask_session:
             return json_error("Not authenticated - please login to the dashboard", 401)
+        # Referencing handles applicant/tenant PII — restrict to admin roles.
+        role = (flask_session.get("user", {}).get("role") or "").lower()
+        if role not in ("super_admin", "admin"):
+            return json_error("You do not have permission to access referencing data", 403)
         return f(*args, **kwargs)
     return wrap
 
@@ -2387,6 +2391,27 @@ def api_create_tenancy_from_form():
             "UPDATE referencing_forms SET status = 'tenancy_created', modified = ? WHERE id = ?",
             [now, form_id],
         )
+
+        # Also update the linked applicant's status to 'converted'
+        applicant_id = form.get("applicant_id")
+        if applicant_id:
+            db.execute(
+                "UPDATE applicants SET status = 'converted', modified = ? WHERE id = ?",
+                [now, applicant_id],
+            )
+
+        # Create deposit record if deposit amount was provided
+        deposit_amount_val = float(deposit_amount) if deposit_amount else 0
+        if deposit_amount_val > 0:
+            db.execute(
+                "INSERT INTO deposits (tenancy_id, tenant_id, unit_id, property_id, amount, "
+                "registered_amount, deposit_type, scheme, protection_status, current_status, "
+                "date_received, source, notes, created, modified) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'cash', ?, 'unprotected', 'held', ?, 'banksia', ?, ?, ?)",
+                [tenancy_id, None, unit_id, property_id, deposit_amount_val, deposit_amount_val,
+                 deposit_scheme or "", start_date,
+                 f"Auto-created from referencing form #{form_id}", now, now],
+            )
 
         db.commit()
         tenancy = db.execute("SELECT * FROM tenancies WHERE id = ?", [tenancy_id]).fetchone()

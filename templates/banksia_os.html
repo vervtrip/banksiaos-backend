@@ -1520,7 +1520,7 @@ async function renderProperties() {
         const tags = (p.tags_list || []).map(t => `<span class="tag-badge">${escHtml(t)}</span>`).join('');
         const unitsStr = `${p.occupied_units||0} of ${p.total_units||0} units`;
         const conditionStr = p.condition ? `<span class="tag-badge tag-${(p.condition||'').toLowerCase()}">${escHtml(p.condition)}</span>` : '—';
-        html += `<tr onclick="showProperty(${p.id})"><td>${escHtml(p.ref||'—')}</td><td><strong>${escHtml(p.name||p.ref||'—')}</strong>${tags?'<br>'+tags:''}</td><td>${typeLabel}</td><td>${escHtml(p.address_line_1||'')}</td><td>${escHtml(p.city||'')}</td><td>${escHtml(p.owner_name||p.property_owner_name||'—')}</td><td>${conditionStr}</td><td>${unitsStr}</td></tr>`;
+        html += `<tr onclick="showProperty(${p.id})"><td>${escHtml(p.ref||'—')}</td><td><strong>${escHtml(p.name||p.ref||'—')}</strong>${tags?'<br>'+tags:''}</td><td>${typeLabel}</td><td>${escHtml(p.address_line_1||'')}</td><td>${escHtml(p.city||'')}</td><td>${p.owner_display_name ? '<a href="#" onclick="event.stopPropagation();closeDetail();navigate(\'property-owners\');setTimeout(()=>showOwnerDetail('+p.owner_display_id+'),100)" style="color:#2563eb;text-decoration:none">'+escHtml(p.owner_display_name)+'</a>' : escHtml(p.property_owner_name||'—')}</td><td>${conditionStr}</td><td>${unitsStr}</td></tr>`;
       });
       html += '</tbody></table>';
       html += paginationControls(propsState, 'propsPagination');
@@ -1586,6 +1586,11 @@ async function showProperty(id) {
     let html = `<div class="detail-section"><h3>Property Details</h3><div class="detail-grid">`;
     html += makeEditable('properties',id,'ref','Ref',p.ref||'','text');
     html += makeEditable('properties',id,'name','Name',displayName,'text');
+    // Insert owner as a clickable link if resolved from owner table
+    if (p.owner_display_name && p.owner_display_id) {
+      html += `<div class="detail-field"><div class="label">Owner</div>
+        <div class="val"><a href="#" onclick="event.preventDefault();closeDetail();navigate('property-owners');setTimeout(()=>showOwnerDetail(${p.owner_display_id}),100)" style="color:#2563eb;text-decoration:none;font-weight:500">${escHtml(p.owner_display_name)}</a></div></div>`;
+    }
     const addrFields = [
       ['address_line_1','Address Line 1','text'],['city','City','text'],
       ['county','County','text'],['postcode','Postcode','text'],
@@ -1593,7 +1598,7 @@ async function showProperty(id) {
       ['total_units','Total Units','number'],['bedrooms','Bedrooms','number'],
       ['bathrooms','Bathrooms','number'],['council_tax_band','Council Tax Band','text'],
       ['council_account_no','Council Account No','text'],
-      ['property_owner_name','Owner','text'],['features','Features','text']
+      ['features','Features','text']
     ];
     addrFields.forEach(([f,l,t]) => {
       const v = p[f]; if (v!=null && v!=='') html += makeEditable('properties',id,f,l,v,t);
@@ -3101,6 +3106,19 @@ async function submitNewUnit() {
 // PROPERTY OWNERS
 // ══════════════════════════════════════════
 let ownersState = { page:1, perPage:20, search:'', total:0 };
+
+// ── Owner Tags Parser ──
+function parseOwnerTags(tags) {
+  if (!tags) return [];
+  if (Array.isArray(tags)) return tags;
+  if (typeof tags === 'string') {
+    try { const p = JSON.parse(tags); return Array.isArray(p) ? p : []; }
+    catch(e) { return tags.split(',').map(t=>t.trim()).filter(Boolean); }
+  }
+  return [];
+}
+
+// ── List Page ──
 async function renderPropertyOwners() {
   const el = document.getElementById('page-content');
   el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading property owners...</div>';
@@ -3115,16 +3133,17 @@ async function renderPropertyOwners() {
     if (items.length===0) {
       html += '<div class="empty-state"><div class="icon">◉</div><h3>No property owners found</h3></div>';
     } else {
-      html += '<table><thead><tr><th>Name</th><th>Company</th><th>Main Contact</th><th>Phone</th><th>Status</th><th>Tags</th></tr></thead><tbody>';
+      html += '<table><thead><tr><th>Name</th><th>Company</th><th>Main Contact</th><th>Phone</th><th>Email</th><th>Status</th><th>Properties</th></tr></thead><tbody>';
       items.forEach(o => {
-        const tagArr = typeof o.tags === 'string' ? (()=>{try{return JSON.parse(o.tags)}catch(e){return o.tags.split(',').map(t=>t.trim()).filter(Boolean)}})() : (o.tags_list||o.tags||[]);
-        const tags = tagArr.map(t => `<span class="tag-badge">${escHtml(t)}</span>`).join('');
-        html += `<tr onclick="showOwnerDetail(${o.id})"><td><strong>${escHtml(o.name||o.owner_name||'—')}</strong></td>
-          <td>${escHtml(o.company||'—')}</td>
-          <td>${escHtml(o.main_contact||o.contact_name||'—')}</td>
-          <td>${escHtml(o.phone||o.phone_number||'—')}</td>
+        const tags = parseOwnerTags(o.tags);
+        const tagHtml = tags.map(t => `<span class="tag-badge">${escHtml(t)}</span>`).join('');
+        html += `<tr onclick="showOwnerDetail(${o.id})"><td><strong>${escHtml(o.name||'—')}</strong>${tagHtml?'<br><span style="font-size:11px">'+tagHtml+'</span>':''}</td>
+          <td>${escHtml(o.company_name||'—')}</td>
+          <td>${escHtml(o.main_contact_name||'—')}</td>
+          <td>${escHtml(o.contact_phone||'—')}</td>
+          <td>${escHtml(o.contact_email||'—')}</td>
           <td>${statusBadge(o.status||'active')}</td>
-          <td>${tags||'—'}</td></tr>`;
+          <td>${o.property_count!=null ? o.property_count : (o.properties||[]).length}</td></tr>`;
       });
       html += '</tbody></table>';
       html += paginationControls(ownersState, 'ownersPagination');
@@ -3136,54 +3155,221 @@ async function renderPropertyOwners() {
   }
 }
 function ownersPagination(p) { ownersState.page=p; renderPropertyOwners(); }
+
+// ── Detail Panel (with inline editing) ──
 async function showOwnerDetail(id) {
   try {
     const res = await api(`/property-owners/${id}`);
     const o = res.data;
-    let html = '<div class="detail-section"><h3>Owner Details</h3><div class="detail-grid">';
-    const fields = [['Name','name','text'],['Company','company','text'],['Main Contact','main_contact','text'],
-      ['Phone','phone','text'],['Email','email','text'],['Address','address','text'],
-      ['Status','status','text'],['Notes','notes','text']];
-    fields.forEach(([l,f,t]) => { const v=o[f]; if(v!=null&&v!=='') html+=`<div class="detail-field"><div class="label">${l}</div><div class="val">${escHtml(v)}</div></div>`; });
+    const fields = [
+      ['Name', 'name', 'text'],
+      ['Company', 'company_name', 'text'],
+      ['Office No', 'office_no', 'text'],
+      ['Main Contact', 'main_contact_name', 'text'],
+      ['Phone', 'contact_phone', 'tel'],
+      ['Email', 'contact_email', 'email'],
+      ['Address', 'address_line_1', 'text'],
+      ['City', 'city', 'text'],
+      ['Postcode', 'postcode', 'text'],
+      ['Status', 'status', 'select', ['active','inactive']],
+      ['Tags', 'tags', 'tags'],
+      ['Notes', 'notes', 'textarea']
+    ];
+
+    let html = '<div class="detail-section"><h3>Owner Information</h3><div class="detail-grid" id="owner-detail-grid">';
+    fields.forEach(([l,f,t,opts]) => {
+      const v = o[f];
+      if (v != null && v !== '') {
+        let display = escHtml(v);
+        if (f === 'tags') {
+          const tags = parseOwnerTags(v);
+          display = tags.map(t => `<span class="tag-badge">${escHtml(t)}</span>`).join('') || '—';
+        }
+        html += `<div class="detail-field" data-field="${f}"><div class="label">${l}</div>
+          <div class="val" onclick="inlineEditOwnerField(${o.id},'${f}','${l}',this)">${display}</div></div>`;
+      } else {
+        html += `<div class="detail-field muted" data-field="${f}" style="opacity:0.5"><div class="label">${l}</div>
+          <div class="val" onclick="inlineEditOwnerField(${o.id},'${f}','${l}',this)" style="cursor:pointer">—</div></div>`;
+      }
+    });
     html += '</div></div>';
+
     // Properties owned
-    if (o.properties && o.properties.length > 0) {
-      html += '<div class="detail-section"><h3>Properties</h3><table><thead><tr><th>Ref</th><th>Name</th><th>Address</th></tr></thead><tbody>';
-      o.properties.forEach(p => {
-        html += `<tr onclick="closeDetail();navigate('properties');setTimeout(()=>showProperty(${p.id}),100)"><td>${escHtml(p.ref||'—')}</td><td>${escHtml(p.name||'—')}</td><td>${escHtml(p.address_line_1||'')}</td></tr>`;
+    const props = o.properties || [];
+    html += '<div class="detail-section"><h3>Linked Properties <span class="badge">' + props.length + '</span></h3>';
+    if (props.length === 0) {
+      html += '<p class="muted">No properties linked to this owner. <a href="#" onclick="showLinkPropertyForm('+o.id+',\''+escHtml(o.name)+'\');return false">Link a property</a>.</p>';
+    } else {
+      html += '<table><thead><tr><th>Ref</th><th>Name</th><th>Address</th><th>Type</th></tr></thead><tbody>';
+      props.forEach(p => {
+        html += `<tr onclick="closeDetail();navigate('properties');setTimeout(()=>showProperty(${p.id}),100)" style="cursor:pointer">
+          <td>${escHtml(p.ref||'—')}</td><td>${escHtml(p.name||'—')}</td>
+          <td>${escHtml(p.address_line_1||'')}${p.city?', '+escHtml(p.city):''}</td>
+          <td>${escHtml(p.property_type||'—')}</td></tr>`;
       });
-      html += '</tbody></table></div>';
+      html += '</tbody></table>';
     }
+    html += '</div>';
+
+    // Activity
+    html += '<div class="detail-section"><h3>Activity</h3>';
+    const created = o.created ? new Date(o.created).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : '—';
+    const modified = o.modified ? new Date(o.modified).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+    html += `<p class="muted" style="font-size:12px">Created: ${created} &middot; Last modified: ${modified}</p>`;
+    html += '</div>';
+
     openDetail(o.name||'Owner', html, 'property-owners', id);
   } catch(e) { showToast('Failed: '+e.message,'error'); }
 }
+
+// ── Inline Edit ──
+function inlineEditOwnerField(id, field, label, el) {
+  const current = el.textContent.trim();
+  if (field === 'tags') {
+    const input = prompt('Enter tags (comma-separated):', current === '—' ? '' : current);
+    if (input === null) return;
+    const payload = {};
+    payload[field] = input;
+    api(`/property-owners/${id}`, { method:'PATCH', body:JSON.stringify(payload) }).then(() => {
+      showToast('Updated');
+      showOwnerDetail(id);
+    }).catch(e => showToast('Failed: '+e.message,'error'));
+  } else if (field === 'notes') {
+    const input = prompt(label + ':', current === '—' ? '' : current);
+    if (input === null) return;
+    const payload = {};
+    payload[field] = input;
+    api(`/property-owners/${id}`, { method:'PATCH', body:JSON.stringify(payload) }).then(() => {
+      showToast('Updated');
+      showOwnerDetail(id);
+    }).catch(e => showToast('Failed: '+e.message,'error'));
+  } else if (field === 'status') {
+    const cur = current === '—' ? 'active' : current;
+    const n = cur === 'active' ? 'inactive' : 'active';
+    if (!confirm(`Change status to "${n}"?`)) return;
+    const payload = {};
+    payload[field] = n;
+    api(`/property-owners/${id}`, { method:'PATCH', body:JSON.stringify(payload) }).then(() => {
+      showToast('Status changed to ' + n);
+      showOwnerDetail(id);
+    }).catch(e => showToast('Failed: '+e.message,'error'));
+  } else {
+    const input = prompt(label + ':', current === '—' ? '' : current);
+    if (input === null) return;
+    const payload = {};
+    payload[field] = input;
+    api(`/property-owners/${id}`, { method:'PATCH', body:JSON.stringify(payload) }).then(() => {
+      showToast('Updated');
+      showOwnerDetail(id);
+    }).catch(e => showToast('Failed: '+e.message,'error'));
+  }
+}
+
+// ── Link Property to Owner ──
+async function showLinkPropertyForm(ownerId, ownerName) {
+  // Load unlinked properties for selection
+  try {
+    const allRes = await api('/properties?per_page=200');
+    const unlinked = (allRes.data||[]).filter(p => !p.property_owner_id && !p.property_owner_name);
+    if (unlinked.length === 0) {
+      showToast('No unlinked properties available. Create a new property first.','info');
+      return;
+    }
+    let opts = unlinked.map(p => `<option value="${p.id}">${escHtml(p.ref||'')} — ${escHtml(p.name||'')}</option>`).join('');
+    openModal(`<h2>Link Property to Owner</h2><div class="sub">Link a property to <strong>${escHtml(ownerName)}</strong></div>
+      <div class="form-group"><label>Select Property</label><select id="link-prop-select">${opts}</select></div>
+      <div class="form-actions"><button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button>
+      <button class="btn btn-submit" onclick="submitLinkProperty(${ownerId})">Link Property</button></div>`);
+  } catch(e) { showToast('Failed: '+e.message,'error'); }
+}
+
+async function submitLinkProperty(ownerId) {
+  const propId = document.getElementById('link-prop-select').value;
+  if (!propId) { showToast('Select a property','error'); return; }
+  try {
+    await api(`/properties/${propId}`, { method:'PATCH', body:JSON.stringify({
+      property_owner_id: String(ownerId)
+    })});
+    closeModal(null);
+    showToast('Property linked');
+    showOwnerDetail(ownerId);
+  } catch(e) { showToast('Failed: '+e.message,'error'); }
+}
+
+// ── New Owner Form (with auto-property creation) ──
 function showNewOwnerForm() {
-  openModal(`<h2>New Property Owner</h2><div class="sub">Add an owner to the portfolio</div>
-    <div class="form-row"><div class="form-group"><label>Name</label><input type="text" id="newowner-name"></div>
+  openModal(`<h2>New Property Owner</h2><div class="sub">Add an owner and optionally create their first property</div>
+    <div class="form-row"><div class="form-group"><label>Owner Name *</label><input type="text" id="newowner-name"></div>
     <div class="form-group"><label>Company</label><input type="text" id="newowner-company"></div></div>
     <div class="form-row"><div class="form-group"><label>Main Contact</label><input type="text" id="newowner-contact"></div>
     <div class="form-group"><label>Phone</label><input type="tel" id="newowner-phone"></div></div>
     <div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="newowner-email"></div>
+    <div class="form-group"><label>Office No</label><input type="tel" id="newowner-office"></div></div>
+    <div class="form-row"><div class="form-group"><label>Address</label><input type="text" id="newowner-address"></div>
+    <div class="form-group"><label>City</label><input type="text" id="newowner-city"></div></div>
+    <div class="form-row"><div class="form-group"><label>Postcode</label><input type="text" id="newowner-postcode"></div>
     <div class="form-group"><label>Status</label><select id="newowner-status"><option value="active">Active</option><option value="inactive">Inactive</option></select></div></div>
-    <div class="form-group"><label>Address</label><textarea id="newowner-address" rows="2"></textarea></div>
-    <div class="form-group"><label>Notes</label><textarea id="newowner-notes" rows="2"></textarea></div>
+    <hr style="margin:12px 0;border:none;border-top:1px solid #eee">
+    <h4 style="margin:0 0 8px 0">Auto-Create Property</h4>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:8px">
+      <input type="checkbox" id="newowner-create-prop" onchange="togglePropFields()" checked style="width:auto"> Create a linked property for this owner</label>
+    <div id="newowner-prop-fields">
+      <div class="form-group"><label>Property Name *</label><input type="text" id="newowner-prop-name" value=""></div>
+      <div class="form-row"><div class="form-group"><label>Ref (optional)</label><input type="text" id="newowner-prop-ref"></div>
+        <div class="form-group"><label>Type</label><select id="newowner-prop-type"><option value="single">Single</option><option value="multi">Multi-unit / HMO</option></select></div></div>
+      <div class="form-row"><div class="form-group"><label>Address</label><input type="text" id="newowner-prop-address"></div>
+        <div class="form-group"><label>City</label><input type="text" id="newowner-prop-city"></div></div>
+      <div class="form-row"><div class="form-group"><label>Postcode</label><input type="text" id="newowner-prop-postcode"></div>
+        <div class="form-group"><label>No. Units</label><input type="number" id="newowner-prop-units" value="1" min="1" style="width:80px"></div></div>
+    </div>
     <div class="form-actions"><button class="btn btn-cancel" onclick="closeModal(event)">Cancel</button>
     <button class="btn btn-submit" onclick="submitNewOwner()">Add Owner</button></div>`);
 }
+function togglePropFields() {
+  const show = document.getElementById('newowner-create-prop').checked;
+  document.getElementById('newowner-prop-fields').style.display = show ? 'block' : 'none';
+}
+
 async function submitNewOwner() {
+  const name = document.getElementById('newowner-name').value.trim();
+  if (!name) { showToast('Owner name required','error'); return; }
   const payload = {
-    name: document.getElementById('newowner-name').value,
-    company: document.getElementById('newowner-company').value,
-    main_contact: document.getElementById('newowner-contact').value,
-    phone: document.getElementById('newowner-phone').value,
-    email: document.getElementById('newowner-email').value,
-    status: document.getElementById('newowner-status').value,
-    address: document.getElementById('newowner-address').value,
-    notes: document.getElementById('newowner-notes').value
+    name,
+    company_name: document.getElementById('newowner-company').value.trim(),
+    main_contact_name: document.getElementById('newowner-contact').value.trim(),
+    contact_phone: document.getElementById('newowner-phone').value.trim(),
+    contact_email: document.getElementById('newowner-email').value.trim(),
+    office_no: document.getElementById('newowner-office').value.trim(),
+    address_line_1: document.getElementById('newowner-address').value.trim(),
+    city: document.getElementById('newowner-city').value.trim(),
+    postcode: document.getElementById('newowner-postcode').value.trim(),
+    status: document.getElementById('newowner-status').value
   };
-  if (!payload.name) { showToast('Name required','error'); return; }
-  try { await api('/property-owners', { method:'POST', body:JSON.stringify(payload) }); closeModal(null); showToast('Owner added'); renderPropertyOwners(); }
-  catch(e) { showToast('Failed: '+e.message,'error'); }
+
+  // Auto-create property?
+  if (document.getElementById('newowner-create-prop').checked) {
+    const propName = document.getElementById('newowner-prop-name').value.trim();
+    if (propName) {
+      payload.create_property = true;
+      payload.property_name = propName;
+      payload.property_ref = document.getElementById('newowner-prop-ref').value.trim();
+      payload.property_address = document.getElementById('newowner-prop-address').value.trim();
+      payload.property_type = document.getElementById('newowner-prop-type').value;
+      payload.property_city = document.getElementById('newowner-prop-city').value.trim();
+      payload.property_postcode = document.getElementById('newowner-prop-postcode').value.trim();
+      payload.property_units = parseInt(document.getElementById('newowner-prop-units').value) || 1;
+    }
+  }
+
+  try {
+    const res = await api('/property-owners', { method:'POST', body:JSON.stringify(payload) });
+    closeModal(null);
+    const msg = res.created_property
+      ? `Owner added & property "${res.created_property.name}" created`
+      : 'Owner added';
+    showToast(msg, 'success');
+    renderPropertyOwners();
+  } catch(e) { showToast('Failed: '+e.message,'error'); }
 }
 
 // ══════════════════════════════════════════

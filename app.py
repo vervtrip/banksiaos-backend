@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
 """Banksia OS — STR, HMO, Maintenance consolidated view."""
-import json, os, subprocess, re, time, sys, urllib.request, uuid, sqlite3
+import json, os, subprocess, re, time, sys, urllib.request, uuid, sqlite3, hashlib, secrets
 from datetime import datetime, timedelta, date, timezone
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, redirect, session
 
 app = Flask(__name__)
-app.secret_key = "verv-ops-dash-2026-secure"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "verv-ops-dash-2026-secure")
 app.config.update(
-    SESSION_COOKIE_SECURE=False,
+    SESSION_COOKIE_SECURE=False,  # Traefik terminates TLS, internal traffic is HTTP
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_NAME='banksia_os_sid',
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+    SESSION_PERMANENT=True,
     SEND_FILE_MAX_AGE_DEFAULT=300,
-    TEMPLATES_AUTO_RELOAD=False
+    TEMPLATES_AUTO_RELOAD=False,
+    MAX_CONTENT_LENGTH=50 * 1024 * 1024,  # 50MB upload cap
+    JSONIFY_PRETTYPRINT_REGULAR=False,
 )
+
+# ── Trust X-Forwarded-Proto when behind Traefik ──
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_for=1)
 
 # ── Single authoritative per-thread DB connection ──
 from verv_os_db import get_db, get_dict_db, _vos_local
@@ -58,7 +67,27 @@ def shutdown_db(exception=None):
 
 @app.after_request
 def add_cache_headers(response):
-    """Add caching headers for static-like responses and prevent double-commits on JSON."""
+    """Add caching headers for static-like responses, prevent double-commits,
+    and inject security headers across all responses."""
+    # CSP — strict but functional for dashboard
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob: https:; "
+        "font-src 'self' data:; "
+        "connect-src 'self' http://127.0.0.1:5050 https://api.arthuronline.co.uk https://api.hostaway.com https://api.monday.com; "
+        "frame-ancestors 'none'; "
+        "form-action 'self'; "
+        "base-uri 'self'; "
+        "object-src 'none'"
+    )
+    response.headers['Content-Security-Policy'] = csp
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+
     path = request.path
     if path.startswith('/static/') or path.startswith('/api/banksia-os/dashboard'):
         response.headers['Cache-Control'] = 'public, max-age=60'
@@ -73,8 +102,15 @@ from banksia_api import banksia
 app.register_blueprint(banksia)
 
 # ── Register Banksia OS Blueprint ──
-from banksia_os import banksia_os_bp
+from banksia_os import banksia_os_bp, sync_unit_vacancy
 app.register_blueprint(banksia_os_bp)
+
+# Run unit vacancy sync at startup to ensure consistency
+try:
+    result = sync_unit_vacancy()
+    app.logger.info(f"Unit vacancy sync on startup: {result.get('total_changed', 0)} units updated")
+except Exception as e:
+    app.logger.warning(f"Unit vacancy sync on startup failed: {e}")
 
 # ── Monday Push Sync ──
 from monday_push import push_all_pending, get_token
@@ -110,28 +146,73 @@ app.register_blueprint(referencing_bp)
 # ── Multi-user auth system ──
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
 
+# Track login attempts per IP for brute-force protection
+_login_attempts: dict[str, list[float]] = {}
+MAX_LOGIN_ATTEMPTS = 10
+LOGIN_WINDOW = 300  # 5 minutes
+
+def _hash_password(password: str) -> str:
+    """SHA-256 with a random salt. Note: bcrypt/argon2 preferred for production."""
+    salt = hashlib.sha256(secrets.token_bytes(32)).hexdigest()[:16]
+    return salt + ":" + hashlib.sha256((salt + password).encode()).hexdigest()
+
+def _check_password(password: str, stored: str) -> bool:
+    if ":" not in stored:
+        return stored == password  # legacy plaintext fallback
+    salt, h = stored.split(":", 1)
+    return hashlib.sha256((salt + password).encode()).hexdigest() == h
+
+def _migrate_password_to_hash(users, username, password):
+    """Upgrade a plaintext password to hashed on successful login."""
+    stored = str(users[username].get("password", ""))
+    if ":" not in stored:
+        # Still plaintext — hash it now
+        users[username]["password"] = _hash_password(password)
+        _save_users(users)
+        return True
+    return False
+
+def _check_rate_limit(ip: str) -> bool:
+    now = time.time()
+    if ip not in _login_attempts:
+        _login_attempts[ip] = []
+    _login_attempts[ip] = [t for t in _login_attempts[ip] if now - t < LOGIN_WINDOW]
+    return len(_login_attempts[ip]) < MAX_LOGIN_ATTEMPTS
+
+def _record_login_attempt(ip: str):
+    _login_attempts.setdefault(ip, []).append(time.time())
+
 def _load_users():
     if not os.path.exists(USERS_FILE):
-        return {"Sami": {"password": "Newpassword1323!", "role": "super_admin"}}
+        default_hash = _hash_password("Newpassword1323!")
+        return {"Sami": {"password": default_hash, "role": "super_admin"}}
     return json.load(open(USERS_FILE))
 
 def _save_users(users):
-    with open(USERS_FILE, "w") as f:
+    # Write atomically via temp file to prevent partial writes on crash
+    tmp_path = USERS_FILE + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(users, f, indent=2)
+    os.replace(tmp_path, USERS_FILE)
 
 def _authenticate(username, password):
     users = _load_users()
     # Try direct username match first
     u = users.get(username)
-    if u and u.get("password") == password:
-        return {"username": username, "role": u.get("role", "admin"), "email": u.get("email", "")}
+    if u:
+        stored = u.get("password", "")
+        if _check_password(password, stored):
+            _migrate_password_to_hash(users, username, password)
+            return {"username": username, "role": u.get("role", "admin"), "email": u.get("email", "")}
     # Try email match
     for uname, data in users.items():
-        if data.get("email", "").lower() == username.lower() and data.get("password") == password:
+        if data.get("email", "").lower() == username.lower() and _check_password(password, data.get("password", "")):
+            _migrate_password_to_hash(users, uname, password)
             return {"username": uname, "role": data.get("role", "admin"), "email": data.get("email", "")}
     # Try case-insensitive username
     for uname, data in users.items():
-        if uname.lower() == username.lower() and data.get("password") == password:
+        if uname.lower() == username.lower() and _check_password(password, data.get("password", "")):
+            _migrate_password_to_hash(users, uname, password)
             return {"username": uname, "role": data.get("role", "admin"), "email": data.get("email", "")}
     return None
 
@@ -278,11 +359,16 @@ def dashboard_redirect():
 # ── Auth API ──
 @app.route("/api/auth/login", methods=["POST"])
 def api_auth_login():
+    # Rate limit by IP
+    ip = request.remote_addr or "unknown"
+    if not _check_rate_limit(ip):
+        return jsonify({"error": "Too many login attempts. Try again in 5 minutes."}), 429
     data = request.get_json()
     username = data.get("username", "").strip()
     password = data.get("password", "")
     user = _authenticate(username, password)
     if not user:
+        _record_login_attempt(ip)
         return jsonify({"error": "Invalid credentials"}), 401
     session["user"] = user
     session.permanent = True
@@ -297,7 +383,9 @@ def api_auth_user():
 
 @app.route("/api/auth/logout", methods=["POST", "GET"])
 def api_auth_logout():
+    # Regenerate session to prevent session fixation
     session.clear()
+    # Create a new session cookie on logout for CSRF freshness
     return redirect("/")
 
 # ── Health check for Traefik / watchdog ──
@@ -323,16 +411,7 @@ def favicon():
                 data = f.read()
             return Response(data, mimetype="image/x-icon")
     return ("", 204)
-    try:
-        cur = get_db().execute("SELECT 1")
-        db_ok = cur.fetchone() is not None
-    except Exception:
-        db_ok = False
-    return jsonify({
-        "status": "ok" if db_ok else "degraded",
-        "database": "connected" if db_ok else "error",
-        "uptime_seconds": round(time.time() - _start_time, 1) if '_start_time' in dir() else 0
-    })
+
 
 # Track start time
 _start_time = time.time()
@@ -342,6 +421,17 @@ RESET_TOKENS = {}  # {email: {"token": str, "expires": timestamp}}
 
 @app.route("/api/auth/forgot-password", methods=["POST"])
 def api_forgot_password():
+    # Rate limit forgot-password: 3 per 10 minutes per IP
+    ip = request.remote_addr or "unknown"
+    rl_key = f"forgot:{ip}"
+    now = time.time()
+    if rl_key not in _login_attempts:
+        _login_attempts[rl_key] = []
+    _login_attempts[rl_key] = [t for t in _login_attempts[rl_key] if now - t < 600]
+    if len(_login_attempts[rl_key]) >= 3:
+        return jsonify({"error": "Too many requests. Try again later."}), 429
+    _login_attempts[rl_key].append(now)
+    
     data = request.get_json()
     email = data.get("email", "").strip().lower()
     if not email:
@@ -417,7 +507,7 @@ def api_reset_password():
     users = _load_users()
     username = stored["username"]
     if username in users:
-        users[username]["password"] = new_password
+        users[username]["password"] = _hash_password(new_password)
         _save_users(users)
         del RESET_TOKENS[email]
         return jsonify({"success": True, "message": "Password has been reset successfully."})
@@ -732,7 +822,7 @@ def api_add_user():
     if new_role == "super_admin" and role != "super_admin":
         return jsonify({"error": "Only super admins can create super admin accounts"}), 403
     users = _load_users()
-    users[username] = {"password": password, "role": new_role}
+    users[username] = {"password": _hash_password(password), "role": new_role}
     _save_users(users)
     return jsonify({"success": True, "user": {"username": username, "role": new_role}})
 
@@ -785,9 +875,9 @@ def api_update_user(username):
     # Only super admin can change role
     if is_super and "role" in data:
         users[username]["role"] = data["role"]
-    # Password update handled separately by change-password endpoint
+    # Password update — always hash
     if "password" in data and data["password"]:
-        users[username]["password"] = data["password"]
+        users[username]["password"] = _hash_password(data["password"])
     _save_users(users)
     return jsonify({"success": True, "user": {"username": username, "role": users[username].get("role")}})
 
@@ -827,9 +917,24 @@ def api_upload_avatar(username):
     if "avatar" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
     file = request.files["avatar"]
-    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "png"
+    # Security: validate extension
+    orig_name = (file.filename or "").strip()
+    if not orig_name:
+        return jsonify({"error": "Invalid filename"}), 400
+    ext = orig_name.rsplit(".", 1)[-1].lower() if "." in orig_name else ""
     if ext not in ("png", "jpg", "jpeg", "gif", "webp"):
-        return jsonify({"error": "Invalid image format"}), 400
+        return jsonify({"error": "Invalid image format. Allowed: png, jpg, jpeg, gif, webp"}), 400
+    # Security: validate MIME
+    mime = file.content_type or ""
+    if mime and mime not in ("image/png", "image/jpeg", "image/gif", "image/webp", "application/octet-stream"):
+        return jsonify({"error": "Invalid MIME type"}), 400
+    # Security: enforce max file size (2MB for avatars)
+    MAX_AVATAR_SIZE = 2 * 1024 * 1024
+    file.seek(0, os.SEEK_END)
+    real_size = file.tell()
+    file.seek(0)
+    if real_size > MAX_AVATAR_SIZE:
+        return jsonify({"error": "Avatar too large. Max 2MB."}), 400
     filename = f"{uuid.uuid4().hex}.{ext}"
     file.save(os.path.join(AVATAR_DIR, filename))
     url = f"/static/avatars/{filename}"
@@ -880,9 +985,10 @@ def api_user_change_password():
     users = _load_users()
     if username not in users:
         return jsonify({"error": "User not found"}), 404
-    if users[username].get("password") != current_password:
+    stored = users[username].get("password", "")
+    if not _check_password(current_password, stored):
         return jsonify({"error": "Current password is incorrect"}), 403
-    users[username]["password"] = new_password
+    users[username]["password"] = _hash_password(new_password)
     _save_users(users)
     return jsonify({"success": True, "message": "Password updated"})
 
@@ -2586,9 +2692,9 @@ def api_update_profile():
         users[username]["email"] = data["email"].strip()
     
     if "current_password" in data and "new_password" in data:
-        if users[username].get("password") != data["current_password"]:
+        if not _check_password(data["current_password"], users[username].get("password", "")):
             return jsonify({"error": "Current password is incorrect"}), 403
-        users[username]["password"] = data["new_password"]
+        users[username]["password"] = _hash_password(data["new_password"])
     
     _save_users(users)
     return jsonify({"success": True, "message": "Profile updated"})

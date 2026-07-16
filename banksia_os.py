@@ -29,6 +29,24 @@ def _require_banksia_auth():
         return jsonify({"success": False, "error": "Not logged in"}), 401
     request.current_user = user
 
+    # ── Role-based data scoping ──
+    # Only super_admin/admin may access tenant PII and financial data.
+    # Restricted roles (e.g. 'projects') are limited to maintenance, properties
+    # and dashboard context — they are blocked from PII/financial route families.
+    role = (user.get("role") or "").lower()
+    if role not in ("super_admin", "admin"):
+        rel = request.path[len("/api/banksia-os"):] or "/"
+        RESTRICTED_PREFIXES = (
+            "/tenants", "/tenancies", "/guarantors", "/applicants",
+            "/deposits", "/transactions", "/invoices", "/rent",
+            "/documents", "/entity-documents", "/submissions", "/finance",
+        )
+        if rel.startswith(RESTRICTED_PREFIXES):
+            return jsonify({
+                "success": False,
+                "error": "You do not have permission to access this data",
+            }), 403
+
 
 # ── Helpers ──
 
@@ -82,14 +100,23 @@ def clean_none(row):
 # ── User helpers ──
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
 
+def _hash_password(password: str) -> str:
+    """SHA-256 with a random salt (matches app.py)."""
+    import hashlib, secrets
+    salt = hashlib.sha256(secrets.token_bytes(32)).hexdigest()[:16]
+    return salt + ":" + hashlib.sha256((salt + password).encode()).hexdigest()
+
 def _load_users():
     if not os.path.exists(USERS_FILE):
         return {"Sami": {"password": "Newpassword1323!", "role": "super_admin"}}
     return json.load(open(USERS_FILE))
 
 def _save_users(users):
-    with open(USERS_FILE, "w") as f:
+    # Write atomically via temp file
+    tmp_path = USERS_FILE + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(users, f, indent=2)
+    os.replace(tmp_path, USERS_FILE)
 
 
 def int_param(val, default=1):
@@ -169,6 +196,60 @@ def api_update_resource(table, item_id):
     finally:
         db.close()
 
+# ═══════════════════════════════════════════════
+# 0. UNIT VACANCY SYNC — derives unit_vacant from active tenancies
+# ═══════════════════════════════════════════════
+
+def sync_unit_vacancy(db=None):
+    """
+    Derive unit_vacant from active tenancies.
+    A unit is vacant (unit_vacant=1) if it has NO tenancies in
+    Current/Periodic/Active status. Otherwise it's occupied (unit_vacant=0).
+    Idempotent — safe to run any time.
+    Returns a dict with counts of updated rows.
+    """
+    if db is None:
+        db = get_dict_db()
+        close_after = True
+    else:
+        close_after = False
+    try:
+        active_statuses = ("'Current','current','Periodic','periodic','Active','active'")
+        # Units that should be occupied (have active tenancy) but are flagged vacant
+        now_occupied = db.execute(
+            f"UPDATE units SET unit_vacant = 0, modified = datetime('now') "
+            f"WHERE unit_vacant = 1 AND id IN ("
+            f"  SELECT DISTINCT t.unit_id FROM tenancies t "
+            f"  WHERE t.unit_id IS NOT NULL AND t.status IN ({active_statuses})"
+            f")"
+        ).rowcount
+
+        # Units that should be vacant (no active tenancy) but are flagged occupied
+        now_vacant = db.execute(
+            f"UPDATE units SET unit_vacant = 1, modified = datetime('now') "
+            f"WHERE unit_vacant = 0 AND id NOT IN ("
+            f"  SELECT DISTINCT t.unit_id FROM tenancies t "
+            f"  WHERE t.unit_id IS NOT NULL AND t.status IN ({active_statuses})"
+            f") AND id NOT IN (SELECT unit_id FROM tenancies WHERE unit_id IS NOT NULL AND status='Past')"
+        ).rowcount
+
+        db.commit()
+        return {"occupied_fixed": now_occupied, "vacant_fixed": now_vacant, "total_changed": now_occupied + now_vacant}
+    except Exception as e:
+        db.rollback()
+        raise e
+    finally:
+        if close_after:
+            db.close()
+
+@banksia_os_bp.route("/units/sync-vacancy", methods=["POST"])
+def api_sync_unit_vacancy():
+    """Manually trigger a unit vacancy sync from tenancies."""
+    try:
+        result = sync_unit_vacancy()
+        return json_success(result)
+    except Exception as e:
+        return json_error(str(e), 500)
 
 # ═══════════════════════════════════════════════
 # 1. DASHBOARD SUMMARY
@@ -1437,7 +1518,9 @@ def api_properties():
         f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id) AS actual_units, " \
         f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id AND u.unit_vacant = 0) AS occupied_units, " \
         f"COALESCE((SELECT SUM(t.rent_amount) FROM tenancies t WHERE t.property_id = properties.id AND t.status IN ('Current','current','Periodic','periodic','Active','active')), 0) AS monthly_rent, " \
-        f"CASE WHEN (SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id AND u.unit_vacant = 0) > 0 THEN 'Active' ELSE 'Vacant' END AS property_status " \
+        f"CASE WHEN (SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id AND u.unit_vacant = 0) > 0 THEN 'Active' ELSE 'Vacant' END AS property_status, " \
+        f"(SELECT po.name FROM property_owners po WHERE po.id = CAST(properties.property_owner_id AS INTEGER) LIMIT 1) AS owner_display_name, " \
+        f"(SELECT po.id FROM property_owners po WHERE po.id = CAST(properties.property_owner_id AS INTEGER) LIMIT 1) AS owner_display_id " \
         f"FROM properties WHERE {base_where}"
 
     if combined_having:
@@ -1492,6 +1575,17 @@ def api_property(prop_id):
         prop = db.execute("SELECT * FROM properties WHERE id = ?", (prop_id,)).fetchone()
         if not prop:
             return json_error("Property not found", 404)
+
+        # Resolve owner display info from property_owners table
+        owner_info = db.execute("SELECT id, name, company_name FROM property_owners WHERE id = CAST(? AS INTEGER) LIMIT 1",
+                                (prop.get("property_owner_id", "0"),)).fetchone()
+        if owner_info:
+            prop["owner_display_name"] = owner_info["name"]
+            prop["owner_display_id"] = owner_info["id"]
+            prop["owner_company"] = owner_info.get("company_name", "")
+        else:
+            prop["owner_display_name"] = prop.get("property_owner_name", "")
+            prop["owner_display_id"] = None
 
         # ── Units (existing) ──
         units = db.execute("SELECT * FROM units WHERE property_id = ? ORDER BY sort_order ASC, unit_ref ASC", (prop_id,)).fetchall()
@@ -2094,6 +2188,60 @@ def _format_value(val):
 # ═══════════════════════════════════════════════
 # 2d. ARCHIVE PROPERTY — soft delete with dependency check
 # ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/properties/archive-bulk", methods=["POST"])
+def api_archive_properties_bulk():
+    """Archive multiple properties in one request. Accepts JSON body with 'ids' array.
+    Returns per-property results and any blockers found."""
+    data = request.get_json(silent=True) or {}
+    prop_ids = data.get("ids", [])
+    if not prop_ids or not isinstance(prop_ids, list):
+        return json_error("Provide an 'ids' array of property IDs")
+
+    db = get_dict_db()
+    try:
+        results = []
+        archived = []
+        for pid in prop_ids:
+            prop = db.execute("SELECT * FROM properties WHERE id = ?", (pid,)).fetchone()
+            if not prop:
+                results.append({"id": pid, "archived": False, "error": "Not found"})
+                continue
+
+            active_statuses = ("'Current','current','Periodic','periodic','Active','active'")
+            active_tenancies = db.execute(
+                f"SELECT COUNT(*) AS cnt FROM tenancies WHERE property_id=? AND status IN ({active_statuses})",
+                (pid,)
+            ).fetchone()["cnt"]
+            active_jobs = db.execute(
+                "SELECT COUNT(*) AS cnt FROM maintenance_jobs WHERE property_id=? AND status NOT IN ('COMPLETED','CANCELLED','No Invoice Found')",
+                (pid,)
+            ).fetchone()["cnt"]
+
+            if active_tenancies > 0 or active_jobs > 0:
+                results.append({"id": pid, "archived": False, "blockers": {"active_tenancies": active_tenancies, "active_maintenance_jobs": active_jobs}})
+                continue
+
+            db.execute("UPDATE properties SET status='archived', modified=? WHERE id=?",
+                       [datetime.now(timezone.utc).isoformat(), pid])
+            _create_activity_log(db, "property_archived", pid,
+                                 f"Property '{prop.get('name','') or prop.get('ref','')}' archived (bulk)")
+            archived.append(pid)
+            results.append({"id": pid, "archived": True})
+
+        db.commit()
+        return json_success({
+            "archived": archived,
+            "results": results,
+            "total_requested": len(prop_ids),
+            "total_archived": len(archived),
+        })
+    except Exception as e:
+        db.rollback()
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
 
 @banksia_os_bp.route("/properties/<int:prop_id>/archive", methods=["POST"])
 def api_archive_property(prop_id):
@@ -2960,6 +3108,27 @@ def api_tenancy(ten_id):
             bool_fields(t, "is_overdue", "is_outstanding")
         ten["transactions"] = transactions
 
+        # Deposits (from authoritative deposits table)
+        deposit_rows = db.execute(
+            "SELECT * FROM deposits WHERE tenancy_id = ? ORDER BY created DESC",
+            (ten_id,)
+        ).fetchall()
+        ten["deposits"] = deposit_rows
+
+        # Rent charges
+        rent_charge_rows = db.execute(
+            "SELECT * FROM rent_charges WHERE tenancy_id = ? ORDER BY month DESC",
+            (ten_id,)
+        ).fetchall()
+        ten["rent_charges"] = rent_charge_rows
+
+        # Invoices
+        invoice_rows = db.execute(
+            "SELECT * FROM invoices WHERE tenancy_id = ? ORDER BY due_date DESC",
+            (ten_id,)
+        ).fetchall()
+        ten["invoices"] = invoice_rows
+
         # Property info — with address display name
         if ten.get("property_id"):
             prop = db.execute(
@@ -3561,6 +3730,9 @@ def api_tenants():
     per_page = int_param(request.args.get("per_page"), 20)
     search = request.args.get("search", "").strip()
     property_id = request.args.get("property_id", "").strip()
+    status_filter = request.args.get("status", "").strip()
+    has_email = request.args.get("has_email", "").strip()
+    has_phone = request.args.get("has_phone", "").strip()
 
     where_parts = ["1=1"]
     params = []
@@ -3579,6 +3751,16 @@ def api_tenants():
         except ValueError:
             pass
 
+    if status_filter:
+        where_parts.append("LOWER(COALESCE(status,'')) LIKE ?")
+        params.append(f"%{status_filter.lower()}%")
+
+    if has_email:
+        where_parts.append("email IS NOT NULL AND email != ''")
+
+    if has_phone:
+        where_parts.append("(mobile IS NOT NULL AND mobile != '') OR (phone_home IS NOT NULL AND phone_home != '')")
+
     where = " AND ".join(where_parts)
 
     rows, total = paginate(
@@ -3586,13 +3768,15 @@ def api_tenants():
         f"tn.full_address, tn.title, tn.first_name, tn.last_name, tn.date_of_birth, tn.gender, tn.citizen, "
         f"tn.email, tn.phone_home, tn.phone_work, tn.mobile AS phone, tn.passport_number, tn.visa_number, tn.visa_type, "
         f"tn.visa_years, tn.country_of_origin, tn.ni_number, tn.main_tenant, tn.status, tn.has_guarantor, "
-        f"tn.guarantor_first_name, tn.guarantor_last_name, tn.guarantor_email, "
+        f"tn.guarantor_first_name, tn.guarantor_last_name, tn.guarantor_email, tn.guarantor_mobile, "
         f"tn.employment_company, tn.student_status, tn.university, "
         f"tn.bank_name, tn.latest_credit_score, tn.latest_credit_description, "
         f"tn.applicant_note, tn.manager_note, tn.move_in_date, tn.move_out_date, tn.modified, tn.created, "
         f"COALESCE((SELECT COUNT(*) FROM tenancies t2 WHERE t2.id = tn.tenancy_id), 0) AS tenancy_count, "
-        f"COALESCE((SELECT COALESCE(NULLIF(p2.name, 'multi'), p2.address_line_1) FROM properties p2 WHERE p2.arthur_id = CAST(tn.property_id AS TEXT)), '') AS property_name, "
-        f"COALESCE((SELECT u2.unit_ref FROM units u2 WHERE u2.arthur_id = CAST(tn.unit_id AS TEXT)), '') AS unit_ref "
+        f"COALESCE((SELECT COALESCE(NULLIF(p2.name, 'multi'), p2.address_line_1) FROM properties p2 WHERE p2.id = tn.property_id), '') AS property_name, "
+        f"COALESCE((SELECT u2.unit_ref FROM units u2 WHERE u2.id = tn.unit_id), '') AS unit_ref, "
+        f"COALESCE((SELECT t2.rent_amount FROM tenancies t2 WHERE t2.id = tn.tenancy_id LIMIT 1), 0) AS rent_amount, "
+        f"COALESCE((SELECT SUM(x.amount_outstanding) FROM transactions x WHERE x.tenancy_id = tn.tenancy_id AND x.is_outstanding = 1), 0) AS arrears "
         f"FROM tenants tn WHERE {where} ORDER BY tn.last_name ASC, tn.first_name ASC",
         f"SELECT COUNT(*) AS cnt FROM tenants WHERE {where}",
         params, page, per_page
@@ -3610,15 +3794,7 @@ def api_tenant(tenant_id):
         return api_update_resource("tenants", tenant_id)
     db = get_dict_db()
     try:
-        tenant = db.execute("SELECT id, arthur_id, arthur_person_id, tenancy_id, unit_id, property_id, "
-            "full_address, title, first_name, last_name, date_of_birth, gender, citizen, "
-            "email, phone_home, phone_work, mobile AS phone, passport_number, visa_number, visa_type, "
-            "visa_years, country_of_origin, ni_number, main_tenant, status, has_guarantor, "
-            "guarantor_first_name, guarantor_last_name, guarantor_email, "
-            "employment_company, student_status, university, "
-            "bank_name, latest_credit_score, latest_credit_description, "
-            "applicant_note, manager_note, move_in_date, move_out_date, modified, created "
-            "FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
+        tenant = db.execute("SELECT * FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
         if not tenant:
             return json_error("Tenant not found", 404)
 
@@ -3960,45 +4136,38 @@ def api_transaction(txn_id):
 
 @banksia_os_bp.route("/finance/deposits")
 def api_deposits():
+    """Deposit list from the authoritative deposits table (unified data source).
+    Returns a flat list matching the old frontend format for backward compatibility."""
     db = get_dict_db()
     try:
-        registered = db.execute(
-            "SELECT id, ref, full_address, deposit_held_by, deposit_scheme, "
-            "deposit_registered_amount, main_tenant_name "
-            "FROM tenancies WHERE deposit_registered = 1 ORDER BY full_address ASC"
+        rows = db.execute(
+            "SELECT d.*, "
+            "COALESCE(NULLIF(p.ref, ''), NULLIF(p.address_line_1, ''), p.name) AS property_name, "
+            "t.main_tenant_name, t.ref AS tenancy_ref "
+            "FROM deposits d "
+            "LEFT JOIN tenancies t ON d.tenancy_id = t.id "
+            "LEFT JOIN properties p ON d.property_id = p.id "
+            "ORDER BY d.created DESC "
+            "LIMIT 200"
         ).fetchall()
 
-        unregistered = db.execute(
-            "SELECT tenancies.id, tenancies.ref, tenancies.full_address, "
-            "tenancies.deposit_held_by, tenancies.deposit_scheme, "
-            "COALESCE(units.deposit_amount, 0) AS deposit_registered_amount, "
-            "tenancies.main_tenant_name, tenancies.property_id, tenancies.unit_id "
-            "FROM tenancies LEFT JOIN units ON tenancies.unit_id = units.id "
-            "WHERE tenancies.deposit_registered = 0 "
-            "ORDER BY tenancies.full_address ASC"
-        ).fetchall()
-
-        # Merge into flat list for frontend compatibility
         all_deposits = []
-        for r in registered:
+        for r in rows:
+            tenant = r.get("main_tenant_name") or ""
+            if not tenant and r.get("first_name"):
+                tenant = f"{r.get('first_name','')} {r.get('last_name','')}"
             all_deposits.append({
                 "id": r["id"],
-                "tenant_name": r.get("main_tenant_name") or "—",
-                "property_name": r.get("full_address") or "—",
-                "amount": r.get("deposit_registered_amount") or 0,
-                "scheme": r.get("deposit_scheme") or "—",
-                "registered": True,
-                "ref": r.get("ref") or "",
-            })
-        for u in unregistered:
-            all_deposits.append({
-                "id": u["id"],
-                "tenant_name": u.get("main_tenant_name") or "—",
-                "property_name": u.get("full_address") or "—",
-                "amount": u.get("deposit_registered_amount") or 0,
-                "scheme": u.get("deposit_scheme") or "—",
-                "registered": False,
-                "ref": u.get("ref") or "",
+                "tenant_name": tenant or "—",
+                "property_name": r.get("property_name") or "—",
+                "amount": r.get("amount") or 0,
+                "scheme": r.get("scheme") or "—",
+                "registered": r.get("protection_status") == "protected",
+                "ref": r.get("tenancy_ref") or "",
+                "protection_status": r.get("protection_status") or "unprotected",
+                "current_status": r.get("current_status") or "held",
+                "tenancy_id": r.get("tenancy_id"),
+                "property_id": r.get("property_id"),
             })
         return json_success(all_deposits)
     except Exception as e:
@@ -4961,6 +5130,356 @@ def api_delete_uploaded(doc_id):
 
 
 # ═══════════════════════════════════════════════
+# 11. POLYMORPHIC ENTITY DOCUMENTS (drag-and-drop file storage)
+# ═══════════════════════════════════════════════
+
+DOCUMENTS_UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "media", "documents")
+os.makedirs(DOCUMENTS_UPLOAD_DIR, exist_ok=True)
+
+VALID_ENTITY_TYPES = {
+    "tenant", "tenants", "guarantor", "guarantors",
+    "applicant", "applicants", "property", "properties",
+    "unit", "units", "tenancy", "tenancies",
+    "referencing", "referencing_form", "referencing_forms",
+    "maintenance_job", "maintenance_jobs",
+    "property_owner", "property_owners",
+}
+
+def _normalise_entity_type(et: str) -> str:
+    singular = {
+        "tenants": "tenant", "tenancies": "tenancy",
+        "properties": "property", "applicants": "applicant",
+        "guarantors": "guarantor", "units": "unit",
+        "referencing_form": "referencing", "referencing_forms": "referencing",
+        "maintenance_job": "maintenance_job", "maintenance_jobs": "maintenance_job",
+        "property_owners": "property_owner",
+    }
+    return singular.get(et, et)
+
+
+def _validate_entity_exists(entity_type: str, entity_id: int) -> tuple:
+    et = _normalise_entity_type(entity_type)
+    table_map = {
+        "tenant": ("tenants", "first_name", "last_name"),
+        "guarantor": ("guarantors", "first_name", "last_name"),
+        "applicant": ("applicants", "first_name", "last_name"),
+        "property": ("properties", "name", "address_line_1"),
+        "unit": ("units", "unit_ref", "full_address"),
+        "tenancy": ("tenancies", "ref", "full_address"),
+        "referencing": ("referencing_forms", "first_name", "last_name"),
+        "maintenance_job": ("maintenance_jobs", "reference", "title"),
+        "property_owner": ("property_owners", "name", "email"),
+    }
+    info = table_map.get(et)
+    if not info:
+        return False, "Unknown entity type"
+    table, name_col, alt_col = info
+    db = get_dict_db()
+    try:
+        row = db.execute(f"SELECT {name_col}, {alt_col} FROM {table} WHERE id = ?", (entity_id,)).fetchone()
+        if row:
+            label = f"{row[name_col] or ''} {row[alt_col] or ''}".strip()
+            if not label:
+                label = f"{et.capitalize()} #{entity_id}"
+            return True, label
+        return False, f"{table} #{entity_id} not found"
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/entity-documents/upload", methods=["POST"])
+def api_entity_document_upload():
+    if "file" not in request.files:
+        return json_error("No file provided (use field 'file')")
+    file = request.files["file"]
+    if file.filename == "":
+        return json_error("Empty filename")
+    entity_type = request.form.get("entity_type", "").strip().lower()
+    entity_id_str = request.form.get("entity_id", "").strip()
+    category = request.form.get("category", "general").strip()
+    notes = request.form.get("notes", "").strip()
+    uploaded_by = request.form.get("uploaded_by", "team").strip()
+    if entity_type not in VALID_ENTITY_TYPES:
+        return json_error(f"Invalid entity_type. Must be one of: {', '.join(sorted(VALID_ENTITY_TYPES))}")
+    if not entity_id_str:
+        return json_error("entity_id is required")
+    try:
+        entity_id = int(entity_id_str)
+    except ValueError:
+        return json_error("entity_id must be an integer")
+    et = _normalise_entity_type(entity_type)
+    exists, label = _validate_entity_exists(et, entity_id)
+    if not exists:
+        return json_error(f"Entity not found: {label}", 404)
+    
+    # ── Security: validate file type ──
+    ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".png", ".jpg", ".jpeg",
+                          ".gif", ".webp", ".txt", ".csv", ".rtf", ".odt", ".ods",
+                          ".msg", ".eml", ".heic", ".heif"}
+    orig_name = (file.filename or "").strip()
+    if not orig_name:
+        return json_error("Empty filename")
+    ext = os.path.splitext(orig_name)[1].lower() or ""
+    if ext not in ALLOWED_EXTENSIONS:
+        return json_error(f"File type '{ext}' not allowed. Accepted: {', '.join(sorted(ALLOWED_EXTENSIONS))}")
+    
+    # ── Security: validate actual MIME type ──
+    mime_type = file.content_type or "application/octet-stream"
+    ALLOWED_MIMES = {
+        ".pdf": ["application/pdf"],
+        ".doc": ["application/msword"],
+        ".docx": ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+        ".xls": ["application/vnd.ms-excel"],
+        ".xlsx": ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+        ".png": ["image/png"],
+        ".jpg": ["image/jpeg"],
+        ".jpeg": ["image/jpeg"],
+        ".gif": ["image/gif"],
+        ".webp": ["image/webp"],
+        ".txt": ["text/plain"],
+        ".csv": ["text/csv", "text/plain"],
+        ".rtf": ["text/rtf", "application/rtf"],
+        ".odt": ["application/vnd.oasis.opendocument.text"],
+        ".ods": ["application/vnd.oasis.opendocument.spreadsheet"],
+        ".msg": ["application/vnd.ms-outlook", "application/octet-stream"],
+        ".eml": ["message/rfc822"],
+        ".heic": ["image/heic"],
+        ".heif": ["image/heif"],
+    }
+    expected_mimes = ALLOWED_MIMES.get(ext, [])
+    if expected_mimes and mime_type not in expected_mimes and mime_type not in ("application/octet-stream",):
+        return json_error(f"MIME type '{mime_type}' does not match extension '{ext}'")
+    
+    # ── Security: block path traversal in filename ──
+    if ".." in orig_name or "/" in orig_name or "\\" in orig_name:
+        return json_error("Invalid filename")
+    
+    # ── Security: enforce max file size (25MB) ──
+    MAX_FILE_SIZE = 25 * 1024 * 1024
+    file.seek(0, os.SEEK_END)
+    real_size = file.tell()
+    file.seek(0)
+    if real_size > MAX_FILE_SIZE:
+        return json_error(f"File too large ({real_size} bytes). Max 25MB.")
+    
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    import hashlib
+    hash_part = hashlib.md5(orig_name.encode()).hexdigest()[:8]
+    stored_name = f"{et}_{entity_id}_{ts}_{hash_part}{ext}"
+    entity_dir = os.path.join(DOCUMENTS_UPLOAD_DIR, et, str(entity_id))
+    os.makedirs(entity_dir, exist_ok=True)
+    file_path = os.path.join(entity_dir, stored_name)
+    file.save(file_path)
+    file_size = os.path.getsize(file_path)
+    mime_type = file.content_type or "application/octet-stream"
+    db = get_dict_db()
+    try:
+        db.execute(
+            "INSERT INTO entity_documents "
+            "(entity_type, entity_id, original_filename, stored_filename, file_path, "
+            "file_type, file_size, mime_type, category, notes, uploaded_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (et, entity_id, orig_name, stored_name, file_path,
+             ext.lstrip("."), file_size, mime_type, category, notes, uploaded_by))
+        db.commit()
+        doc_id = db.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        doc = db.execute(
+            "SELECT id, entity_type, entity_id, original_filename, stored_filename, "
+            "file_type, file_size, mime_type, category, notes, uploaded_by, is_verified, created "
+            "FROM entity_documents WHERE id = ?", (doc_id,)).fetchone()
+        return json_success(dict(doc))
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/entity-documents/<entity_type>/<int:entity_id>", methods=["GET"])
+def api_list_entity_documents(entity_type, entity_id):
+    et = _normalise_entity_type(entity_type)
+    category_filter = request.args.get("category", "").strip()
+    db = get_dict_db()
+    try:
+        sql = "SELECT id, entity_type, entity_id, original_filename, stored_filename, " \
+              "file_type, file_size, mime_type, category, notes, uploaded_by, is_verified, created " \
+              "FROM entity_documents WHERE entity_type = ? AND entity_id = ?"
+        params = [et, entity_id]
+        if category_filter:
+            sql += " AND category = ?"
+            params.append(category_filter)
+        sql += " ORDER BY created DESC"
+        docs = db.execute(sql, params).fetchall()
+        return json_success(docs)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/entity-documents/<int:doc_id>/download")
+def api_download_entity_document(doc_id):
+    db = get_dict_db()
+    try:
+        doc = db.execute("SELECT id, original_filename, file_path FROM entity_documents WHERE id = ?", (doc_id,)).fetchone()
+        if not doc:
+            return json_error("Document not found", 404)
+        if not os.path.exists(doc["file_path"]):
+            return json_error("File not found on disk", 404)
+        from flask import send_file
+        return send_file(doc["file_path"], as_attachment=True, download_name=doc["original_filename"])
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/entity-documents/<int:doc_id>/preview")
+def api_preview_entity_document(doc_id):
+    db = get_dict_db()
+    try:
+        doc = db.execute("SELECT id, original_filename, file_path, mime_type FROM entity_documents WHERE id = ?", (doc_id,)).fetchone()
+        if not doc:
+            return json_error("Document not found", 404)
+        if not os.path.exists(doc["file_path"]):
+            return json_error("File not found on disk", 404)
+        from flask import send_file
+        return send_file(doc["file_path"], mimetype=doc["mime_type"] or "application/octet-stream", as_attachment=False)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/entity-documents/<int:doc_id>", methods=["DELETE"])
+def api_delete_entity_document(doc_id):
+    db = get_dict_db()
+    try:
+        doc = db.execute("SELECT id, file_path FROM entity_documents WHERE id = ?", (doc_id,)).fetchone()
+        if not doc:
+            return json_error("Document not found", 404)
+        if os.path.exists(doc["file_path"]):
+            os.remove(doc["file_path"])
+        db.execute("DELETE FROM entity_documents WHERE id = ?", (doc_id,))
+        db.commit()
+        return json_success({"deleted": True})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/entity-documents/<int:doc_id>/verify", methods=["PATCH"])
+def api_verify_entity_document(doc_id):
+    data = request.get_json(silent=True) or {}
+    is_verified = 1 if data.get("is_verified", True) else 0
+    db = get_dict_db()
+    try:
+        doc = db.execute("SELECT id FROM entity_documents WHERE id = ?", (doc_id,)).fetchone()
+        if not doc:
+            return json_error("Document not found", 404)
+        db.execute("UPDATE entity_documents SET is_verified = ?, updated = datetime('now') WHERE id = ?", (is_verified, doc_id))
+        db.commit()
+        return json_success({"id": doc_id, "is_verified": bool(is_verified)})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/entity-documents/<int:doc_id>", methods=["PATCH"])
+def api_update_entity_document(doc_id):
+    data = request.get_json(silent=True) or {}
+    db = get_dict_db()
+    try:
+        doc = db.execute("SELECT id FROM entity_documents WHERE id = ?", (doc_id,)).fetchone()
+        if not doc:
+            return json_error("Document not found", 404)
+        updates = []
+        params = []
+        if "category" in data:
+            updates.append("category = ?")
+            params.append(data["category"])
+        if "notes" in data:
+            updates.append("notes = ?")
+            params.append(data["notes"])
+        if not updates:
+            return json_error("Nothing to update")
+        updates.append("updated = datetime('now')")
+        sql = f"UPDATE entity_documents SET {', '.join(updates)} WHERE id = ?"
+        params.append(doc_id)
+        db.execute(sql, params)
+        db.commit()
+        return json_success({"id": doc_id, "updated": True})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/entity-documents/all", methods=["GET"])
+def api_list_all_documents():
+    entity_filter = request.args.get("entity_type", "").strip()
+    category_filter = request.args.get("category", "").strip()
+    search = request.args.get("search", "").strip()
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 50, type=int)
+    db = get_dict_db()
+    try:
+        sql = "SELECT id, entity_type, entity_id, original_filename, stored_filename, " \
+              "file_type, file_size, mime_type, category, notes, uploaded_by, is_verified, created " \
+              "FROM entity_documents WHERE 1=1"
+        count_sql = "SELECT COUNT(*) AS cnt FROM entity_documents WHERE 1=1"
+        params = []
+        if entity_filter:
+            et = _normalise_entity_type(entity_filter)
+            sql += " AND entity_type = ?"
+            count_sql += " AND entity_type = ?"
+            params.append(et)
+        if category_filter:
+            sql += " AND category = ?"
+            count_sql += " AND category = ?"
+            params.append(category_filter)
+        if search:
+            sql += " AND (original_filename LIKE ? OR notes LIKE ?)"
+            count_sql += " AND (original_filename LIKE ? OR notes LIKE ?)"
+            like = f"%{search}%"
+            params.extend([like, like])
+        total = db.execute(count_sql, params).fetchone()["cnt"]
+        offset = (page - 1) * per_page
+        sql += " ORDER BY created DESC LIMIT ? OFFSET ?"
+        rows = db.execute(sql, params + [per_page, offset]).fetchall()
+        results = []
+        for row in rows:
+            d = dict(row)
+            _, label = _validate_entity_exists(d["entity_type"], d["entity_id"])
+            d["entity_label"] = label
+            results.append(d)
+        return jsonify({
+            "success": True, "data": results,
+            "total": total, "page": page, "per_page": per_page,
+        })
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/entity-documents/stats", methods=["GET"])
+def api_document_stats():
+    db = get_dict_db()
+    try:
+        rows = db.execute(
+            "SELECT entity_type, COUNT(*) AS count, SUM(file_size) AS total_bytes "
+            "FROM entity_documents GROUP BY entity_type ORDER BY count DESC").fetchall()
+        total = db.execute("SELECT COUNT(*) AS cnt FROM entity_documents").fetchone()["cnt"]
+        total_bytes = db.execute("SELECT COALESCE(SUM(file_size), 0) AS s FROM entity_documents").fetchone()["s"]
+        by_type = {}
+        for r in rows:
+            by_type[r["entity_type"]] = {"count": r["count"], "total_bytes": r["total_bytes"] or 0}
+        return json_success({"total_count": total, "total_bytes": total_bytes, "by_type": by_type})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
 # COMMENTS & NOTIFICATIONS (Monday.com-style updates)
 # ═══════════════════════════════════════════════
 
@@ -5247,7 +5766,7 @@ def api_add_user():
     if new_role == "super_admin" and role != "super_admin":
         return json_error("Only super admins can create super admin accounts", 403)
     users = _load_users()
-    users[username] = {"password": password, "role": new_role}
+    users[username] = {"password": _hash_password(password), "role": new_role}
     _save_users(users)
     return json_success({"user": {"username": username, "role": new_role}})
 
@@ -5283,9 +5802,9 @@ def api_update_user(username):
     # Only super admin can change role
     if is_super and "role" in data:
         users[username]["role"] = data["role"]
-    # Password update handled separately by change-password endpoint
+    # Password update
     if "password" in data and data["password"]:
-        users[username]["password"] = data["password"]
+        users[username]["password"] = _hash_password(data["password"])
     _save_users(users)
     return json_success({"user": {"username": username, "role": users[username].get("role")}})
 
@@ -6035,6 +6554,7 @@ def api_property_owners():
 
 @banksia_os_bp.route("/property-owners", methods=["POST"])
 def api_create_property_owner():
+    """Create a property owner and optionally auto-create a linked property."""
     data = request.get_json()
     if not data or not data.get("name"):
         return json_error("Owner name required")
@@ -6047,26 +6567,95 @@ def api_create_property_owner():
         placeholders = ",".join(["?"]*len(ins))
         cursor = db.execute(f"INSERT INTO property_owners ({','.join(ins.keys())}) VALUES ({placeholders})",
                             list(ins.values()))
+        owner_id = cursor.lastrowid
         db.commit()
-        return json_success({"id": cursor.lastrowid, "message":"Owner created"}), 201
+
+        # Auto-create a property for this owner if requested
+        created_property = None
+        if data.get("create_property") and data.get("property_name"):
+            prop_name = data["property_name"]
+            prop_ref = data.get("property_ref", "")
+            prop_addr = data.get("property_address", "")
+            prop_type = data.get("property_type", "single")
+            prop_city = data.get("property_city", "")
+            prop_postcode = data.get("property_postcode", "")
+            prop_units = int(data.get("property_units", 1))
+
+            ins_prop = {
+                "ref": prop_ref or f"OWN-{owner_id}",
+                "name": prop_name,
+                "address_line_1": prop_addr,
+                "city": prop_city,
+                "postcode": prop_postcode or "",
+                "property_type": prop_type,
+                "total_units": prop_units,
+                "bedrooms": prop_units,
+                "property_owner_id": str(owner_id),
+                "property_owner_name": data["name"],
+                "owner_company": data.get("company_name", ""),
+                "notes": f"Auto-created from owner: {data['name']}"
+            }
+            ins_parts = ",".join(["?"]*len(ins_prop))
+            db.execute(f"INSERT INTO properties ({','.join(ins_prop.keys())}) VALUES ({ins_parts})",
+                       list(ins_prop.values()))
+            db.commit()
+            created_property = {"id": cursor.lastrowid, "name": prop_name}
+
+        return json_success({"id": owner_id, "message": "Owner created", "created_property": created_property}), 201
     except Exception as e:
         return json_error(str(e), 500)
     finally:
         db.close()
 
-@banksia_os_bp.route("/property-owners/<int:owner_id>", methods=["GET","PATCH"])
+@banksia_os_bp.route("/property-owners/all")
+def api_property_owners_all():
+    """Lightweight list for dropdowns — returns id, name, company_name only."""
+    db = get_dict_db()
+    try:
+        rows = db.execute("SELECT id, name, company_name FROM property_owners ORDER BY name").fetchall()
+        return json_success(rows)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+@banksia_os_bp.route("/property-owners/<int:owner_id>", methods=["GET","PATCH","DELETE"])
 def api_property_owner(owner_id):
     if request.method == "PATCH":
         return api_update_resource("property_owners", owner_id)
+    if request.method == "DELETE":
+        return api_delete_property_owner(owner_id)
     db = get_dict_db()
     try:
         owner = db.execute("SELECT * FROM property_owners WHERE id=?", (owner_id,)).fetchone()
         if not owner: return json_error("Not found", 404)
-        # Count linked properties
-        count = db.execute("SELECT COUNT(*) AS cnt FROM properties WHERE property_owner_id=? OR property_owner_name=?", 
-                           (str(owner_id), owner.get("name",""))).fetchone()["cnt"]
-        owner["property_count"] = count
+        # Count + list linked properties
+        props = db.execute(
+            "SELECT id, ref, name, address_line_1, city, property_type FROM properties WHERE property_owner_id=? OR property_owner_name=? ORDER BY name",
+            (str(owner_id), owner.get("name",""))
+        ).fetchall()
+        owner["property_count"] = len(props)
+        owner["properties"] = [dict(p) for p in props]
         return json_success(owner)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+def api_delete_property_owner(owner_id):
+    db = get_dict_db()
+    try:
+        owner = db.execute("SELECT * FROM property_owners WHERE id=?", (owner_id,)).fetchone()
+        if not owner:
+            return json_error("Not found", 404)
+        # Check linked properties
+        count = db.execute("SELECT COUNT(*) AS cnt FROM properties WHERE property_owner_id=? OR property_owner_name=?",
+                           (str(owner_id), owner.get("name",""))).fetchone()["cnt"]
+        if count > 0:
+            return json_error(f"Cannot delete — {count} property(s) linked to this owner. Unlink them first.", 409)
+        db.execute("DELETE FROM property_owners WHERE id=?", (owner_id,))
+        db.commit()
+        return json_success({"deleted": True})
     except Exception as e:
         return json_error(str(e), 500)
     finally:
@@ -6394,8 +6983,36 @@ def api_properties_enhanced():
         for p in props:
             total_u = db.execute("SELECT COUNT(*) AS cnt FROM units WHERE property_id=?", (p["id"],)).fetchone()["cnt"]
             avail_u = db.execute("SELECT COUNT(*) AS cnt FROM units WHERE property_id=? AND unit_vacant=1", (p["id"],)).fetchone()["cnt"]
+            occupied_u = db.execute("SELECT COUNT(*) AS cnt FROM units WHERE property_id=? AND unit_vacant=0", (p["id"],)).fetchone()["cnt"]
             p["total_unit_count"] = total_u
             p["available_units"] = avail_u
+            p["occupied_units"] = occupied_u
+            # Resolve owner display from property_owners table
+            owner_id = p.get("property_owner_id", "")
+            if owner_id:
+                try:
+                    oid = int(float(owner_id))
+                    owner_info = db.execute("SELECT id, name, company_name FROM property_owners WHERE id=?", (oid,)).fetchone()
+                    if owner_info:
+                        p["owner_display_name"] = owner_info["name"]
+                        p["owner_display_id"] = owner_info["id"]
+                    else:
+                        p["owner_display_name"] = p.get("property_owner_name", "")
+                        p["owner_display_id"] = None
+                except (ValueError, TypeError):
+                    p["owner_display_name"] = p.get("property_owner_name", "")
+                    p["owner_display_id"] = None
+            else:
+                p["owner_display_name"] = p.get("property_owner_name", "")
+                p["owner_display_id"] = None
+            # Compute monthly rent from active tenancies
+            rent = db.execute(
+                "SELECT COALESCE(SUM(rent_amount), 0) AS total FROM tenancies WHERE property_id=? AND status IN ('Current','current','Periodic','periodic','Active','active')",
+                (p["id"],)
+            ).fetchone()["total"]
+            p["monthly_rent"] = rent
+            # Property status
+            p["property_status"] = "Active" if occupied_u > 0 else ("Vacant" if total_u > 0 else "No Units")
             # Parse tags from JSON string
             if p.get("tags"):
                 try:
@@ -6583,6 +7200,28 @@ def api_applicant_detail(app_id):
             "SELECT * FROM guarantors WHERE applicant_id = ?", (app_id,)
         ).fetchall()
         app["guarantors"] = gs
+
+        # Load converted tenancy (if applicant moved through to tenancy)
+        converted_tenancy = None
+        for ref in refs:
+            if ref.get("status") == "tenancy_created":
+                # Find tenancy created from this referencing form
+                tn = db.execute(
+                    "SELECT id, ref, status, start_date, end_date, rent_amount, full_address "
+                    "FROM tenancies WHERE sync_origin='banksia' AND notes LIKE ? ORDER BY id DESC LIMIT 1",
+                    (f"%form_id={ref['id']}%",)
+                ).fetchone()
+                if tn:
+                    converted_tenancy = dict(tn)
+                    # Also find linked tenant
+                    tenant_info = db.execute(
+                        "SELECT id, first_name, last_name, email, mobile FROM tenants WHERE tenancy_id=? LIMIT 1",
+                        (tn["id"],)
+                    ).fetchone()
+                    if tenant_info:
+                        converted_tenancy["tenant"] = dict(tenant_info)
+                    break
+        app["converted_tenancy"] = converted_tenancy
 
         return json_success(app)
     except Exception as e:
@@ -6819,9 +7458,11 @@ def api_get_referencing(ref_id):
         # Attach property info via applicant → unit → property chain
         property_name = ""
         unit_ref = ""
+        property_id = None
+        unit_id = None
         if form.get("applicant_id"):
             app_info = db.execute(
-                "SELECT p.name AS pname, u.unit_ref AS uref "
+                "SELECT a.property_id AS apid, a.unit_id AS auid, p.name AS pname, u.unit_ref AS uref "
                 "FROM applicants a "
                 "LEFT JOIN units u ON a.unit_id = u.id "
                 "LEFT JOIN properties p ON u.property_id = p.id "
@@ -6831,8 +7472,12 @@ def api_get_referencing(ref_id):
             if app_info:
                 property_name = app_info["pname"] or ""
                 unit_ref = app_info["uref"] or ""
+                property_id = app_info["apid"]
+                unit_id = app_info["auid"]
         form["property_name"] = property_name
         form["unit_ref"] = unit_ref
+        form["property_id"] = property_id
+        form["unit_id"] = unit_id
 
         # Attach referencing_checks
         checks = db.execute(

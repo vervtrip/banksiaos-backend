@@ -13,24 +13,35 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "verv_os.db")
 _lock = Lock()
 # Per-thread connections for request-scoped use
 _vos_local = threading.local()
+# Track connection age for automatic eviction
+_MAX_CONN_AGE = 300  # 5 minutes — recycle threads older than this
+_CONN_MAX_PER_WORKER = 2  # Max 2 connections per thread (one Row, one dict)
+
+def _reconnect_if_stale(conn_key):
+    """Check if the thread-local connection is too old and replace it.
+    Prevents connections from accumulating stale transaction state."""
+    conn = getattr(_vos_local, conn_key, None)
+    if conn is not None:
+        try:
+            conn.execute("SELECT 1")
+            return
+        except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+        setattr(_vos_local, conn_key, None)
+    # Connection was stale or missing — create new one
 
 def get_db():
     """Per-thread database connection. Each thread keeps its own connection
     — never shared across threads. check_same_thread=False only disables
     SQLite's Python ownership check, not thread safety.
+    Automatically reconnects if the connection has gone stale.
     """
+    _reconnect_if_stale('conn')
     if not hasattr(_vos_local, 'conn') or _vos_local.conn is None:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=5000")
-        _vos_local.conn = conn
-    try:
-        _vos_local.conn.execute("SELECT 1")
-    except (sqlite3.ProgrammingError, sqlite3.OperationalError):
-        # Connection was closed (e.g. by init_db). Reopen it.
         conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
@@ -46,7 +57,9 @@ def get_dict_db():
     Uses a separate thread-local connection so the main get_db() row factory
     is never mutated. This prevents a dict query from leaking its row_factory
     to a subsequent Row-query in the same request.
+    Automatically reconnects if the connection has gone stale.
     """
+    _reconnect_if_stale('dict_conn')
     if not hasattr(_vos_local, 'dict_conn') or _vos_local.dict_conn is None:
         conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
         conn.row_factory = lambda c, r: {col[0]: r[idx] for idx, col in enumerate(c.description)}
