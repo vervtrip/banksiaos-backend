@@ -6674,7 +6674,7 @@ def api_property_owners():
 
 @banksia_os_bp.route("/property-owners", methods=["POST"])
 def api_create_property_owner():
-    """Create a property owner and optionally auto-create a linked property."""
+    """Create a landlord and optionally auto-create a linked property."""
     data = request.get_json()
     if not data or not data.get("name"):
         return json_error("Owner name required")
@@ -8391,7 +8391,7 @@ def global_search():
                 parent = {"type": "applicant", "id": r["applicant_id"], "label": parent_label or f"Applicant #{r['applicant_id']}"}
             add_result("guarantor", r["id"], label, f"/guarantors/{r['id']}", match_field, parent)
 
-        # ── Property Owners ──
+        # ── Landlords ──
         rows = db.execute(
             """SELECT id, name, company_name, contact_email
                FROM property_owners
