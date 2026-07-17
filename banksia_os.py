@@ -1764,7 +1764,7 @@ def api_property(prop_id):
             prop["owner_display_id"] = None
 
         # ── Units (existing) ──
-        units = db.execute("SELECT * FROM units WHERE property_id = ? ORDER BY sort_order ASC, CAST(SUBSTR(unit_ref, 2) AS INTEGER) ASC, unit_ref ASC", (prop_id,)).fetchall()
+        units = db.execute("SELECT * FROM units WHERE property_id = ? AND (is_active IS NULL OR is_active = 1) ORDER BY sort_order ASC, CAST(SUBSTR(unit_ref, 2) AS INTEGER) ASC, unit_ref ASC", (prop_id,)).fetchall()
         computed_rent = 0
         for u in units:
             tn = db.execute("SELECT * FROM tenancies WHERE unit_id=? AND status IN ('Active','active','Periodic','periodic') ORDER BY id DESC LIMIT 1", (u["id"],)).fetchone()
@@ -2416,6 +2416,13 @@ def api_archive_properties_bulk():
 
             db.execute("UPDATE properties SET status='archived', modified=? WHERE id=?",
                        [datetime.now(timezone.utc).isoformat(), pid])
+
+            # Cascade: archive all units under this property
+            db.execute(
+                "UPDATE units SET is_active = 0, modified = ? WHERE property_id = ? AND (is_active IS NULL OR is_active = 1)",
+                [datetime.now(timezone.utc).isoformat(), pid]
+            )
+
             _create_activity_log(db, "property_archived", pid,
                                  f"Property '{prop.get('name','') or prop.get('ref','')}' archived (bulk)")
             archived.append(pid)
@@ -2511,6 +2518,12 @@ def api_archive_property(prop_id):
             [datetime.now(timezone.utc).isoformat(), prop_id]
         )
 
+        # Cascade: archive all units under this property
+        db.execute(
+            "UPDATE units SET is_active = 0, modified = ? WHERE property_id = ? AND (is_active IS NULL OR is_active = 1)",
+            [datetime.now(timezone.utc).isoformat(), prop_id]
+        )
+
         _create_activity_log(db, "property_archived", prop_id,
                              f"Property '{prop.get('name', '') or prop.get('ref', '')}' archived")
 
@@ -2554,6 +2567,12 @@ def api_restore_property(prop_id):
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
             "UPDATE properties SET status = 'active', modified = ? WHERE id = ?",
+            [now, prop_id]
+        )
+
+        # Cascade: restore all units under this property
+        db.execute(
+            "UPDATE units SET is_active = 1, modified = ? WHERE property_id = ? AND (is_active IS NULL OR is_active = 0)",
             [now, prop_id]
         )
 
@@ -2674,13 +2693,15 @@ def api_delete_property(prop_id):
             }, 409)
 
         # Delete related records explicitly (CASCADE may not be configured)
-        for table in ("access_records", "property_images", "documents"):
+        for table in ("units", "access_records", "property_images", "documents"):
             try:
                 if table == "documents":
                     db.execute(
                         f"DELETE FROM {table} WHERE related_to = 'property' AND related_id = ?",
                         (str(prop_id),)
                     )
+                elif table == "units":
+                    db.execute(f"DELETE FROM {table} WHERE property_id = ?", (prop_id,))
                 elif table == "access_records":
                     db.execute(f"DELETE FROM {table} WHERE property_id = ?", (prop_id,))
                 else:
@@ -3103,8 +3124,23 @@ def api_units():
     status_filter = request.args.get("status", "").strip()
     property_id = request.args.get("property_id", "").strip()
     search = request.args.get("search", "").strip()
+    sort_by = request.args.get("sort_by", "").strip()
+    sort_dir = request.args.get("sort_dir", "asc").strip().lower()
 
-    where_parts = ["1=1"]
+    # Allowed sort columns mapped to SQL expressions
+    sortable_columns = {
+        "unit_ref": "u.unit_ref",
+        "property_name": "property_name",
+        "unit_type": "u.unit_type",
+        "unit_vacant": "u.unit_vacant",
+        "tenant_name": "tenant_name",
+        "tenancy_rent": "tenancy_rent",
+        "tenancy_deposit": "tenancy_deposit",
+        "tenancy_start_date": "tenancy_start_date",
+        "tenancy_end_date": "tenancy_end_date",
+    }
+
+    where_parts = ["(u.is_active IS NULL OR u.is_active = 1)"]
     params = []
 
     if status_filter:
@@ -3132,6 +3168,13 @@ def api_units():
 
     where = " AND ".join(where_parts)
 
+    # Build ORDER BY clause
+    if sort_by in sortable_columns:
+        direction = "DESC" if sort_dir == "desc" else "ASC"
+        order_clause = f"{sortable_columns[sort_by]} {direction}"
+    else:
+        order_clause = "sort_order ASC, CAST(SUBSTR(unit_ref, 2) AS INTEGER) ASC, unit_ref ASC"
+
     rows, total = paginate(
         f"SELECT u.*, "
         f"(SELECT p.name FROM properties p WHERE p.id = u.property_id) AS property_name, "
@@ -3140,7 +3183,7 @@ def api_units():
         f"(SELECT t.deposit_registered_amount FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_deposit, "
         f"(SELECT t.start_date FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_start_date, "
         f"(SELECT t.end_date FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_end_date "
-        f"FROM units u WHERE {where} ORDER BY sort_order ASC, CAST(SUBSTR(unit_ref, 2) AS INTEGER) ASC, unit_ref ASC",
+        f"FROM units u WHERE {where} ORDER BY {order_clause}",
         f"SELECT COUNT(*) AS cnt FROM units u WHERE {where}",
         params, page, per_page
     )
