@@ -1765,6 +1765,170 @@ def api_create_property():
         db.close()
 
 
+@banksia_os_bp.route("/properties/sync-monday-list", methods=["POST"])
+def api_sync_monday_property_list():
+    """Fetch Monday.com Property List board and update properties.custom_fields."""
+    import requests as req_lib
+    from pathlib import Path
+
+    token_path = Path("/root/.hermes/secrets/monday_token.txt")
+    if not token_path.exists():
+        return json_error("Monday token not found", 500)
+    token = token_path.read_text().strip()
+
+    headers = {"Authorization": token, "Content-Type": "application/json"}
+
+    # 1. Fetch all items from Property List board
+    query = """{ boards(ids: 5930667891) { items_page(limit: 500) { items { id name column_values { id text } } } } }"""
+    try:
+        resp = req_lib.post("https://api.monday.com/v2", json={"query": query}, headers=headers, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        return json_error(f"Monday API error: {str(e)}", 502)
+
+    items = data.get("data", {}).get("boards", [{}])[0].get("items_page", {}).get("items", [])
+    if not items:
+        return json_error("No items found on Monday board", 404)
+
+    # Column ID to custom_fields key mapping
+    col_map = {
+        "status": "legal_type",
+        "numeric_mks0z366": "rent_to_ll_monday",
+        "numeric_mm0psp3q": "rent_received_monday",
+        "status7": "operating_as",
+        "color_mm06cjy9": "model_monday",
+        "check__1": "has_keys",
+        "numbers2__1": "smart_tvs",
+        "numbers7__1": "ring_doorbells",
+        "numbers__1": "rooms_monday",
+        "laundry__1": "laundry_code",
+        "letterbox__1": "letterbox_code",
+        "numbers4__1": "beds_monday",
+        "label__1": "boiler_location",
+        "numbers5__1": "keybox_code_monday",
+        "numbers47__1": "smart_locks",
+        "text__1": "alias_name",
+        "text_mky1a405": "joint_venture",
+        "date4": "start_date_monday",
+        "date_mknagbz": "expiry_date_monday",
+        "link": "maps_link",
+    }
+
+    import re as re_lib
+
+    def normalize(s):
+        s = s.lower().strip()
+        s = re_lib.sub(r'[,\.]', '', s)
+        s = re_lib.sub(r'\s+', ' ', s)
+        return s.strip()
+
+    def extract_street_num(s):
+        nums = set(re_lib.findall(r'\d+', s))
+        return nums
+
+    # 2. Get local properties
+    db = get_dict_db()
+    try:
+        local_props = db.execute(
+            "SELECT id, name, address_line_1 FROM properties WHERE (status IS NULL OR status = '' OR status = 'Active')"
+        ).fetchall()
+    except Exception as e:
+        db.close()
+        return json_error(f"DB error: {str(e)}", 500)
+
+    updated = 0
+    matched = 0
+    unmatched_monday = []
+
+    for item in items:
+        mname = item.get("name", "")
+        mname_norm = normalize(mname)
+        m_numbers = extract_street_num(mname)
+
+        # Extract postcode from Monday name
+        pc_match = re_lib.search(r'([A-Z]{1,2}\d{1,2}\s*\d[A-Z]{2})', mname, re_lib.IGNORECASE)
+        m_postcode = pc_match.group(1).strip().upper() if pc_match else ""
+
+        # Build custom_fields dict from Monday columns
+        custom = {}
+        for cv in item.get("column_values", []):
+            cid = cv.get("id", "")
+            ckey = col_map.get(cid)
+            if ckey:
+                val = cv.get("text", "").strip()
+                if val:
+                    custom[ckey] = val
+
+        if not custom:
+            continue
+
+        custom["_monday_name"] = mname
+        custom["_monday_id"] = item.get("id", "")
+
+        # Try matching to a local property
+        found = False
+        for lp in local_props:
+            lp_id = lp["id"]
+            lp_name_norm = normalize(lp["name"])
+            lp_addr_norm = normalize(lp.get("address_line_1", ""))
+            lp_numbers = extract_street_num(lp["name"] + " " + (lp.get("address_line_1", "") or ""))
+
+            # Exact match
+            if mname_norm == lp_name_norm or mname_norm == lp_addr_norm:
+                found = True
+            else:
+                # Match by postcode + street number overlap
+                common_nums = m_numbers & lp_numbers
+                if m_postcode and common_nums:
+                    # Check street name overlap
+                    m_words = set(re_lib.sub(r'\d+', '', mname_norm).split())
+                    lp_words = set(re_lib.sub(r'\d+', '', lp_name_norm + " " + lp_addr_norm).split())
+                    common_words = m_words & lp_words
+                    if len(common_words) >= 2 or (len(common_words) >= 1 and len([w for w in common_words if len(w) > 3]) >= 1):
+                        found = True
+                elif common_nums:
+                    m_words = set(re_lib.sub(r'\d+', '', mname_norm).split())
+                    lp_words = set(re_lib.sub(r'\d+', '', lp_name_norm + " " + lp_addr_norm).split())
+                    common_words = m_words & lp_words
+                    if len(common_words) >= 3 or (len(common_nums) >= 1 and len(common_words) >= 2):
+                        found = True
+
+            if found:
+                try:
+                    existing = db.execute("SELECT custom_fields FROM properties WHERE id=?", (lp_id,)).fetchone()
+                    existing_json = {}
+                    if existing and existing.get("custom_fields"):
+                        try:
+                            existing_json = json.loads(existing["custom_fields"])
+                        except (json.JSONDecodeError, TypeError):
+                            existing_json = {}
+                    # Merge: Monday data overwrites, but preserve non-Monday custom fields
+                    # Only update the Monday-specific keys
+                    custom_fields = {k: v for k, v in existing_json.items() if not k.startswith("_monday") and k not in col_map.values()}
+                    custom_fields.update(custom)
+
+                    db.execute("UPDATE properties SET custom_fields=? WHERE id=?", (json.dumps(custom_fields), lp_id))
+                    updated += 1
+                    matched += 1
+                except Exception:
+                    pass
+                break
+
+        if not found:
+            unmatched_monday.append(mname)
+
+    db.commit()
+    db.close()
+
+    return json_success({
+        "updated": updated,
+        "total_monday_items": len(items),
+        "matched": matched,
+        "unmatched_monday_count": len(unmatched_monday),
+    })
+
+
 @banksia_os_bp.route("/properties/<int:prop_id>", methods=["GET", "PATCH"])
 def api_property(prop_id):
     if request.method == "PATCH":
