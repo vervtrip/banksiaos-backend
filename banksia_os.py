@@ -1640,6 +1640,8 @@ def api_properties():
     occ_filter = request.args.get("occupancy", "").strip().lower()
     rent_min = float_param(request.args.get("rent_min"))
     rent_max = float_param(request.args.get("rent_max"))
+    sort_field = request.args.get("sort_field", "").strip()
+    sort_direction = request.args.get("sort_direction", "asc").strip().lower()
 
     base_where = "(status IS NULL OR status = '' OR status = 'Active')"
     base_params = []
@@ -1648,7 +1650,8 @@ def api_properties():
         search_clause, search_params = build_search_clause(
             ["name", "ref", "address_line_1", "city", "postcode"], search
         )
-        base_where = search_clause
+        base_where = f"({search_clause})"
+        # Include archived properties in search results
         base_params = search_params
 
     # Occupancy filter
@@ -1679,9 +1682,26 @@ def api_properties():
 
     combined_filter = ""
     if occ_where or rent_where:
-        combined_filter = " WHERE 1=1" + occ_where + rent_where
+        combined_filter = " WHERE 1=1 " + occ_where + rent_where
 
-    base_query = f"SELECT * FROM ({inner_query}) sub {combined_filter} ORDER BY ref ASC"
+    # Build ORDER BY
+    safe_sort_fields = {
+        "name": "sort_name",
+        "ref": "ref",
+        "type": "property_type",
+        "city": "city",
+        "status": "property_status",
+        "units": "total_units",
+        "occupied": "occupied_units",
+        "vacant": "(total_units - occupied_units)",
+        "rent": "monthly_rent",
+        "owner": "owner_display_name",
+    }
+    order_col = safe_sort_fields.get(sort_field, "ref")
+    order_dir = "DESC" if sort_direction == "desc" else "ASC"
+    order_clause = f"ORDER BY {order_col} {order_dir}"
+
+    base_query = f"SELECT * FROM ({inner_query}) sub {combined_filter} {order_clause}"
     count_query = f"SELECT COUNT(*) AS cnt FROM ({inner_query}) sub {combined_filter}"
 
     rows, total = paginate(base_query, count_query, base_params, page, per_page)
@@ -1694,12 +1714,15 @@ def api_properties():
         real_props_count = totals_row["props_cnt"]
         real_units = totals_row["units_cnt"]
         real_occupied = totals_row["occ_cnt"]
+        # Active/inactive counts — unfiltered (from full DB, not current page)
+        active_cnt = db2.execute("SELECT COUNT(*) AS cnt FROM properties WHERE is_active = 1").fetchone()["cnt"]
+        inactive_cnt = db2.execute("SELECT COUNT(*) AS cnt FROM properties WHERE is_active = 0").fetchone()["cnt"]
     finally:
         db2.close()
 
     return json_success({
         "items": rows,
-        "totals": {"properties": real_props_count, "units": real_units, "occupied": real_occupied},
+        "totals": {"properties": real_props_count, "units": real_units, "occupied": real_occupied, "active": active_cnt, "inactive": inactive_cnt},
     }, total, page, per_page)
 
 
@@ -3177,7 +3200,7 @@ def api_units():
 
     rows, total = paginate(
         f"SELECT u.*, "
-        f"(SELECT p.name FROM properties p WHERE p.id = u.property_id) AS property_name, "
+        f"(SELECT COALESCE(NULLIF(NULLIF(p.name,'multi'),'single'), p.address_line_1, p.name) FROM properties p WHERE p.id = u.property_id) AS property_name, "
         f"(SELECT t.main_tenant_name FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenant_name, "
         f"(SELECT t.rent_amount FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_rent, "
         f"(SELECT t.deposit_registered_amount FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_deposit, "
