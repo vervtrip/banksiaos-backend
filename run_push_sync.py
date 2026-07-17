@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Run the maintenance push sync and report results."""
-import json
+"""Cron entry point: push pending maintenance jobs to Monday.com."""
 import sys
-import os
+sys.path.insert(0, "/root/verv-dashboard")
 
-sys.path.insert(0, os.path.dirname(__file__))
-
-from verv_os_db import get_db
+from verv_os_db import get_dict_db
 from monday_push import push_all_pending
 
-db = get_db()
+db = get_dict_db()
 result = push_all_pending(db)
-print(json.dumps(result))
+print(f"PUSHED: {result['pushed']}")
+print(f"FAILED: {result['failed']}")
+errors = result.get('errors', [])
+if errors:
+    for e in errors:
+        print(f"  ERROR: {e}")
+print(f"MESSAGE: {result['message']}")

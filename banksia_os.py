@@ -1570,49 +1570,54 @@ def api_properties():
         base_where = search_clause
         base_params = search_params
 
-    # Occupancy filter via HAVING on derived columns
-    occ_having = ""
+    # Occupancy filter
+    occ_where = ""
     if occ_filter == "vacant":
-        occ_having = "HAVING occupied_units = 0 OR occupied_units IS NULL"
+        occ_where = "AND occupied_units = 0"
     elif occ_filter == "full":
-        occ_having = "HAVING occupied_units = total_units AND occupied_units > 0"
+        occ_where = "AND occupied_units > 0 AND occupied_units = total_units"
     elif occ_filter == "partial":
-        occ_having = "HAVING occupied_units > 0 AND occupied_units < total_units"
+        occ_where = "AND occupied_units > 0 AND occupied_units < total_units"
 
     # Rent range filter
-    rent_having = ""
+    rent_where = ""
     if rent_min is not None:
-        rent_having = f"HAVING monthly_rent >= {rent_min}"
+        rent_where = f"AND monthly_rent >= {rent_min}"
         if rent_max is not None and rent_max < float('inf'):
-            rent_having = f"HAVING monthly_rent >= {rent_min} AND monthly_rent <= {rent_max}"
+            rent_where = f"AND monthly_rent >= {rent_min} AND monthly_rent <= {rent_max}"
 
-    # Combine HAVING clauses
-    combined_having = ""
-    if occ_having or rent_having:
-        parts = [h for h in [occ_having, rent_having] if h]
-        combined_having = parts[0].replace("HAVING", "HAVING ", 1)
-        for h in parts[1:]:
-            combined_having += " AND " + h.replace("HAVING ", "", 1)
-
-    base_query = f"SELECT *, " \
+    inner_query = f"SELECT *, " \
         f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id) AS actual_units, " \
         f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id AND u.unit_vacant = 0) AS occupied_units, " \
+        f"(SELECT COALESCE(NULLIF(ref, ''), NULLIF(address_line_1, ''), name)) AS sort_name, " \
         f"COALESCE((SELECT SUM(t.rent_amount) FROM tenancies t WHERE t.property_id = properties.id AND t.status IN ('Current','current','Periodic','periodic','Active','active')), 0) AS monthly_rent, " \
         f"CASE WHEN (SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id AND u.unit_vacant = 0) > 0 THEN 'Active' ELSE 'Vacant' END AS property_status, " \
         f"(SELECT po.name FROM property_owners po WHERE po.id = CAST(properties.property_owner_id AS INTEGER) LIMIT 1) AS owner_display_name, " \
         f"(SELECT po.id FROM property_owners po WHERE po.id = CAST(properties.property_owner_id AS INTEGER) LIMIT 1) AS owner_display_id " \
         f"FROM properties WHERE {base_where}"
 
-    if combined_having:
-        base_query += f" {combined_having}"
+    combined_filter = ""
+    if occ_where or rent_where:
+        combined_filter = " WHERE 1=1" + occ_where + rent_where
 
-    base_query += " ORDER BY ref ASC"
-
-    count_query = f"SELECT COUNT(*) AS cnt FROM properties WHERE {base_where}"
+    base_query = f"SELECT * FROM ({inner_query}) sub {combined_filter} ORDER BY ref ASC"
+    count_query = f"SELECT COUNT(*) AS cnt FROM ({inner_query}) sub {combined_filter}"
 
     rows, total = paginate(base_query, count_query, base_params, page, per_page)
 
-    return json_success(rows, total, page, per_page)
+    # Real totals from DB (all active properties, not just the current page)
+    db2 = get_dict_db()
+    try:
+        real_props_count = db2.execute("SELECT COUNT(*) AS cnt FROM properties WHERE status IS NULL OR status = '' OR status = 'Active'").fetchone()["cnt"]
+        real_units = db2.execute("SELECT COUNT(*) AS cnt FROM units u JOIN properties p ON u.property_id = p.id WHERE p.status IS NULL OR p.status = '' OR p.status = 'Active'").fetchone()["cnt"]
+        real_occupied = db2.execute("SELECT COUNT(*) AS cnt FROM units u JOIN properties p ON u.property_id = p.id WHERE (p.status IS NULL OR p.status = '' OR p.status = 'Active') AND u.unit_vacant = 0").fetchone()["cnt"]
+    finally:
+        db2.close()
+
+    return json_success({
+        "items": rows,
+        "totals": {"properties": real_props_count, "units": real_units, "occupied": real_occupied},
+    }, total, page, per_page)
 
 
 def api_create_property():
@@ -1674,6 +1679,7 @@ def api_property(prop_id):
 
         # ── Units (existing) ──
         units = db.execute("SELECT * FROM units WHERE property_id = ? ORDER BY sort_order ASC, unit_ref ASC", (prop_id,)).fetchall()
+        computed_rent = 0
         for u in units:
             tn = db.execute("SELECT * FROM tenancies WHERE unit_id=? AND status IN ('Active','active','Periodic','periodic') ORDER BY id DESC LIMIT 1", (u["id"],)).fetchone()
             if tn:
@@ -1682,6 +1688,7 @@ def api_property(prop_id):
                 u['tenancy_rent'] = tn.get('rent_amount', 0)
                 u['tenancy_status'] = tn.get('status', '')
                 u['deposit_amount'] = tn.get('deposit_registered_amount', 0) or 0
+                computed_rent += (tn.get('rent_amount', 0) or 0)
                 cnt = db.execute("SELECT COUNT(*) AS cnt FROM tenants WHERE tenancy_id=?", (tn["id"],)).fetchone()
                 u["occupant_count"] = cnt["cnt"] if cnt else 0
                 first_t = db.execute("SELECT id FROM tenants WHERE tenancy_id=? LIMIT 1", (tn["id"],)).fetchone()
@@ -1694,6 +1701,9 @@ def api_property(prop_id):
                 u["occupant_count"] = 0
                 u["tenant_id"] = None
         prop["units"] = units
+        prop["monthly_rent"] = computed_rent or prop.get("monthly_rent", 0) or prop.get("monthly_property_rent", 0)
+        prop["occupied_units"] = len([u for u in units if not u.get("unit_vacant")])
+        prop["vacant_units"] = len([u for u in units if u.get("unit_vacant")])
 
         # ── Tenancies ──
         tenancies = db.execute(
@@ -3031,6 +3041,8 @@ def api_units():
         f"SELECT u.*, "
         f"(SELECT p.name FROM properties p WHERE p.id = u.property_id) AS property_name, "
         f"(SELECT t.main_tenant_name FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenant_name, "
+        f"(SELECT t.rent_amount FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_rent, "
+        f"(SELECT t.deposit_registered_amount FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_deposit, "
         f"(SELECT t.start_date FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_start_date, "
         f"(SELECT t.end_date FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_end_date "
         f"FROM units u WHERE {where} ORDER BY sort_order ASC, unit_ref ASC",
@@ -3039,10 +3051,28 @@ def api_units():
     )
 
     # Convert unit_vacant to bool
+    vac_count = 0
+    occ_count = 0
     for r in rows:
         bool_fields(r, "unit_vacant")
+        if r.get("unit_vacant"):
+            vac_count += 1
+        else:
+            occ_count += 1
 
-    return json_success(rows, total, page, per_page)
+    # Get real totals from DB (not just the current page)
+    db2 = get_dict_db()
+    try:
+        real_total = db2.execute("SELECT COUNT(*) AS cnt FROM units WHERE 1=1").fetchone()["cnt"]
+        real_vacant = db2.execute("SELECT COUNT(*) AS cnt FROM units WHERE unit_vacant = 1").fetchone()["cnt"]
+        real_occupied = real_total - real_vacant
+    finally:
+        db2.close()
+
+    return json_success({
+        "items": rows,
+        "totals": {"total": real_total, "occupied": real_occupied, "vacant": real_vacant},
+    }, total, page, per_page)
 
 
 def api_create_unit():
@@ -3298,7 +3328,13 @@ def api_tenancies_moving_in():
         month_end = next_month.isoformat()
 
         rows = db.execute(
-            "SELECT * FROM tenancies WHERE move_in_date >= ? AND move_in_date < ? "
+            "SELECT t.*, "
+            "(SELECT COALESCE(NULLIF(p.name, 'multi'), p.address_line_1) FROM properties p WHERE p.id = t.property_id) AS property_name, "
+            "(SELECT p.address_line_1 FROM properties p WHERE p.id = t.property_id) AS property_address, "
+            "(SELECT u.unit_ref FROM units u WHERE u.id = t.unit_id) AS unit_ref, "
+            "(SELECT u.unit_type FROM units u WHERE u.id = t.unit_id) AS unit_type_name, "
+            "t.deposit_registered_amount AS deposit_amount "
+            "FROM tenancies t WHERE move_in_date >= ? AND move_in_date < ? "
             "ORDER BY move_in_date ASC",
             (month_start, month_end)
         ).fetchall()
@@ -3326,7 +3362,13 @@ def api_tenancies_moving_out():
         month_end = next_month.isoformat()
 
         rows = db.execute(
-            "SELECT * FROM tenancies WHERE move_out_date >= ? AND move_out_date < ? "
+            "SELECT t.*, "
+            "(SELECT COALESCE(NULLIF(p.name, 'multi'), p.address_line_1) FROM properties p WHERE p.id = t.property_id) AS property_name, "
+            "(SELECT p.address_line_1 FROM properties p WHERE p.id = t.property_id) AS property_address, "
+            "(SELECT u.unit_ref FROM units u WHERE u.id = t.unit_id) AS unit_ref, "
+            "(SELECT u.unit_type FROM units u WHERE u.id = t.unit_id) AS unit_type_name, "
+            "t.deposit_registered_amount AS deposit_amount "
+            "FROM tenancies t WHERE move_out_date >= ? AND move_out_date < ? "
             "ORDER BY move_out_date ASC",
             (month_start, month_end)
         ).fetchall()
