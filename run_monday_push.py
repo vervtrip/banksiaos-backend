@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Runner: call push_all_pending with the verv_os_db connection."""
-import sys, os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from verv_os_db import get_db
+"""Cron entry point: push pending local dashboard changes to Monday.com."""
+import sys
+sys.path.insert(0, '/root/verv-dashboard')
 from monday_push import push_all_pending
+from verv_os_db import get_db
+
 db = get_db()
 result = push_all_pending(db)
-print(result)
+print(result["message"])
+sys.exit(0 if result["failed"] == 0 else 1)

@@ -15,6 +15,26 @@ from verv_os_db import get_db, get_dict_db, count, dict_from_row, raw_query
 
 banksia_os_bp = Blueprint("banksia_os", __name__, url_prefix="/api/banksia-os")
 
+# ── Change log table init ──
+try:
+    _cl_db = get_dict_db()
+    _cl_db.execute("""
+        CREATE TABLE IF NOT EXISTS change_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_name TEXT NOT NULL,
+            action TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT,
+            summary TEXT,
+            details TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    _cl_db.commit()
+    _cl_db.close()
+except Exception:
+    pass
+
 
 # ── Global auth for the entire blueprint ──
 @banksia_os_bp.before_request
@@ -111,6 +131,67 @@ def clean_none(row):
     if row is None:
         return ""
     return row
+
+
+# ── Change log helpers ──
+
+def record_change(user_name, action, entity_type, entity_id=None, summary=None, details=None):
+    """Record an activity/change log entry."""
+    try:
+        _db = get_dict_db()
+        _db.execute(
+            "INSERT INTO change_log (user_name, action, entity_type, entity_id, summary, details) VALUES (?, ?, ?, ?, ?, ?)",
+            [user_name, action, entity_type, entity_id, summary, details]
+        )
+        _db.commit()
+        _db.close()
+    except Exception:
+        pass
+
+
+@banksia_os_bp.route("/sync/fingerprint", methods=["GET"])
+def api_sync_fingerprint():
+    """Lightweight endpoint returning data fingerprints for change detection.
+    Returns the latest change_log id so the client can detect changes."""
+    _db = get_dict_db()
+    try:
+        row = _db.execute("SELECT MAX(id) AS max_id, MAX(created_at) AS latest_ts FROM change_log").fetchone()
+        return json_success({
+            "fingerprint": row["max_id"] or 0,
+            "latest_ts": row["latest_ts"] or "",
+        })
+    except Exception:
+        return json_success({"fingerprint": 0, "latest_ts": ""})
+    finally:
+        _db.close()
+
+
+@banksia_os_bp.route("/sync/activity", methods=["GET"])
+def api_sync_activity():
+    """Return recent activity log entries."""
+    page = int_param(request.args.get("page"))
+    per_page = int_param(request.args.get("per_page"), 50)
+
+    since_id = request.args.get("since_id")
+    if since_id:
+        try:
+            since_id = int(since_id)
+            where = "WHERE id > ?"
+            params = [since_id]
+        except ValueError:
+            where = ""
+            params = []
+    else:
+        where = ""
+        params = []
+
+    rows, total = paginate(
+        f"SELECT * FROM change_log {where} ORDER BY created_at DESC, id DESC",
+        f"SELECT COUNT(*) AS cnt FROM change_log {where}",
+        params, page, per_page
+    )
+
+    return json_success({"items": rows, "total": total})
 
 
 # ── User helpers ──
@@ -871,7 +952,7 @@ def api_maintenance_jobs():
 
         offset = (page - 1) * per_page
         rows = db.execute(
-            f"""SELECT mj.*, p.name AS property_name
+            f"""SELECT mj.*, COALESCE(NULLIF(CASE WHEN LOWER(p.name) IN ('multi','single') THEN '' ELSE p.name END, ''), p.address_line_1, p.ref, p.name) AS property_name
                 FROM maintenance_jobs mj
                 LEFT JOIN properties p ON mj.property_id = p.id
                 WHERE {where_clause}
@@ -949,7 +1030,7 @@ def api_create_maintenance_job():
         db.commit()
         job_id = cur.lastrowid
         job = db.execute(
-            """SELECT mj.*, p.name AS property_name
+            """SELECT mj.*, COALESCE(NULLIF(CASE WHEN LOWER(p.name) IN ('multi','single') THEN '' ELSE p.name END, ''), p.address_line_1, p.ref, p.name) AS property_name
                FROM maintenance_jobs mj
                LEFT JOIN properties p ON mj.property_id = p.id
                WHERE mj.id = ?""",
@@ -969,7 +1050,7 @@ def api_maintenance_job(job_id):
     try:
         if request.method == "GET":
             job = db.execute(
-                """SELECT mj.*, p.name AS property_name
+                """SELECT mj.*, COALESCE(NULLIF(CASE WHEN LOWER(p.name) IN ('multi','single') THEN '' ELSE p.name END, ''), p.address_line_1, p.ref, p.name) AS property_name
                    FROM maintenance_jobs mj
                    LEFT JOIN properties p ON mj.property_id = p.id
                    WHERE mj.id = ?""",
@@ -1605,12 +1686,14 @@ def api_properties():
 
     rows, total = paginate(base_query, count_query, base_params, page, per_page)
 
-    # Real totals from DB (all active properties, not just the current page)
+    # Real totals from DB — respect filters
+    totals_query = f"SELECT COUNT(*) AS props_cnt, COALESCE(SUM(total_units),0) AS units_cnt, COALESCE(SUM(occupied_units),0) AS occ_cnt FROM ({inner_query}) sub {combined_filter}"
     db2 = get_dict_db()
     try:
-        real_props_count = db2.execute("SELECT COUNT(*) AS cnt FROM properties WHERE status IS NULL OR status = '' OR status = 'Active'").fetchone()["cnt"]
-        real_units = db2.execute("SELECT COUNT(*) AS cnt FROM units u JOIN properties p ON u.property_id = p.id WHERE p.status IS NULL OR p.status = '' OR p.status = 'Active'").fetchone()["cnt"]
-        real_occupied = db2.execute("SELECT COUNT(*) AS cnt FROM units u JOIN properties p ON u.property_id = p.id WHERE (p.status IS NULL OR p.status = '' OR p.status = 'Active') AND u.unit_vacant = 0").fetchone()["cnt"]
+        totals_row = db2.execute(totals_query).fetchone()
+        real_props_count = totals_row["props_cnt"]
+        real_units = totals_row["units_cnt"]
+        real_occupied = totals_row["occ_cnt"]
     finally:
         db2.close()
 
@@ -1649,6 +1732,9 @@ def api_create_property():
         )
         db.commit()
         new_id = cursor.lastrowid
+        user_info = session.get("user", {})
+        user_name = user_info.get("username", "Unknown")
+        record_change(user_name, 'created', 'property', str(new_id), data.get("name", ""))
         return json_success({"id": new_id, "message": "Property created"}), 201
     except Exception as e:
         return json_error(str(e), 500)
@@ -1678,7 +1764,7 @@ def api_property(prop_id):
             prop["owner_display_id"] = None
 
         # ── Units (existing) ──
-        units = db.execute("SELECT * FROM units WHERE property_id = ? ORDER BY sort_order ASC, unit_ref ASC", (prop_id,)).fetchall()
+        units = db.execute("SELECT * FROM units WHERE property_id = ? ORDER BY sort_order ASC, CAST(SUBSTR(unit_ref, 2) AS INTEGER) ASC, unit_ref ASC", (prop_id,)).fetchall()
         computed_rent = 0
         for u in units:
             tn = db.execute("SELECT * FROM tenancies WHERE unit_id=? AND status IN ('Active','active','Periodic','periodic') ORDER BY id DESC LIMIT 1", (u["id"],)).fetchone()
@@ -1889,6 +1975,10 @@ def _api_patch_property(prop_id):
             params
         )
         db.commit()
+
+        user_info = session.get("user", {})
+        user_name = user_info.get("username", "Unknown")
+        record_change(user_name, 'updated', 'property', str(prop_id), prop.get("name", ""), details=json.dumps(activity_entries) if activity_entries else None)
 
         # 6. Log activity for each changed field
         user_name = getattr(request, "current_user", {}).get("username", "system")
@@ -3018,8 +3108,13 @@ def api_units():
     params = []
 
     if status_filter:
-        where_parts.append("unit_status = ?")
-        params.append(status_filter)
+        if status_filter.lower() == 'vacant':
+            where_parts.append("unit_vacant = 1")
+        elif status_filter.lower() == 'occupied':
+            where_parts.append("(unit_vacant = 0 OR unit_vacant IS NULL)")
+        else:
+            where_parts.append("unit_status = ?")
+            params.append(status_filter)
 
     if property_id:
         try:
@@ -3045,7 +3140,7 @@ def api_units():
         f"(SELECT t.deposit_registered_amount FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_deposit, "
         f"(SELECT t.start_date FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_start_date, "
         f"(SELECT t.end_date FROM tenancies t WHERE t.unit_id = u.id AND t.status IN ('Current','current','Periodic','periodic','Active','active') ORDER BY t.start_date DESC LIMIT 1) AS tenancy_end_date "
-        f"FROM units u WHERE {where} ORDER BY sort_order ASC, unit_ref ASC",
+        f"FROM units u WHERE {where} ORDER BY sort_order ASC, CAST(SUBSTR(unit_ref, 2) AS INTEGER) ASC, unit_ref ASC",
         f"SELECT COUNT(*) AS cnt FROM units u WHERE {where}",
         params, page, per_page
     )
@@ -3063,8 +3158,8 @@ def api_units():
     # Get real totals from DB (not just the current page)
     db2 = get_dict_db()
     try:
-        real_total = db2.execute("SELECT COUNT(*) AS cnt FROM units WHERE 1=1").fetchone()["cnt"]
-        real_vacant = db2.execute("SELECT COUNT(*) AS cnt FROM units WHERE unit_vacant = 1").fetchone()["cnt"]
+        real_total = db2.execute(f"SELECT COUNT(*) AS cnt FROM units u WHERE {where}").fetchone()["cnt"]
+        real_vacant = db2.execute(f"SELECT COUNT(*) AS cnt FROM units u WHERE {where} AND unit_vacant = 1").fetchone()["cnt"]
         real_occupied = real_total - real_vacant
     finally:
         db2.close()
@@ -3098,6 +3193,9 @@ def api_create_unit():
         )
         db.commit()
         new_id = cursor.lastrowid
+        user_info = session.get("user", {})
+        user_name = user_info.get("username", "Unknown")
+        record_change(user_name, 'created', 'unit', str(new_id), data.get("unit_ref", ""))
         return json_success({"id": new_id, "message": "Unit created"}), 201
     except Exception as e:
         return json_error(str(e), 500)
@@ -3595,7 +3693,7 @@ def api_maintenance_list():
 
         offset = (page - 1) * per_page
         rows = db.execute(
-            f"""SELECT mj.*, p.name AS property_name
+            f"""SELECT mj.*, COALESCE(NULLIF(CASE WHEN LOWER(p.name) IN ('multi','single') THEN '' ELSE p.name END, ''), p.address_line_1, p.ref, p.name) AS property_name
                 FROM maintenance_jobs mj
                 LEFT JOIN properties p ON mj.property_id = p.id
                 WHERE {where_clause}
@@ -3636,7 +3734,7 @@ def api_maintenance_detail(job_id):
     db = get_dict_db()
     try:
         job = db.execute(
-            """SELECT mj.*, p.name AS property_name
+            """SELECT mj.*, COALESCE(NULLIF(CASE WHEN LOWER(p.name) IN ('multi','single') THEN '' ELSE p.name END, ''), p.address_line_1, p.ref, p.name) AS property_name
                FROM maintenance_jobs mj
                LEFT JOIN properties p ON mj.property_id = p.id
                WHERE mj.id = ?""",
@@ -5628,24 +5726,147 @@ def api_document_stats():
 # COMMENTS & NOTIFICATIONS (Monday.com-style updates)
 # ═══════════════════════════════════════════════
 
+# ── Comments table migration (idempotent) ──
+try:
+    _cmt_db = get_dict_db()
+    # Check existing columns via PRAGMA
+    existing_cols = {row["name"] for row in _cmt_db.execute("PRAGMA table_info(comments)").fetchall()}
+    _cmt_migrated = False
+    for col_name, col_def in [
+        ("author_id", "TEXT"),
+        ("parent_id", "INTEGER DEFAULT NULL"),
+        ("media_paths", "TEXT DEFAULT '[]'"),
+        ("is_edited", "INTEGER DEFAULT 0"),
+        ("is_deleted", "INTEGER DEFAULT 0"),
+        ("modified", "TEXT"),
+    ]:
+        if col_name not in existing_cols:
+            _cmt_db.execute(f"ALTER TABLE comments ADD COLUMN {col_name} {col_def}")
+            _cmt_migrated = True
+    if _cmt_migrated:
+        _cmt_db.commit()
+    _cmt_db.close()
+except Exception:
+    pass
+
+# ── Ensure notifications table exists ──
+try:
+    _not_db = get_dict_db()
+    _not_db.execute("""
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            message TEXT NOT NULL,
+            link TEXT DEFAULT '',
+            read INTEGER DEFAULT 0,
+            created TEXT NOT NULL
+        )
+    """)
+    _not_db.execute("CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(username, read)")
+    _not_db.commit()
+    _not_db.close()
+except Exception:
+    pass
+
+
+# ── Helper: load users.json ──
+def _load_comment_users():
+    try:
+        return json.load(open("/root/verv-dashboard/users.json"))
+    except Exception:
+        return {}
+
+
+# ── Helper: map entity type to display label ──
+_ENTITY_LABELS = {
+    "tenancies": "Tenancy", "tenancy": "Tenancy",
+    "properties": "Property", "property": "Property",
+    "tenants": "Tenant", "tenant": "Tenant",
+    "applicants": "Applicant", "applicant": "Applicant",
+    "units": "Unit", "unit": "Unit",
+    "transactions": "Transaction", "transaction": "Transaction",
+    "maintenance_jobs": "Maintenance Job", "maintenance_job": "Maintenance Job",
+    "property_owners": "Property Owner", "property_owner": "Property Owner",
+}
+
+
+# ── Helper: get current user info from session ──
+def _get_current_user():
+    u = getattr(request, 'current_user', None) or session.get("user", {})
+    if isinstance(u, dict):
+        return u.get("username", "System"), u.get("role", "")
+    return getattr(u, "username", "System"), getattr(u, "role", "")
+
+
+@banksia_os_bp.route("/me")
+def api_get_current_user():
+    username, role = _get_current_user()
+    users_data = _load_comment_users()
+    user_info = users_data.get(username, {})
+    avatar_url = f"/static/uploads/avatars/{username}.jpg" if username and os.path.isfile(f"/root/verv-dashboard/static/uploads/avatars/{username}.jpg") else None
+    return json_success({
+        "username": username,
+        "name": user_info.get("display_name") or username,
+        "role": role,
+        "email": user_info.get("email", ""),
+        "avatar_url": avatar_url,
+    })
+
+
 @banksia_os_bp.route("/comments/<entity_type>/<int:entity_id>", methods=["GET"])
 def api_get_comments(entity_type, entity_id):
     valid = {"tenancy","tenancies","property","properties","tenant","tenants",
-             "applicant","applicants","unit","units","transaction","transactions"}
+             "applicant","applicants","unit","units","transaction","transactions",
+             "maintenance_job","maintenance_jobs","property_owner","property_owners"}
     if entity_type not in valid:
         return json_error("Invalid entity type", 400)
-    if entity_type == "tenancy": entity_type = "tenancies"
-    elif entity_type == "property": entity_type = "properties"
-    elif entity_type == "applicant": entity_type = "applicants"
-    elif entity_type == "transaction": entity_type = "transactions"
+    sg_map = {"tenancy":"tenancies","property":"properties","applicant":"applicants",
+              "transaction":"transactions","maintenance_job":"maintenance_jobs",
+              "tenant":"tenants","unit":"units","property_owner":"property_owners"}
+    etype = sg_map.get(entity_type, entity_type)
+    current_user, current_role = _get_current_user()
+    users_data = _load_comment_users()
     db = get_dict_db()
     try:
-        comments = db.execute(
-            "SELECT id, author, body, mentions, created FROM comments "
-            "WHERE entity_type = ? AND entity_id = ? ORDER BY created ASC",
-            (entity_type, entity_id)
+        rows = db.execute(
+            "SELECT id, author, author_id, body, mentions, media_paths, "
+            "       is_edited, is_deleted, parent_id, created, modified "
+            "FROM comments "
+            "WHERE entity_type = ? AND entity_id = ? AND is_deleted = 0 "
+            "ORDER BY created ASC",
+            (etype, entity_id)
         ).fetchall()
-        return json_success(comments)
+        results = []
+        for r in rows:
+            author_id = r.get("author_id") or r.get("author", "")
+            user_info = users_data.get(author_id, {})
+            author_name = user_info.get("display_name") or author_id or r.get("author", "Unknown")
+            avatar_url = f"/static/uploads/avatars/{author_id}.jpg" if author_id and os.path.isfile(f"/root/verv-dashboard/static/uploads/avatars/{author_id}.jpg") else None
+            can_delete = (current_user == author_id or current_role == "super_admin")
+            try:
+                mp = json.loads(r.get("media_paths") or "[]")
+            except (json.JSONDecodeError, TypeError):
+                mp = []
+            try:
+                ment = json.loads(r.get("mentions") or "[]")
+            except (json.JSONDecodeError, TypeError):
+                ment = []
+            results.append({
+                "id": r["id"],
+                "author": r.get("author", ""),
+                "author_id": author_id,
+                "author_name": author_name,
+                "avatar_url": avatar_url,
+                "body": r["body"],
+                "mentions": ment,
+                "media_paths": mp,
+                "is_edited": bool(r.get("is_edited")),
+                "parent_id": r.get("parent_id"),
+                "created": r["created"],
+                "modified": r.get("modified"),
+                "can_delete": can_delete,
+            })
+        return json_success(results)
     except Exception as e:
         return json_error(str(e), 500)
     finally:
@@ -5658,51 +5879,209 @@ def api_add_comment(entity_type, entity_id):
     if not data or not data.get("body","").strip():
         return json_error("Comment body is required")
     body = data["body"].strip()
-    author = data.get("author","Unknown")
     etype = entity_type
-    if etype == "tenancy": etype = "tenancies"
-    elif etype == "property": etype = "properties"
-    elif etype == "applicant": etype = "applicants"
-    elif etype == "transaction": etype = "transactions"
-    valid = {"tenancies","properties","tenants","applicants","units","transactions"}
+    sg_map = {"tenancy":"tenancies","property":"properties","applicant":"applicants",
+              "transaction":"transactions","maintenance_job":"maintenance_jobs",
+              "tenant":"tenants","unit":"units","property_owner":"property_owners"}
+    etype = sg_map.get(etype, etype)
+    valid = {"tenancies","properties","tenants","applicants","units","transactions","maintenance_jobs","property_owners"}
     if etype not in valid:
         return json_error("Invalid entity type", 400)
+    current_user, _ = _get_current_user()
+    author_id = current_user
     import re
-    mentioned = re.findall(r'@(\w+)', body)
+    mentioned = list(set(re.findall(r'@(\w+)', body)))
+    media_paths = data.get("media_paths", [])
+    if not isinstance(media_paths, list):
+        media_paths = []
+    now_iso = datetime.now(timezone.utc).isoformat()
     db = get_dict_db()
     try:
         c = db.execute(
-            "INSERT INTO comments (entity_type, entity_id, author, body, mentions, created) VALUES (?,?,?,?,?,?)",
-            (etype, entity_id, author, body, json.dumps(mentioned), datetime.now(timezone.utc).isoformat())
+            "INSERT INTO comments (entity_type, entity_id, author, author_id, body, mentions, media_paths, created) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (etype, entity_id, author_id, author_id, body, json.dumps(mentioned), json.dumps(media_paths), now_iso)
         )
         cid = c.lastrowid
         for u in mentioned:
-            db.execute(
-                "INSERT INTO notifications (username, message, link, read, created) VALUES (?,?,?,0,?)",
-                (u, f"{author} @mentioned you on {etype[:-1]} #{entity_id}",
-                 f"/banksia-os?entity={etype}&id={entity_id}",
-                 datetime.now(timezone.utc).isoformat())
-            )
+            # Only notify if the mentioned user actually exists
+            users_data = _load_comment_users()
+            if u in users_data and u != author_id:
+                db.execute(
+                    "INSERT INTO notifications (username, message, link, read, created) VALUES (?,?,?,0,?)",
+                    (u, f"{author_id} @mentioned you on {_ENTITY_LABELS.get(etype, etype[:-1])} #{entity_id}",
+                     f"/banksia-os?entity={etype}&id={entity_id}",
+                     now_iso)
+                )
         db.commit()
-        return json_success({"id":cid,"author":author,"body":body,"mentions":mentioned,
-                            "created":datetime.now(timezone.utc).isoformat()})
+        return json_success({
+            "id": cid,
+            "author": author_id,
+            "author_id": author_id,
+            "body": body,
+            "mentions": mentioned,
+            "media_paths": media_paths,
+            "is_edited": False,
+            "is_deleted": False,
+            "parent_id": None,
+            "created": now_iso,
+            "modified": None,
+        })
     except Exception as e:
         return json_error(str(e), 500)
     finally:
         db.close()
 
 
-@banksia_os_bp.route("/comments/recent")
-def api_recent_comments():
-    """Return the most recent N comments across all entities."""
-    limit = int_param(request.args.get("limit"), 5)
+@banksia_os_bp.route("/comments/<int:comment_id>", methods=["PUT"])
+def api_edit_comment(comment_id):
+    """Edit a comment: soft-deletes the old and inserts a clone with parent_id pointing to original."""
+    current_user, current_role = _get_current_user()
     db = get_dict_db()
     try:
-        comments = db.execute(
-            "SELECT id, author, body, entity_type, entity_id, created FROM comments "
+        old = db.execute(
+            "SELECT * FROM comments WHERE id = ?", (comment_id,)
+        ).fetchone()
+        if not old:
+            return json_error("Comment not found", 404)
+        if old.get("is_deleted"):
+            return json_error("Comment has been deleted", 400)
+        author_id = old.get("author_id") or old.get("author", "")
+        if current_user != author_id:
+            return json_error("You can only edit your own comments", 403)
+        data = request.get_json()
+        if not data or not data.get("body","").strip():
+            return json_error("Comment body is required")
+        new_body = data["body"].strip()
+        new_media = data.get("media_paths", [])
+        if not isinstance(new_media, list):
+            new_media = []
+        import re
+        mentioned = list(set(re.findall(r'@(\w+)', new_body)))
+        now_iso = datetime.now(timezone.utc).isoformat()
+        # Soft-delete old comment
+        db.execute(
+            "UPDATE comments SET is_edited = 1, modified = ? WHERE id = ?",
+            (now_iso, comment_id)
+        )
+        # Insert new version with parent_id pointing to original
+        c = db.execute(
+            "INSERT INTO comments (entity_type, entity_id, author, author_id, body, mentions, "
+            "media_paths, parent_id, created) VALUES (?,?,?,?,?,?,?,?,?)",
+            (old["entity_type"], old["entity_id"], author_id, author_id, new_body, json.dumps(mentioned),
+             json.dumps(new_media), comment_id, now_iso)
+        )
+        new_id = c.lastrowid
+        # Notify mentions in the edited comment
+        users_data = _load_comment_users()
+        for u in mentioned:
+            if u in users_data and u != author_id:
+                db.execute(
+                    "INSERT INTO notifications (username, message, link, read, created) VALUES (?,?,?,0,?)",
+                    (u, f"{author_id} @mentioned you in an edited comment on "
+                         f"{_ENTITY_LABELS.get(old['entity_type'], old['entity_type'][:-1])} #{old['entity_id']}",
+                     f"/banksia-os?entity={old['entity_type']}&id={old['entity_id']}",
+                     now_iso)
+                )
+        db.commit()
+        return json_success({
+            "id": new_id,
+            "author": author_id,
+            "author_id": author_id,
+            "body": new_body,
+            "mentions": mentioned,
+            "media_paths": new_media,
+            "is_edited": False,
+            "is_deleted": False,
+            "parent_id": comment_id,
+            "created": now_iso,
+            "modified": None,
+        })
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/comments/<int:comment_id>", methods=["DELETE"])
+def api_delete_comment(comment_id):
+    """Soft-delete a comment. Author or super_admin can delete."""
+    current_user, current_role = _get_current_user()
+    db = get_dict_db()
+    try:
+        old = db.execute(
+            "SELECT * FROM comments WHERE id = ?", (comment_id,)
+        ).fetchone()
+        if not old:
+            return json_error("Comment not found", 404)
+        author_id = old.get("author_id") or old.get("author", "")
+        if current_user != author_id and current_role != "super_admin":
+            return json_error("You do not have permission to delete this comment", 403)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "UPDATE comments SET is_deleted = 1, modified = ? WHERE id = ?",
+            (now_iso, comment_id)
+        )
+        db.commit()
+        return json_success({"deleted": True, "id": comment_id})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/comments/upload", methods=["POST"])
+def api_upload_comment_media():
+    """Upload a file for comment media attachments."""
+    if "file" not in request.files:
+        return json_error("No file provided")
+    file = request.files["file"]
+    if file.filename == "":
+        return json_error("No file selected")
+    # Secure the filename
+    import uuid
+    fname = file.filename or "upload.bin"
+    ext = os.path.splitext(fname)[1].lower()
+    safe_name = f"{uuid.uuid4().hex}{ext}"
+    upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "uploads", "comments")
+    os.makedirs(upload_dir, exist_ok=True)
+    save_path = os.path.join(upload_dir, safe_name)
+    file.save(save_path)
+    url_path = f"/static/uploads/comments/{safe_name}"
+    return json_success({"url": url_path, "filename": safe_name})
+
+
+@banksia_os_bp.route("/comments/recent")
+def api_recent_comments():
+    """Return the 20 most recent non-deleted comments across all entities."""
+    limit = min(int_param(request.args.get("limit"), 20), 20)
+    current_user, _ = _get_current_user()
+    users_data = _load_comment_users()
+    db = get_dict_db()
+    try:
+        rows = db.execute(
+            "SELECT id, author, author_id, body, entity_type, entity_id, created "
+            "FROM comments WHERE is_deleted = 0 "
             "ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
-        return json_success(comments)
+        results = []
+        for r in rows:
+            author_id = r.get("author_id") or r.get("author", "")
+            user_info = users_data.get(author_id, {})
+            author_name = user_info.get("display_name") or author_id or r.get("author", "Unknown")
+            preview = (r["body"] or "")[:100]
+            results.append({
+                "id": r["id"],
+                "author": r.get("author", ""),
+                "author_id": author_id,
+                "author_name": author_name,
+                "body_preview": preview,
+                "entity_type": r["entity_type"],
+                "entity_type_label": _ENTITY_LABELS.get(r["entity_type"], r["entity_type"].replace("_", " ").title()),
+                "entity_id": r["entity_id"],
+                "created": r["created"],
+            })
+        return json_success(results)
     except Exception as e:
         return json_error(str(e), 500)
     finally:
@@ -6713,6 +7092,107 @@ def api_property_owners():
         return json_error(str(e), 500)
     finally:
         db.close()
+
+@banksia_os_bp.route("/contractors", methods=["GET"])
+def api_contractors():
+    """Return aggregated contractor data from maintenance jobs.
+    Groups by contractor name, returns:
+    - name, job_count, total_labour_cost, total_materials_cost, total_cost
+    - latest_job_date, top_job_type, top_priority
+    - status_breakdown: {status: count}
+    """
+    db = get_dict_db()
+    try:
+        rows = db.execute("""
+            SELECT
+                contractor AS name,
+                COUNT(*) AS job_count,
+                COALESCE(SUM(labour_cost), 0) AS total_labour_cost,
+                COALESCE(SUM(materials_cost), 0) AS total_materials_cost,
+                COALESCE(SUM(COALESCE(labour_cost,0) + COALESCE(materials_cost,0)), 0) AS total_cost,
+                MAX(created) AS latest_job_date
+            FROM maintenance_jobs
+            WHERE contractor IS NOT NULL AND contractor != ''
+            GROUP BY contractor
+            ORDER BY total_cost DESC
+        """).fetchall()
+
+        # Add status breakdown per contractor
+        status_rows = db.execute("""
+            SELECT contractor, status, COUNT(*) AS cnt
+            FROM maintenance_jobs
+            WHERE contractor IS NOT NULL AND contractor != ''
+            GROUP BY contractor, status
+            ORDER BY contractor, cnt DESC
+        """).fetchall()
+
+        breakdown = {}
+        for s in status_rows:
+            c = s["contractor"]
+            if c not in breakdown:
+                breakdown[c] = {}
+            breakdown[c][s["status"]] = s["cnt"]
+
+        # Add top job type per contractor
+        type_rows = db.execute("""
+            SELECT contractor, type, COUNT(*) AS cnt
+            FROM maintenance_jobs
+            WHERE contractor IS NOT NULL AND contractor != '' AND type IS NOT NULL AND type != ''
+            GROUP BY contractor, type
+            ORDER BY contractor, cnt DESC
+        """).fetchall()
+
+        top_types = {}
+        for t in type_rows:
+            c = t["contractor"]
+            if c not in top_types:
+                top_types[c] = t["type"]
+
+        result = []
+        for r in rows:
+            name = r["name"]
+            result.append({
+                "name": name,
+                "job_count": r["job_count"],
+                "total_labour_cost": r["total_labour_cost"],
+                "total_materials_cost": r["total_materials_cost"],
+                "total_cost": r["total_cost"],
+                "latest_job_date": r["latest_job_date"],
+                "top_job_type": top_types.get(name, ""),
+                "status_breakdown": breakdown.get(name, {}),
+            })
+
+        totals = {
+            "total_contractors": len(result),
+            "total_jobs": sum(r["job_count"] for r in result),
+            "total_labour_cost": sum(r["total_labour_cost"] for r in result),
+            "total_materials_cost": sum(r["total_materials_cost"] for r in result),
+            "total_cost": sum(r["total_cost"] for r in result),
+        }
+
+        return json_success({"items": result, "totals": totals})
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/contractors/<contractor_name>/jobs", methods=["GET"])
+def api_contractor_jobs(contractor_name):
+    """Return maintenance jobs for a specific contractor."""
+    from urllib.parse import unquote
+    name = unquote(contractor_name)
+    page = int_param(request.args.get("page"))
+    per_page = int_param(request.args.get("per_page"), 20)
+
+    rows, total = paginate(
+        f"SELECT * FROM maintenance_jobs WHERE contractor = ? ORDER BY created DESC",
+        f"SELECT COUNT(*) AS cnt FROM maintenance_jobs WHERE contractor = ?",
+        [name], page, per_page
+    )
+
+    return json_success({"items": rows}, total, page, per_page)
+
 
 @banksia_os_bp.route("/property-owners", methods=["POST"])
 def api_create_property_owner():
@@ -8779,6 +9259,411 @@ def api_universal_timeline():
         })
 
     except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ── Monday.com Comment Import & 2-Way Sync ──
+
+def _ensure_monday_update_id_column():
+    """Add monday_update_id column to comments table if it doesn't exist."""
+    db = get_dict_db()
+    try:
+        rows = db.execute("PRAGMA table_info(comments)").fetchall()
+        cols = [r["name"] for r in rows]
+        if "monday_update_id" not in cols:
+            db.execute("ALTER TABLE comments ADD COLUMN monday_update_id TEXT")
+            db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/maintenance/import-monday-comments", methods=["POST"])
+def api_import_monday_comments():
+    """Import ALL Monday.com Updates as comments for all jobs with a monday_id."""
+    _ensure_monday_update_id_column()
+
+    mtok = None
+    try:
+        mtok = open("/root/.hermes/secrets/monday_token.txt").read().strip()
+    except Exception:
+        pass
+    if not mtok:
+        return json_error("Monday token not found")
+
+    db = get_dict_db()
+    try:
+        jobs = db.execute(
+            "SELECT id, monday_id FROM maintenance_jobs WHERE monday_id IS NOT NULL AND monday_id != ''"
+        ).fetchall()
+
+        if not jobs:
+            return json_success({"imported": 0, "total_jobs": 0, "message": "No jobs with monday_id found"})
+
+        users_data = _load_comment_users()
+        imported = 0
+        total_updates = 0
+
+        for job in jobs:
+            job_id = job["id"]
+            monday_id = job["monday_id"]
+
+            q = ('{ items(ids: [%s]) { updates(limit: 200) {'
+                 ' id body text_body created_at updated_at'
+                 ' creator { id name }'
+                 ' assets { id name url file_extension }'
+                 ' } } }') % monday_id
+
+            try:
+                data = _monday_graphql(mtok, q)
+            except Exception:
+                continue
+
+            items = data.get("data", {}).get("items", [])
+            if not items:
+                continue
+
+            updates = items[0].get("updates", []) if items else []
+            total_updates += len(updates)
+
+            for upd in updates:
+                update_id = str(upd["id"])
+                existing = db.execute(
+                    "SELECT id FROM comments WHERE monday_update_id = ?",
+                    [update_id]
+                ).fetchone()
+                if existing:
+                    continue
+
+                creator = upd.get("creator", {})
+                monday_author_name = creator.get("name", "Monday User")
+                author_id = monday_author_name
+                for uname, uinfo in users_data.items():
+                    display = uinfo.get("display_name", "") or uname
+                    if display == monday_author_name or uname == monday_author_name:
+                        author_id = uname
+                        break
+
+                text_body = upd.get("text_body") or upd.get("body") or ""
+                created_at = upd.get("created_at", "")
+                updated_at = upd.get("updated_at", "")
+                is_edited = 1 if (updated_at and created_at and updated_at != created_at) else 0
+
+                assets = upd.get("assets", [])
+                media_paths = []
+                if assets:
+                    for asset in assets:
+                        asset_url = asset.get("url", "")
+                        if asset_url:
+                            media_paths.append(asset_url)
+
+                db.execute(
+                    "INSERT INTO comments "
+                    "(entity_type, entity_id, author, author_id, body, media_paths, created, modified, is_edited, monday_update_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("maintenance_jobs", job_id, monday_author_name, author_id,
+                     text_body, json.dumps(media_paths), created_at,
+                     updated_at or created_at, is_edited, update_id)
+                )
+                imported += 1
+
+        db.commit()
+        return json_success({
+            "imported": imported,
+            "total_jobs": len(jobs),
+            "total_updates_found": total_updates,
+            "message": f"Imported {imported} new comments from Monday",
+        })
+
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/maintenance/monday-sync", methods=["POST"])
+def api_monday_sync():
+    """Full 2-way sync between Monday.com and Banksia OS maintenance jobs."""
+    mtok = None
+    try:
+        mtok = open("/root/.hermes/secrets/monday_token.txt").read().strip()
+    except Exception:
+        pass
+    if not mtok:
+        return json_error("Monday token not found")
+
+    _ensure_monday_update_id_column()
+
+    db = get_dict_db()
+    try:
+        users_data = _load_comment_users()
+        results = {
+            "monday_to_local": {"jobs_synced": 0, "comments_imported": 0},
+            "local_to_monday": {"jobs_pushed": 0, "comments_pushed": 0, "errors": []},
+        }
+
+        # ── Direction A: Monday to Banksia OS ──
+        all_items = []
+        cursor = None
+        while True:
+            page_ql = f"items_page(limit:200" + (f',cursor:"{cursor}"' if cursor else "") + ")"
+            q = ("{ boards(ids: [18401159622]) { id name "
+                 + page_ql
+                 + """ { cursor items {
+                        id name column_values { id text value }
+                    } } } }""")
+            data = _monday_graphql(mtok, q)
+            page_data = (
+                data.get("data", {})
+                .get("boards", [{}])[0]
+                .get("items_page", {})
+            )
+            items = page_data.get("items", [])
+            cursor = page_data.get("cursor")
+            all_items.extend(items)
+            if not cursor or len(items) < 200:
+                break
+
+        jobs_synced = 0
+        for item in all_items:
+            cols = _parse_monday_cols(item.get("column_values", []))
+            monday_id = item["id"]
+            title = item.get("name", "")
+
+            status = _safe_status(cols.get("status", "PENDING"))
+            priority = _safe_priority(cols.get("color_mm0p8qna", "Medium"))
+            maint_type = cols.get("color_mm0vfxmq", "")
+            address = (cols.get("short_text041ydfbp", "")
+                       or cols.get("long_text_mm50g0j6", "")
+                       or cols.get("board_relation_mm0p7cv6", ""))
+            contractor = cols.get("color_mm0p4947", "")
+            location = cols.get("dropdown_mm0p6nzm", "")
+            labour_raw = cols.get("numeric_mm0pndmj", "") or "0"
+            materials_raw = cols.get("numeric_mm0p7jdn", "") or "0"
+            try:
+                labour_cost = float(labour_raw.replace("\u00a3", "").replace(",", "").strip())
+            except (ValueError, AttributeError):
+                labour_cost = 0.0
+            try:
+                materials_cost = float(materials_raw.replace("\u00a3", "").replace(",", "").strip())
+            except (ValueError, AttributeError):
+                materials_cost = 0.0
+            bill_ll = 1 if cols.get("boolean_mm0phkaq", "") == "checked" else 0
+            emergency = 1 if cols.get("boolean2hbqq7ey", "") == "checked" else 0
+            reporter_name = cols.get("short_textcvckh2h3", "")
+            reporter_email = cols.get("emailzit7svgb", "")
+            photo_paths = _parse_photo_paths(cols)
+            invoice_paths = _parse_invoice_paths(cols)
+
+            existing = db.execute(
+                "SELECT id, status, priority, type, address, contractor, "
+                "labour_cost, materials_cost, bill_ll, emergency, "
+                "reporter_name, reporter_email, photo_paths, invoice_paths, "
+                "location, description, team_notes "
+                "FROM maintenance_jobs WHERE monday_id = ?",
+                [monday_id],
+            ).fetchone()
+
+            if existing:
+                changed = False
+                updates = {}
+                compare_map = {
+                    "title": title,
+                    "status": status,
+                    "priority": priority,
+                    "type": maint_type,
+                    "address": address,
+                    "contractor": contractor,
+                    "location": location,
+                    "labour_cost": labour_cost,
+                    "materials_cost": materials_cost,
+                    "bill_ll": bill_ll,
+                    "emergency": emergency,
+                    "reporter_name": reporter_name,
+                    "reporter_email": reporter_email,
+                    "photo_paths": photo_paths,
+                    "invoice_paths": invoice_paths,
+                }
+                for field, new_val in compare_map.items():
+                    old_val = existing[field]
+                    if old_val is None:
+                        old_val = ""
+                    if isinstance(old_val, float) or isinstance(new_val, float):
+                        if abs(float(old_val or 0) - float(new_val or 0)) > 0.001:
+                            updates[field] = new_val
+                            changed = True
+                    elif str(old_val).strip() != str(new_val).strip():
+                        updates[field] = new_val
+                        changed = True
+
+                if changed:
+                    updates["modified"] = "datetime('now')"
+                    set_clause = ", ".join(f"{k} = ?" for k in updates)
+                    values = list(updates.values())
+                    values.append(existing["id"])
+                    db.execute(
+                        f"UPDATE maintenance_jobs SET {set_clause} WHERE id = ?",
+                        values,
+                    )
+                    jobs_synced += 1
+            else:
+                db.execute(
+                    "INSERT INTO maintenance_jobs "
+                    "(monday_id, title, status, priority, type, address, contractor, location, "
+                    "labour_cost, materials_cost, bill_ll, emergency, "
+                    "reporter_name, reporter_email, photo_paths, invoice_paths) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (monday_id, title, status, priority, maint_type,
+                     address, contractor, location, labour_cost,
+                     materials_cost, bill_ll, emergency,
+                     reporter_name, reporter_email, photo_paths, invoice_paths),
+                )
+                jobs_synced += 1
+
+        results["monday_to_local"]["jobs_synced"] = jobs_synced
+
+        # Import new Monday Updates as comments
+        jobs_with_monday = db.execute(
+            "SELECT id, monday_id FROM maintenance_jobs WHERE monday_id IS NOT NULL AND monday_id != ''"
+        ).fetchall()
+
+        comments_imported = 0
+        for job in jobs_with_monday:
+            job_id = job["id"]
+            monday_id = job["monday_id"]
+
+            q = ('{ items(ids: [%s]) { updates(limit: 200) {'
+                 ' id body text_body created_at updated_at'
+                 ' creator { id name }'
+                 ' assets { id name url file_extension }'
+                 ' } } }') % monday_id
+
+            try:
+                data = _monday_graphql(mtok, q)
+            except Exception:
+                continue
+
+            items = data.get("data", {}).get("items", [])
+            if not items:
+                continue
+            updates = items[0].get("updates", []) if items else []
+
+            for upd in updates:
+                update_id = str(upd["id"])
+                existing = db.execute(
+                    "SELECT id FROM comments WHERE monday_update_id = ?",
+                    [update_id]
+                ).fetchone()
+                if existing:
+                    continue
+
+                creator = upd.get("creator", {})
+                monday_author_name = creator.get("name", "Monday User")
+                author_id = monday_author_name
+                for uname, uinfo in users_data.items():
+                    display = uinfo.get("display_name", "") or uname
+                    if display == monday_author_name or uname == monday_author_name:
+                        author_id = uname
+                        break
+
+                text_body = upd.get("text_body") or upd.get("body") or ""
+                created_at = upd.get("created_at", "")
+                updated_at = upd.get("updated_at", "")
+                is_edited = 1 if (updated_at and created_at and updated_at != created_at) else 0
+
+                assets = upd.get("assets", [])
+                media_paths = []
+                if assets:
+                    for asset in assets:
+                        asset_url = asset.get("url", "")
+                        if asset_url:
+                            media_paths.append(asset_url)
+
+                db.execute(
+                    "INSERT INTO comments "
+                    "(entity_type, entity_id, author, author_id, body, media_paths, created, modified, is_edited, monday_update_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("maintenance_jobs", job_id, monday_author_name, author_id,
+                     text_body, json.dumps(media_paths), created_at,
+                     updated_at or created_at, is_edited, update_id)
+                )
+                comments_imported += 1
+
+        results["monday_to_local"]["comments_imported"] = comments_imported
+        db.commit()
+
+        # ── Direction B: Banksia OS to Monday ──
+        # Push pending field changes
+        try:
+            from monday_push import push_all_pending
+            push_result = push_all_pending(db)
+            results["local_to_monday"]["jobs_pushed"] = push_result.get("pushed", 0)
+            if push_result.get("errors"):
+                results["local_to_monday"]["errors"].extend(push_result["errors"])
+        except Exception as e:
+            results["local_to_monday"]["errors"].append(f"push_all_pending error: {e}")
+
+        # Push local comments without monday_update_id as new Monday Updates
+        local_comments = db.execute(
+            "SELECT c.id, c.entity_id, c.author, c.author_id, c.body, c.media_paths "
+            "FROM comments c "
+            "JOIN maintenance_jobs j ON j.id = c.entity_id "
+            "WHERE c.entity_type = 'maintenance_jobs' "
+            "AND (c.monday_update_id IS NULL OR c.monday_update_id = '') "
+            "AND j.monday_id IS NOT NULL AND j.monday_id != ''"
+        ).fetchall()
+
+        comments_pushed = 0
+        for comment in local_comments:
+            job = db.execute(
+                "SELECT monday_id FROM maintenance_jobs WHERE id = ?",
+                [comment["entity_id"]]
+            ).fetchone()
+            if not job:
+                continue
+
+            monday_item_id = job["monday_id"]
+            body_text = (comment.get("body") or "").strip()
+            if not body_text:
+                continue
+
+            escaped_body = body_text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+            mutation = ('mutation { create_update('
+                        f'item_id: "{monday_item_id}", '
+                        f'body: "{escaped_body}"'
+                        ') { id } }')
+
+            try:
+                resp = _monday_graphql(mtok, mutation)
+                if resp.get("data") and resp["data"].get("create_update"):
+                    monday_update_id = str(resp["data"]["create_update"]["id"])
+                    db.execute(
+                        "UPDATE comments SET monday_update_id = ? WHERE id = ?",
+                        [monday_update_id, comment["id"]]
+                    )
+                    comments_pushed += 1
+                else:
+                    errors = resp.get("errors", [])
+                    err_msg = str(errors) if errors else "unknown error"
+                    results["local_to_monday"]["errors"].append(
+                        f"comment {comment['id']}: {err_msg}"
+                    )
+            except Exception as e:
+                results["local_to_monday"]["errors"].append(
+                    f"comment {comment['id']}: {e}"
+                )
+
+        results["local_to_monday"]["comments_pushed"] = comments_pushed
+        db.commit()
+
+        return json_success(results)
+
+    except Exception as e:
+        db.rollback()
         return json_error(str(e), 500)
     finally:
         db.close()

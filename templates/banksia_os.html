@@ -680,7 +680,10 @@ code{background:#f1f5f9;padding:2px 6px;border-radius:3px;font-size:12px;color:#
 <div class="detail-overlay" id="detail-overlay" onclick="closeDetail()"></div>
 <div class="detail-panel" id="detail-panel">
   <div class="detail-header">
-    <h2 id="detail-title">Detail</h2>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button id="detail-back-btn" style="display:none;background:none;border:none;color:#64748B;font-size:18px;cursor:pointer;padding:2px 6px;border-radius:4px;line-height:1" onclick="closeDetail();navigate('units')" title="Back">←</button>
+      <h2 id="detail-title">Detail</h2>
+    </div>
     <button class="close-btn" onclick="closeDetail()">✕</button>
   </div>
   <div class="detail-body" id="detail-body"></div>
@@ -1516,13 +1519,14 @@ async function renderProperties() {
     if (items.length===0) {
       html += '<div class="empty-state"><div class="icon">◧</div><h3>No properties found</h3></div>';
     } else {
-      html += '<table><thead><tr><th>Ref</th><th>Property Name</th><th>Type</th><th>Address</th><th>City</th><th>Owner</th><th>Condition</th><th>Units</th></tr></thead><tbody>';
+      html += '<table><thead><tr><th>Address</th><th>Ref</th><th>Type</th><th>City</th><th>Owner</th><th>Condition</th><th>Units</th></tr></thead><tbody>';
       items.forEach(p => {
         const typeLabel = p.property_type === 'HMO / Guaranteed' ? 'HMO / Guaranteed' : (p.property_type === 'HMO / Management' ? 'HMO / Management' : (p.property_type === 'Single / Guaranteed' ? 'Single / Guaranteed' : (p.property_type === 'Single / Management' ? 'Single / Management' : escHtml(p.property_type||'—'))));
         const tags = (p.tags_list || []).map(t => `<span class="tag-badge">${escHtml(t)}</span>`).join('');
         const unitsStr = `${p.occupied_units||0} of ${p.total_units||0} units`;
         const conditionStr = p.condition ? `<span class="tag-badge tag-${(p.condition||'').toLowerCase()}">${escHtml(p.condition)}</span>` : '—';
-        html += `<tr onclick="showProperty(${p.id})"><td>${escHtml(p.ref||'—')}</td><td><strong>${escHtml(p.name||p.ref||'—')}</strong>${tags?'<br>'+tags:''}</td><td>${typeLabel}</td><td>${escHtml(p.address_line_1||'')}</td><td>${escHtml(p.city||'')}</td><td>${p.owner_display_name ? '<a href="#" onclick="event.stopPropagation();closeDetail();navigate(\'property-owners\');setTimeout(()=>showOwnerDetail('+p.owner_display_id+'),100)" style="color:#2563eb;text-decoration:none">'+escHtml(p.owner_display_name)+'</a>' : escHtml(p.property_owner_name||'—')}</td><td>${conditionStr}</td><td>${unitsStr}</td></tr>`;
+        const nameOrRef = (p.name && p.name !== 'multi') ? p.name : p.ref || '';
+        html += `<tr onclick="showProperty(${p.id})"><td><strong>${escHtml(p.address_line_1||'')}</strong></td><td>${escHtml(nameOrRef)}</td><td>${typeLabel}</td><td>${escHtml(p.city||'')}</td><td>${p.owner_display_name ? '<a href="#" onclick="event.stopPropagation();closeDetail();navigate(\'property-owners\');setTimeout(()=>showOwnerDetail('+p.owner_display_id+'),100)" style="color:#2563eb;text-decoration:none">'+escHtml(p.owner_display_name)+'</a>' : escHtml(p.property_owner_name||'—')}</td><td>${conditionStr}</td><td>${unitsStr}</td></tr>`;
       });
       html += '</tbody></table>';
       html += paginationControls(propsState, 'propsPagination');
@@ -1553,7 +1557,13 @@ function makeEditable(table, id, field, label, val, type='text') {
 function editField(table, id, field, label, currentVal, type) {
   const el = document.getElementById(`val-${table}-${id}-${field}`);
   if (!el) return;
+  // Support select:Option1,Option2 format
+  let selectOpts = '';
+  if (type && type.startsWith('select:')) {
+    selectOpts = type.split(':')[1].split(',').map(o => `<option value="${o}"${currentVal===o?' selected':''}>${o}</option>`).join('');
+  }
   const input = type==='select' ? `<select id="edit-input">${currentVal}</select>` :
+    selectOpts ? `<select id="edit-input"><option value="">—</option>${selectOpts}</select>` :
     type==='number' ? `<input type="number" step="0.01" id="edit-input" value="${currentVal}">` :
     `<input type="text" id="edit-input" value="${currentVal}" placeholder="${label}">`;
   el.innerHTML = input + `<button class="save-btn" onclick="saveField('${table}',${id},'${field}')">Save</button><button class="cancel-btn" onclick="cancelEdit('${table}',${id},'${field}','${escHtml(currentVal)}')">Cancel</button>`;
@@ -1604,18 +1614,23 @@ async function showProperty(id) {
     const p = res.data;
     // Use ref/address for display name if name is generic 'multi'
     const displayName = (p.name && p.name !== 'multi') ? p.name : (p.ref || p.address_line_1 || 'Property');
+    // Use address for the header title if name is generic 'multi'
+    const detailTitle = (p.name && p.name !== 'multi') ? p.name : (p.address_line_1 || p.ref || 'Property');
+    const addrParts = [p.address_line_1, p.city, p.county, p.postcode].filter(Boolean);
+    const displayAddr = addrParts.join(', ') || 'No address';
     let html = `<div class="detail-section"><h3>Property Details</h3><div class="detail-grid">`;
-    html += makeEditable('properties',id,'ref','Ref',p.ref||'','text');
-    html += makeEditable('properties',id,'name','Name',displayName,'text');
+    html += makeEditable('properties',id,'address_line_1','Address',displayAddr,'text');
+    html += makeEditable('properties',id,'city','City',p.city||'','text');
+    html += makeEditable('properties',id,'postcode','Postcode',p.postcode||'','text');
     // Insert owner as a clickable link if resolved from owner table
     if (p.owner_display_name && p.owner_display_id) {
       html += `<div class="detail-field"><div class="label">Owner</div>
         <div class="val"><a href="#" onclick="event.preventDefault();closeDetail();navigate('property-owners');setTimeout(()=>showOwnerDetail(${p.owner_display_id}),100)" style="color:#2563eb;text-decoration:none;font-weight:500">${escHtml(p.owner_display_name)}</a></div></div>`;
     }
+    html += makeEditable('properties',id,'ref','Ref',p.ref||'','text');
+    html += makeEditable('properties',id,'name','Name',displayName,'text');
     const addrFields = [
-      ['address_line_1','Address Line 1','text'],['city','City','text'],
-      ['county','County','text'],['postcode','Postcode','text'],
-      ['country','Country','text'],['total_units','Total Units','number'],['bedrooms','Bedrooms','number'],
+      ['county','County','text'],['country','Country','text'],['total_units','Total Units','number'],['bedrooms','Bedrooms','number'],
       ['bathrooms','Bathrooms','number'],['council_tax_band','Council Tax Band','text'],
       ['council_account_no','Council Account No','text'],
       ['features','Features','text']
@@ -1655,15 +1670,22 @@ async function showProperty(id) {
     // Units table
     if (p.units && p.units.length > 0) {
       html += `<div class="detail-section"><h3>Units / Rooms (${p.units.length})</h3><table><thead><tr>
-        <th>Ref</th><th>Tenant</th><th>Rent</th><th>Status</th><th>Occupants</th>
+        <th>Ref</th><th>Occupancy</th><th>Tenant</th><th>Rent</th><th>Status</th><th>Occupants</th>
       </tr></thead><tbody>`;
-      p.units.forEach(u => {
+      // Sort units by numeric part of ref so M1 comes before D2
+      const sortedUnits = [...(p.units || [])].sort((a, b) => {
+        const numA = parseInt((a.unit_ref||'').replace(/[^0-9]/g, ''), 10) || 0;
+        const numB = parseInt((b.unit_ref||'').replace(/[^0-9]/g, ''), 10) || 0;
+        return numA - numB;
+      });
+      sortedUnits.forEach(u => {
         const isLet = u.tenancy_status && (u.tenancy_status.toLowerCase() === 'active' || u.tenancy_status.toLowerCase() === 'periodic');
         const statusText = isLet ? 'Let' : (u.unit_status || 'Vacant');
         const statusClass = isLet ? 'badge-occupied' : (u.unit_vacant ? 'badge-vacant' : 'badge-pending');
         const tenantLink = u.tenant_name ? `<a href="#" onclick="event.preventDefault();closeDetail();propsState.page=1;renderProperties();setTimeout(()=>navigate('tenants',${u.tenant_id}),100)" style="color:#2563eb;text-decoration:none;font-weight:500">${escHtml(u.tenant_name)}</a>` : '—';
         html += `<tr>
           <td><strong>${escHtml(u.unit_ref||'—')}</strong></td>
+          <td>${escHtml(u.occupancy||'—')}</td>
           <td>${tenantLink}</td>
           <td style="font-weight:600">${u.tenancy_rent > 0 ? fmtMoney(u.tenancy_rent) : (u.market_rent > 0 ? fmtMoney(u.market_rent) : '—')}</td>
           <td><span class="badge ${statusClass}">${statusText}</span></td>
@@ -1673,7 +1695,7 @@ async function showProperty(id) {
       html += '</tbody></table></div>';
     }
     html += `<div class="detail-section"><button class="btn btn-ghost btn-sm" onclick="uploadPropertyImage(${id})">+ Upload Image</button></div>`;
-    openDetail(displayName, html, 'properties', id);
+    openDetail(detailTitle, html, 'properties', id);
     setTimeout(async () => {
       const body = document.getElementById('detail-body');
       if (body) {
@@ -1737,9 +1759,9 @@ async function renderUnits() {
     if (items.length===0) {
       html += '<div class="empty-state"><div class="icon">▣</div><h3>No units found</h3></div>';
     } else {
-      html += '<table><thead><tr><th>Ref</th><th>Type</th><th>Status</th><th>Address</th><th>Rent</th><th>Beds</th></tr></thead><tbody>';
+      html += '<table><thead><tr><th>Ref</th><th>Type</th><th>Status</th><th>Occupancy</th><th>Address</th><th>Rent</th><th>Beds</th></tr></thead><tbody>';
       items.forEach(u => {
-        html += `<tr onclick="showUnit(${u.id})"><td>${escHtml(u.unit_ref||'—')}</td><td>${escHtml(u.unit_type||'—')}</td><td>${statusBadge(u.unit_status)}</td><td>${escHtml(u.full_address||'')}</td><td>${fmtMoney(u.market_rent)}</td><td>${u.bedrooms||'—'}</td></tr>`;
+        html += `<tr onclick="showUnit(${u.id})"><td>${escHtml(u.unit_ref||'—')}</td><td>${escHtml(u.unit_type||'—')}</td><td>${statusBadge(u.unit_status)}</td><td>${escHtml(u.occupancy||'—')}</td><td>${escHtml(u.full_address||'')}</td><td>${fmtMoney(u.market_rent)}</td><td>${u.bedrooms||'—'}</td></tr>`;
       });
       html += '</tbody></table>';
       html += paginationControls(unitsState, 'unitsPagination');
@@ -1763,14 +1785,23 @@ async function showUnit(id) {
     let html = `<div class="detail-section"><h3>Unit Details</h3><div class="detail-grid">`;
     const fields = [['Ref','unit_ref','text'],['Type','unit_type','text'],['Status','unit_status','text'],
       ['Full Address','full_address','text'],['Market Rent','market_rent','number'],['Frequency','market_rent_frequency','text'],
-      ['Deposit Amount','deposit_amount','number'],['Description','short_description','text'],
+      ['Deposit Amount','deposit_amount','number'],['Occupancy','occupancy','select:Single,Double'],['Description','short_description','text'],
       ['Furnished','furnished','text'],['Bedrooms','bedrooms','number'],['Bathrooms','bathrooms','number'],
       ['Max Occupancy','max_occupancy','number'],['Council Tax Band','council_tax_band','text'],
      ['Features','features','text'],['Notes','notes','text']];
     fields.forEach(([l,f,t]) => {
-      const v = u[f]; if (v!=null && v!=='') html += makeEditable('units',id,f,l,v,t);
+      // Always show select-type fields, even if empty
+      const isSelect = t && t.startsWith('select:');
+      const v = u[f];
+      if (isSelect || (v!=null && v!=='')) html += makeEditable('units',id,f,l,v||'',t);
     });
     html += '</div></div>';
+    // Add back button for units
+    const backBtn = document.getElementById('detail-back-btn');
+    if (backBtn) {
+      backBtn.style.display = '';
+      backBtn.onclick = function() { closeDetail(); navigate('units'); };
+    }
     openDetail(u.unit_ref||'Unit', html, 'units', id);
   } catch(e) {
     showToast('Failed to load unit: ' + e.message, 'error');
