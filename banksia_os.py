@@ -6398,6 +6398,181 @@ def api_get_notifications():
         db.close()
 
 
+@banksia_os_bp.route("/my-updates", methods=["GET"])
+def api_my_updates():
+    """Combined feed: comments mentioning the user + unread notifications.
+    
+    Returns:
+        items: list of update objects, newest first
+        unread_count: total unread (unread notifications only)
+    """
+    db = get_dict_db()
+    try:
+        u = getattr(request, 'current_user', None) or session.get("user", {})
+        uname = u.get("username", "") if isinstance(u, dict) else getattr(u, "username", "")
+        limit = request.args.get("limit", "50")
+        offset = request.args.get("offset", "0")
+        try:
+            limit = max(1, min(int(limit), 200))
+            offset = max(0, int(offset))
+        except:
+            limit, offset = 50, 0
+
+        # 1. Comments where user is mentioned
+        # mentions is stored as JSON array: '["Sami","Norbert"]'
+        mentions_sql = """
+            SELECT c.id, c.entity_type, c.entity_id, c.author, c.body, c.mentions, c.created, c.is_edited,
+                   c.author_id,
+                   (SELECT COUNT(*) FROM comments r WHERE r.parent_id = c.id AND r.is_deleted = 0) AS reply_count
+            FROM comments c
+            WHERE c.is_deleted = 0
+              AND c.mentions LIKE ?
+            ORDER BY c.created DESC
+        """
+        # LIKE pattern to find the username anywhere in the JSON array
+        like_pattern = f'%"{uname}"%'
+        mentioned_items = db.execute(mentions_sql, (like_pattern,)).fetchall()
+
+        # 2. Comments where user is author AND someone replied
+        replied_sql = """
+            SELECT DISTINCT c.id, c.entity_type, c.entity_id, c.author, c.body, c.mentions, c.created, c.is_edited,
+                   c.author_id,
+                   (SELECT COUNT(*) FROM comments r WHERE r.parent_id = c.id AND r.is_deleted = 0) AS reply_count
+            FROM comments c
+            INNER JOIN comments r ON r.parent_id = c.id
+            WHERE c.is_deleted = 0
+              AND c.author = ?
+              AND r.author != ?
+              AND r.is_deleted = 0
+            ORDER BY c.created DESC
+        """
+        replied_items = db.execute(replied_sql, (uname, uname)).fetchall()
+
+        # 3. Unread notifications
+        notif_sql = """
+            SELECT n.id, n.message, n.link, n.created
+            FROM notifications n
+            WHERE n.username = ? AND n.read = 0
+            ORDER BY n.created DESC
+            LIMIT ?
+        """
+        notif_items = db.execute(notif_sql, (uname, limit)).fetchall()
+
+        # 4. Comments on the same entity the user authored (updates to threads they're in)
+        thread_sql = """
+            SELECT c.id, c.entity_type, c.entity_id, c.author, c.body, c.mentions, c.created, c.is_edited,
+                   c.author_id,
+                   (SELECT COUNT(*) FROM comments r WHERE r.parent_id = c.id AND r.is_deleted = 0) AS reply_count
+            FROM comments c
+            WHERE c.is_deleted = 0
+              AND c.entity_id IN (
+                  SELECT DISTINCT cc.entity_id FROM comments cc
+                  WHERE cc.author = ? AND cc.is_deleted = 0
+              )
+              AND c.author != ?
+              AND c.id NOT IN (SELECT id FROM comments WHERE mentions LIKE ?)
+            ORDER BY c.created DESC
+            LIMIT 20
+        """
+        thread_items = db.execute(thread_sql, (uname, uname, like_pattern)).fetchall()
+
+        # Combine and sort by created DESC
+        combined = []
+        seen_ids = set()
+
+        for row in mentioned_items:
+            item = dict(row)
+            item['type'] = 'mention'
+            key = f"comment_{item['id']}"
+            if key not in seen_ids:
+                seen_ids.add(key)
+                combined.append(item)
+
+        for row in replied_items:
+            item = dict(row)
+            item['type'] = 'reply'
+            key = f"comment_{item['id']}"
+            if key not in seen_ids:
+                seen_ids.add(key)
+                combined.append(item)
+
+        for row in thread_items:
+            item = dict(row)
+            item['type'] = 'thread_update'
+            key = f"comment_{item['id']}"
+            if key not in seen_ids:
+                seen_ids.add(key)
+                combined.append(item)
+
+        for row in notif_items:
+            item = dict(row)
+            item['type'] = 'notification'
+            item['author'] = 'system'
+            item['body'] = item['message']
+            item['entity_type'] = 'notification'
+            item['entity_id'] = item['id']
+            item['reply_count'] = 0
+            item['mentions'] = '[]'
+            item['is_edited'] = 0
+            item['author_id'] = 'system'
+            key = f"notif_{item['id']}"
+            if key not in seen_ids:
+                seen_ids.add(key)
+                combined.append(item)
+
+        # Sort by created DESC, newest first
+        combined.sort(key=lambda x: x.get('created', ''), reverse=True)
+
+        # Paginate
+        total = len(combined)
+        page_items = combined[offset:offset + limit]
+
+        # Unread count from notifications only
+        uc = db.execute(
+            "SELECT COUNT(*) AS c FROM notifications WHERE username=? AND read=0",
+            (uname,)
+        ).fetchone()["c"]
+
+        # Get entity display names for context
+        entity_names = {}
+        for item in page_items:
+            if item['entity_type'] in ('notification',):
+                continue
+            et = item['entity_type']
+            eid = item['entity_id']
+            try:
+                if et == 'maintenance_job' or et == 'maintenance':
+                    r = db.execute("SELECT reference, title FROM maintenance_jobs WHERE id=?", (eid,)).fetchone()
+                    if r:
+                        entity_names[f"{et}_{eid}"] = r['reference'] or r['title'] or f"Job #{eid}"
+                    else:
+                        entity_names[f"{et}_{eid}"] = f"Job #{eid}"
+                elif et == 'property':
+                    r = db.execute("SELECT name, address_line_1 FROM properties WHERE id=?", (eid,)).fetchone()
+                    entity_names[f"{et}_{eid}"] = (r['name'] or r['address_line_1'] or f"Property #{eid}") if r else f"Property #{eid}"
+                elif et == 'property_owner':
+                    r = db.execute("SELECT name FROM property_owners WHERE id=?", (eid,)).fetchone()
+                    entity_names[f"{et}_{eid}"] = r['name'] if r else f"Landlord #{eid}"
+                elif et == 'unit':
+                    r = db.execute("SELECT ref, name FROM units WHERE id=?", (eid,)).fetchone()
+                    entity_names[f"{et}_{eid}"] = (r['ref'] or r['name'] or f"Unit #{eid}") if r else f"Unit #{eid}"
+                else:
+                    entity_names[f"{et}_{eid}"] = f"{et} #{eid}"
+            except:
+                entity_names[f"{et}_{eid}"] = f"{et} #{eid}"
+
+        return json_success({
+            "items": page_items,
+            "entity_names": entity_names,
+            "unread_count": uc,
+            "total": total,
+        })
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
 @banksia_os_bp.route("/notifications/<int:notification_id>/read", methods=["POST"])
 def api_mark_notification_read(notification_id):
     """Mark a single notification as read."""
