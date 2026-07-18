@@ -113,6 +113,23 @@ def add_cache_headers(response):
     response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
 
     path = request.path
+
+    # ── Consistent JSON envelope for all /api/banksia-os responses ──
+    # Every Banksia OS API response gets a unified structure so the frontend
+    # always knows what shape to expect. If a response is already JSON with a
+    # "success" key, it passes through unchanged. Otherwise it's wrapped.
+    if (
+        path.startswith("/api/banksia-os")
+        and response.is_json
+        and response.status_code < 400
+    ):
+        try:
+            existing = response.get_json()
+            if existing is not None and "success" not in existing:
+                response.set_data(json.dumps({"success": True, "data": existing}))
+        except Exception:
+            pass
+
     if path.startswith('/static/') or path.startswith('/api/banksia-os/dashboard'):
         response.headers['Cache-Control'] = 'public, max-age=60'
     elif path.startswith('/api/'):
@@ -121,13 +138,64 @@ def add_cache_headers(response):
         response.headers['Expires'] = '0'
     return response
 
+
+# ── Application start time for uptime tracking ──
+_start_time = datetime.now(timezone.utc)
+
+
+# ── Health endpoint (no auth required) ──
+@app.route("/api/health")
+def api_health():
+    """Health check for uptime monitoring. Returns DB status, timestamps, version."""
+    db_ok = False
+    db_size = 0
+    db_tables = 0
+    try:
+        from banksia_os_db import get_dict_db
+        db = get_dict_db()
+        db_ok = db.execute("SELECT 1").fetchone() is not None
+        db_size = os.path.getsize(
+            os.path.join(os.path.dirname(__file__), "banksia_os.db")
+        )
+        db_tables = db.execute(
+            "SELECT COUNT(*) AS cnt FROM sqlite_master WHERE type='table'"
+        ).fetchone()["cnt"]
+        db.close()
+    except Exception:
+        pass
+
+    now = datetime.now(timezone.utc)
+    return jsonify({
+        "status": "healthy" if db_ok else "degraded",
+        "timestamp": now.isoformat(),
+        "uptime_seconds": int((now - _start_time).total_seconds()),
+        "database": {
+            "connected": db_ok,
+            "size_bytes": db_size,
+            "tables": db_tables,
+        },
+        "services": {
+            "flask": "running",
+            "nextjs": "upstream",
+        },
+        "version": "1.0.0",
+    })
+
+
 # ── Register Banksia OS Blueprint ──
 from banksia_api import banksia
 app.register_blueprint(banksia)
 
 # ── Register Banksia OS Blueprint ──
-from banksia_os import banksia_os_bp, sync_unit_vacancy
+from banksia_os import banksia_os_bp, sync_unit_vacancy, ensure_audit_table
 app.register_blueprint(banksia_os_bp)
+
+# Initialise auth audit table at startup
+try:
+    ensure_audit_table()
+    app.logger.info("Auth audit table initialised")
+except Exception as e:
+    app.logger.warning(f"Auth audit table init: {e}")
 
 # Run unit vacancy sync at startup to ensure consistency
 try:
@@ -135,6 +203,20 @@ try:
     app.logger.info(f"Unit vacancy sync on startup: {result.get('total_changed', 0)} units updated")
 except Exception as e:
     app.logger.warning(f"Unit vacancy sync on startup failed: {e}")
+
+# ── Run pending DB migrations at startup ──
+try:
+    from services.migration_service import migrate
+    results = migrate()
+    applied = [r for r in results if r["status"] == "applied"]
+    if applied:
+        app.logger.info(f"DB migrations applied at startup: {len(applied)} ({', '.join(r['name'] for r in applied)})")
+    failed = [r for r in results if r["status"] == "failed"]
+    if failed:
+        for f in failed:
+            app.logger.error(f"Migration v{f['version']} failed: {f.get('error')}")
+except Exception as e:
+    app.logger.warning(f"Migration check at startup: {e}")
 
 # ── Monday Push Sync ──
 from monday_push import push_all_pending, get_token
@@ -456,9 +538,11 @@ def api_auth_login():
     user = _authenticate(username, password)
     if not user:
         _record_login_attempt(ip)
+        log_auth_event("login_failed", username, "Invalid credentials", ip)
         return jsonify({"error": "Invalid credentials"}), 401
     session["user"] = user
     session.permanent = True
+    log_auth_event("login_success", username, f"Role: {user['role']}", ip)
     return jsonify({"success": True, "user": {"username": user["username"], "role": user["role"]}})
 
 @app.route("/api/auth/user")

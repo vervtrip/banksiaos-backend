@@ -3,17 +3,41 @@
 Banksia OS — HMO Operations API Blueprint.
 Provides all HMO operations endpoints for daily team use.
 Mounts at /api/banksia-os/
+
+Architecture: Route definitions only — business logic lives in services/ modules.
 """
 import json, os, sys, re
 from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, jsonify, request, session, current_app
 from functools import wraps
 
 from banksia_os_db import get_db, get_dict_db, count, dict_from_row, raw_query
 
+# ── Service-layer imports ──
+from services.db_service import (
+    bool_fields, paginate, json_success, json_error, clean_none,
+    int_param, float_param, build_search_clause, build_order_by, record_change
+)
+from services.activity_service import (
+    create_activity_log, log_activity, _format_value, _redact_if_sensitive,
+    _get_entity_label, _derive_timeline_type, _redact_sensitive_fields, _enhance_timeline_item
+)
+from services.property_service import sync_unit_vacancy, get_monday_token, _monday_graphql, ensure_landlord_link
+from services.maintenance_service import safe_status, safe_priority, parse_monday_cols, parse_photo_paths, parse_invoice_paths
+from services.auth_service import (
+    _hash_password, _verify_password, _validate_password_strength, _load_users, _save_users,
+    VALID_ROLES, check_role_access, check_rate_limit, record_login_attempt, log_auth_event,
+    ensure_audit_table
+)
+from services.finance_service import calculate_arrears, get_tenancy_summary
+from services.notification_service import create_notification, get_user_notifications, get_my_updates
+
 banksia_os_bp = Blueprint("banksia_os", __name__, url_prefix="/api/banksia-os")
+
+# Versioned alias — /api/v1/banksia-os routes to the same blueprint
+# DEPRECATED: After frontend migration, change url_prefix to /api/v1/banksia-os
 
 # ── Change log table init ──
 try:
@@ -32,8 +56,9 @@ try:
     """)
     _cl_db.commit()
     _cl_db.close()
-except Exception:
-    pass
+except Exception as _e:
+    current_app.logger.error(f"Error in line ~54: {_e}")
+    pass  # Expected before change_log table exists on first run
 
 
 # ── Global auth for the entire blueprint ──
@@ -116,69 +141,9 @@ def _require_banksia_auth():
             }), 403
 
 
-# ── Helpers ──
-
-def bool_fields(row, *fields):
-    """Convert 0/1 int fields to bool in-place."""
-    for f in fields:
-        if f in row:
-            row[f] = bool(row[f])
-    return row
-
-
-def paginate(query, count_query, params, page, per_page):
-    """Run a paginated query returning (rows, total)."""
-    db = get_dict_db()
-    try:
-        total = db.execute(count_query, params).fetchone()["cnt"]
-        offset = (page - 1) * per_page
-        rows = db.execute(query + " LIMIT ? OFFSET ?", params + [per_page, offset]).fetchall()
-        return rows, total
-    finally:
-        db.close()
-
-
-def json_success(data, total=None, page=None, per_page=None):
-    """Standard success response."""
-    resp = {"success": True, "data": data}
-    if total is not None:
-        resp["total"] = total
-        resp["page"] = page or 1
-        resp["per_page"] = per_page or 20
-    return jsonify(resp)
-
-
-def json_error(msg, status=400):
-    return jsonify({"success": False, "error": msg}), status
-
-
-def clean_none(row):
-    """Replace all None values in a dict with empty string, recursing into nested dicts/lists."""
-    if row is None:
-        return ""
-    if isinstance(row, dict):
-        return {k: clean_none(v) for k, v in row.items()}
-    if isinstance(row, list):
-        return [clean_none(v) for v in row]
-    if row is None:
-        return ""
-    return row
-
-
-# ── Change log helpers ──
-
-def record_change(user_name, action, entity_type, entity_id=None, summary=None, details=None):
-    """Record an activity/change log entry."""
-    try:
-        _db = get_dict_db()
-        _db.execute(
-            "INSERT INTO change_log (user_name, action, entity_type, entity_id, summary, details) VALUES (?, ?, ?, ?, ?, ?)",
-            [user_name, action, entity_type, entity_id, summary, details]
-        )
-        _db.commit()
-        _db.close()
-    except Exception:
-        pass
+# ── Helpers imported from services/db_service.py ──
+#   bool_fields, paginate, json_success, json_error, clean_none,
+#   int_param, float_param, build_search_clause, build_order_by, record_change
 
 
 @banksia_os_bp.route("/sync/fingerprint", methods=["GET"])
@@ -226,98 +191,14 @@ def api_sync_activity():
     return json_success({"items": rows, "total": total})
 
 
-# ── User helpers ──
-USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
-
-# Canonical role set — must match app.py VALID_ROLES and the Next.js Role union.
-VALID_ROLES = (
-    "super_admin", "admin", "finance", "hmo_manager", "str_manager",
-    "maintenance", "lettings", "projects", "viewer",
-)
-
-_PBKDF2_ITERATIONS = 210_000  # OWASP floor — must match app.py
-
-def _hash_password(password: str) -> str:
-    """PBKDF2-HMAC-SHA256 with per-password random salt — identical format to app.py.
-    Format: pbkdf2$<iterations>$<salt_hex>$<hash_hex>"""
-    import hashlib, secrets
-    salt = secrets.token_bytes(16)
-    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, _PBKDF2_ITERATIONS)
-    return f"pbkdf2${_PBKDF2_ITERATIONS}${salt.hex()}${dk.hex()}"
-
-def _validate_password_strength(pw: str):
-    """(ok, error_message). Policy: >=10 chars, at least one letter and one digit. Matches app.py."""
-    import re as _re
-    if not pw or len(pw) < 10:
-        return False, "Password must be at least 10 characters"
-    if not _re.search(r"[A-Za-z]", pw) or not _re.search(r"\d", pw):
-        return False, "Password must contain at least one letter and one number"
-    return True, ""
-
-def _load_users():
-    if not os.path.exists(USERS_FILE):
-        import secrets as _secrets
-        pw = os.environ.get("BANKSIA_DEFAULT_PASSWORD") or ("Bk-" + _secrets.token_urlsafe(12))
-        return {"Sami": {"password": pw, "role": "super_admin"}}
-    return json.load(open(USERS_FILE))
-
-def _save_users(users):
-    # Write atomically via temp file
-    tmp_path = USERS_FILE + ".tmp"
-    with open(tmp_path, "w") as f:
-        json.dump(users, f, indent=2)
-    os.replace(tmp_path, USERS_FILE)
-
-
-def int_param(val, default=1, max_val=None):
-    try:
-        result = max(1, int(val))
-    except (TypeError, ValueError):
-        result = default
-    if max_val is not None:
-        result = min(result, max_val)
-    return result
-
+# ── User helpers imported from services/auth_service.py ──
+#   _hash_password, _validate_password_strength, _load_users, _save_users
+# ── Utility helpers imported from services/db_service.py ──
+#   int_param, float_param, build_search_clause, build_order_by
 
 # Hard ceiling on any page-size / limit param to prevent a single request
 # loading an entire table into memory (memory-exhaustion protection under load).
 MAX_PAGE_SIZE = 200
-
-
-def float_param(val):
-    if val is None:
-        return None
-    try:
-        return float(val)
-    except (TypeError, ValueError):
-        return None
-
-
-def build_search_clause(fields, search_term):
-    """Build a WHERE clause fragment for searching across multiple TEXT fields."""
-    if not search_term:
-        return "", []
-    clauses = [f"{f} LIKE ?" for f in fields]
-    like_val = f"%{search_term}%"
-    params = [like_val] * len(fields)
-    return f"({' OR '.join(clauses)})", params
-
-
-def build_order_by(sortable_map, default_clause):
-    """Safe ORDER BY fragment from request args.
-
-    Reads ?sort_by= and ?sort_dir= from the request and returns a trusted SQL
-    ORDER BY expression. `sortable_map` whitelists allowed sort keys → SQL
-    expressions, so no user input is ever interpolated into SQL — this is the
-    only reason it is injection-safe. Falls back to `default_clause` when the
-    requested column isn't whitelisted (or none was requested).
-    """
-    sort_by = request.args.get("sort_by", "").strip()
-    sort_dir = request.args.get("sort_dir", "asc").strip().lower()
-    if sort_by in sortable_map:
-        direction = "DESC" if sort_dir == "desc" else "ASC"
-        return f"{sortable_map[sort_by]} {direction}"
-    return default_clause
 
 
 def api_update_resource(table, item_id):
@@ -1987,7 +1868,8 @@ def api_sync_monday_property_list():
                     db.execute("UPDATE properties SET custom_fields=? WHERE id=?", (json.dumps(custom_fields), lp_id))
                     updated += 1
                     matched += 1
-                except Exception:
+                except Exception as _e:
+                    current_app.logger.error(f"Error in line ~1865: {_e}")
                     pass
                 break
 
@@ -2939,7 +2821,8 @@ def api_delete_property(prop_id):
             deposits_count = db.execute(
                 "SELECT COUNT(*) AS cnt FROM deposits WHERE property_id = ?", (prop_id,)
             ).fetchone()["cnt"]
-        except Exception:
+        except Exception as _e:
+            current_app.logger.error(f"Error in line ~2817: {_e}")
             pass
         dependencies["deposits"] = deposits_count
 
@@ -5077,7 +4960,8 @@ def api_deposits_migrate():
                     (datetime.now(timezone.utc).isoformat(), f"Error: {str(e)}", log_id)
                 )
                 db.commit()
-        except Exception:
+        except Exception as _e:
+            current_app.logger.error(f"Error in line ~4955: {_e}")
             pass
         return json_error(str(e), 500)
     finally:
@@ -6158,7 +6042,8 @@ try:
     if _cmt_migrated:
         _cmt_db.commit()
     _cmt_db.close()
-except Exception:
+except Exception as _e:
+    current_app.logger.error(f"Error in for col_name, col_def in [: {_e}")
     pass
 
 # ── Ensure notifications table exists ──
@@ -6177,7 +6062,8 @@ try:
     _not_db.execute("CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(username, read)")
     _not_db.commit()
     _not_db.close()
-except Exception:
+except Exception as _e:
+    current_app.logger.error(f"Error initialising notifications table: {_e}")
     pass
 
 
@@ -9735,7 +9621,8 @@ def _get_entity_label(db, entity_type, entity_id):
                 (entity_id,)
             ).fetchone()
             return row["label"] if row else f"Guarantor #{entity_id}"
-    except Exception:
+    except Exception as _e:
+        current_app.logger.error(f"Error in line ~9613: {_e}")
         pass
     return f"{entity_type.title()} #{entity_id}"
 

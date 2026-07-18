@@ -1,0 +1,1005 @@
+openapi: 3.0.3
+info:
+  title: Banksia OS API
+  description: |
+    Banksia OS — Unified HMO & STR property management CRM.
+    All endpoints are prefixed with `/api/banksia-os/` and require
+    session-based authentication (cookie: `banksia_os_sid`).
+    The auth endpoints live at `/api/auth/*`.
+  version: 1.0.0
+  contact:
+    name: Verv Management
+    url: https://ops.srv1744186.hstgr.cloud
+
+servers:
+  - url: https://ops.srv1744186.hstgr.cloud/api
+    description: Production
+  - url: http://127.0.0.1:5050/api
+    description: Local development
+
+paths:
+  # ── Auth ──
+  /auth/login:
+    post:
+      summary: Authenticate a user
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  user: { $ref: '#/components/schemas/User' }
+        '401':
+          description: Invalid credentials
+
+  /auth/logout:
+    post:
+      summary: Log out current session
+      tags: [Auth]
+      responses:
+        '200':
+          description: Logged out
+
+  /auth/user:
+    get:
+      summary: Get current session user
+      tags: [Auth]
+      responses:
+        '200':
+          description: Current user info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Not logged in
+
+  # ── Dashboard ──
+  /banksia-os/dashboard:
+    get:
+      summary: Dashboard summary metrics
+      tags: [Dashboard]
+      responses:
+        '200':
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardResponse'
+
+  /banksia-os/dashboard/activity:
+    get:
+      summary: Recent activity feed
+      tags: [Dashboard]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 30 }
+        - name: since
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Activity entries
+
+  /banksia-os/submissions:
+    get:
+      summary: Unified submissions inbox
+      tags: [Submissions]
+      parameters:
+        - name: type
+          in: query
+          schema: { type: string, enum: [all, referencing, maintenance, message] }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 60 }
+      responses:
+        '200':
+          description: Submissions feed
+
+  # ── Properties ──
+  /banksia-os/properties:
+    get:
+      summary: List all properties
+      tags: [Properties]
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Properties list
+    post:
+      summary: Create a new property
+      tags: [Properties]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PropertyInput'
+      responses:
+        '200':
+          description: Property created
+
+  /banksia-os/properties/{id}:
+    get:
+      summary: Get property details
+      tags: [Properties]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Property details
+    patch:
+      summary: Update a property
+      tags: [Properties]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PropertyInput'
+      responses:
+        '200':
+          description: Property updated
+
+  /banksia-os/properties/{id}/archive:
+    post:
+      summary: Archive a property (soft delete)
+      tags: [Properties]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Property archived
+
+  /banksia-os/properties/{id}/restore:
+    post:
+      summary: Restore an archived property
+      tags: [Properties]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Property restored
+
+  /banksia-os/properties/{id}/delete:
+    post:
+      summary: Permanently delete a property (super_admin only)
+      tags: [Properties]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Property deleted
+
+  /banksia-os/properties/enhanced:
+    get:
+      summary: Properties with full linked data
+      tags: [Properties]
+      responses:
+        '200':
+          description: Enhanced properties list
+
+  # ── Units ──
+  /banksia-os/units:
+    get:
+      summary: List all units
+      tags: [Units]
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer }
+        - name: per_page
+          in: query
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Units list
+    post:
+      summary: Create a unit
+      tags: [Units]
+      responses:
+        '200':
+          description: Unit created
+
+  /banksia-os/units/sync-vacancy:
+    post:
+      summary: Sync unit vacancy from active tenancies
+      tags: [Units]
+      responses:
+        '200':
+          description: Vacancy sync completed
+
+  /banksia-os/units/{id}:
+    get:
+      summary: Get unit details
+      tags: [Units]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Unit details
+    patch:
+      summary: Update a unit
+      tags: [Units]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Unit updated
+
+  /banksia-os/units/{id}/occupancy:
+    get:
+      summary: Get unit occupancy history
+      tags: [Units]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Occupancy data
+
+  # ── Tenancies ──
+  /banksia-os/tenancies:
+    get:
+      summary: List all tenancies
+      tags: [Tenancies]
+      responses:
+        '200':
+          description: Tenancies list
+    post:
+      summary: Create a tenancy
+      tags: [Tenancies]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenancyInput'
+      responses:
+        '200':
+          description: Tenancy created
+
+  /banksia-os/tenancies/{id}:
+    get:
+      summary: Get tenancy details
+      tags: [Tenancies]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Tenancy details
+    patch:
+      summary: Update a tenancy
+      tags: [Tenancies]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Tenancy updated
+
+  /banksia-os/tenancies/{id}/end:
+    post:
+      summary: End a tenancy
+      tags: [Tenancies]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Tenancy ended
+
+  /banksia-os/tenancies/{id}/renew:
+    post:
+      summary: Renew a tenancy
+      tags: [Tenancies]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Tenancy renewed
+
+  /banksia-os/tenancies/{id}/rent-review:
+    post:
+      summary: Initiate rent review
+      tags: [Tenancies]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Rent review initiated
+
+  /banksia-os/tenancies/{id}/section-21:
+    post:
+      summary: Generate Section 21 notice
+      tags: [Tenancies]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Section 21 notice generated
+
+  /banksia-os/tenancies/ending-soon:
+    get:
+      summary: Tenancies ending within 60 days
+      tags: [Tenancies]
+      responses:
+        '200':
+          description: Ending-soon tenancies
+
+  /banksia-os/tenancies/moving-in-this-month:
+    get:
+      summary: Tenancies moving in this month
+      tags: [Tenancies]
+      responses:
+        '200':
+          description: Move-ins
+
+  /banksia-os/tenancies/moving-out-this-month:
+    get:
+      summary: Tenancies moving out this month
+      tags: [Tenancies]
+      responses:
+        '200':
+          description: Move-outs
+
+  # ── Tenants ──
+  /banksia-os/tenants:
+    get:
+      summary: List all tenants
+      tags: [Tenants]
+      responses:
+        '200':
+          description: Tenants list
+    post:
+      summary: Create a tenant
+      tags: [Tenants]
+      responses:
+        '200':
+          description: Tenant created
+
+  /banksia-os/tenants/{id}:
+    get:
+      summary: Get tenant details
+      tags: [Tenants]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Tenant details
+    patch:
+      summary: Update a tenant
+      tags: [Tenants]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Tenant updated
+
+  # ── Finance ──
+  /banksia-os/finance/overview:
+    get:
+      summary: Financial overview summary
+      tags: [Finance]
+      responses:
+        '200':
+          description: Finance overview
+
+  /banksia-os/finance/transactions:
+    get:
+      summary: Transaction history
+      tags: [Finance]
+      responses:
+        '200':
+          description: Transactions list
+
+  /banksia-os/finance/deposits:
+    get:
+      summary: Deposit records
+      tags: [Finance]
+      responses:
+        '200':
+          description: Deposits list
+
+  /banksia-os/finance/rent-schedule/{tenancy_id}:
+    get:
+      summary: Rent schedule for a tenancy
+      tags: [Finance]
+      parameters:
+        - name: tenancy_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Rent schedule
+
+  /banksia-os/finance/tenancy-summary/{tenancy_id}:
+    get:
+      summary: Financial summary for a tenancy
+      tags: [Finance]
+      parameters:
+        - name: tenancy_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Tenancy financial summary
+
+  # ── Maintenance ──
+  /banksia-os/maintenance:
+    get:
+      summary: Maintenance jobs list
+      tags: [Maintenance]
+      responses:
+        '200':
+          description: Maintenance jobs
+
+  /banksia-os/maintenance/{id}:
+    get:
+      summary: Maintenance job details
+      tags: [Maintenance]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Job detail
+
+  /banksia-os/maintenance/jobs:
+    get:
+      summary: Legacy maintenance jobs list
+      tags: [Maintenance]
+      responses:
+        '200':
+          description: Maintenance jobs
+    post:
+      summary: Create maintenance job
+      tags: [Maintenance]
+      responses:
+        '200':
+          description: Job created
+
+  /banksia-os/maintenance/jobs/{id}:
+    get:
+      summary: Get maintenance job
+      tags: [Maintenance]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Job detail
+    patch:
+      summary: Update maintenance job
+      tags: [Maintenance]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Job updated
+
+  /banksia-os/maintenance/orders:
+    get:
+      summary: Maintenance orders list
+      tags: [Maintenance]
+      responses:
+        '200':
+          description: Orders list
+    post:
+      summary: Create maintenance order
+      tags: [Maintenance]
+      responses:
+        '200':
+          description: Order created
+
+  /banksia-os/maintenance/ll-comms:
+    get:
+      summary: Landlord communications
+      tags: [Maintenance]
+      responses:
+        '200':
+          description: LL comms list
+
+  /banksia-os/maintenance/sync-from-monday:
+    post:
+      summary: Sync maintenance data from Monday.com
+      tags: [Maintenance]
+      responses:
+        '200':
+          description: Sync completed
+
+  # ── Applicants & Referencing ──
+  /banksia-os/applicants:
+    get:
+      summary: List applicants
+      tags: [Applicants]
+      responses:
+        '200':
+          description: Applicants list
+    post:
+      summary: Create applicant
+      tags: [Applicants]
+      responses:
+        '200':
+          description: Applicant created
+
+  /banksia-os/applicants/{id}:
+    get:
+      summary: Applicant details
+      tags: [Applicants]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Applicant detail
+    patch:
+      summary: Update applicant
+      tags: [Applicants]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Applicant updated
+
+  /banksia-os/applicants/{id}/status:
+    post:
+      summary: Transition applicant status
+      tags: [Applicants]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Status transitioned
+
+  /banksia-os/applicants/{id}/create-tenancy:
+    post:
+      summary: Create tenancy from applicant
+      tags: [Applicants]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Tenancy created
+
+  # ── Referencing ──
+  /banksia-os/referencing:
+    get:
+      summary: List referencing forms
+      tags: [Referencing]
+      responses:
+        '200':
+          description: Referencing forms
+
+  /banksia-os/referencing/{id}:
+    get:
+      summary: Referencing form detail
+      tags: [Referencing]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Referencing detail
+
+  # ── Property Owners ──
+  /banksia-os/property-owners:
+    get:
+      summary: List property owners
+      tags: [Property Owners]
+      responses:
+        '200':
+          description: Property owners list
+
+  /banksia-os/property-owners/{id}:
+    get:
+      summary: Property owner details
+      tags: [Property Owners]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Owner detail
+
+  # ── Search ──
+  /banksia-os/search/global:
+    get:
+      summary: Global search across entities
+      tags: [Search]
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Search results
+
+  # ── Timeline / Activity ──
+  /banksia-os/timeline:
+    get:
+      summary: Universal activity timeline
+      tags: [Activity]
+      responses:
+        '200':
+          description: Timeline entries
+
+  /banksia-os/activity:
+    get:
+      summary: Activity log
+      tags: [Activity]
+      responses:
+        '200':
+          description: Activity entries
+
+  # ── Comments ──
+  /banksia-os/comments:
+    get:
+      summary: List comments for an entity
+      tags: [Comments]
+      responses:
+        '200':
+          description: Comments list
+
+  /banksia-os/comments/recent:
+    get:
+      summary: Recent comments across all entities
+      tags: [Comments]
+      responses:
+        '200':
+          description: Recent comments
+
+  # ── Notifications ──
+  /banksia-os/notifications:
+    get:
+      summary: Get user notifications
+      tags: [Notifications]
+      responses:
+        '200':
+          description: Notifications list
+
+  /banksia-os/my-updates:
+    get:
+      summary: Personalised update feed
+      tags: [Notifications]
+      responses:
+        '200':
+          description: My updates feed
+
+  # ── Users ──
+  /banksia-os/users:
+    get:
+      summary: List all users
+      tags: [Users]
+      responses:
+        '200':
+          description: Users list
+    post:
+      summary: Create a user
+      tags: [Users]
+      responses:
+        '200':
+          description: User created
+
+  /banksia-os/users/{username}:
+    patch:
+      summary: Update user
+      tags: [Users]
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: User updated
+    delete:
+      summary: Delete user (super_admin only)
+      tags: [Users]
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: User deleted
+
+  # ── Invoices ──
+  /banksia-os/invoices:
+    get:
+      summary: List invoices
+      tags: [Invoices]
+      responses:
+        '200':
+          description: Invoices list
+    post:
+      summary: Create invoice
+      tags: [Invoices]
+      responses:
+        '200':
+          description: Invoice created
+
+  /banksia-os/invoices/{id}:
+    get:
+      summary: Invoice detail
+      tags: [Invoices]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Invoice detail
+    patch:
+      summary: Update invoice
+      tags: [Invoices]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Invoice updated
+
+  /banksia-os/invoices/{id}/pay:
+    post:
+      summary: Mark invoice as paid
+      tags: [Invoices]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Invoice paid
+
+  # ── Contractors ──
+  /banksia-os/contractors:
+    get:
+      summary: List contractors
+      tags: [Contractors]
+      responses:
+        '200':
+          description: Contractors list
+
+  /banksia-os/contractors/{name}/jobs:
+    get:
+      summary: Contractor job history
+      tags: [Contractors]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Contractor jobs
+
+  # ── Documents ──
+  /banksia-os/documents/templates:
+    get:
+      summary: List document templates
+      tags: [Documents]
+      responses:
+        '200':
+          description: Templates list
+    post:
+      summary: Upload document template
+      tags: [Documents]
+      responses:
+        '200':
+          description: Template uploaded
+
+  /banksia-os/documents/generate:
+    post:
+      summary: Generate a document from template
+      tags: [Documents]
+      responses:
+        '200':
+          description: Document generated
+
+  /banksia-os/entity-documents/upload:
+    post:
+      summary: Upload document linked to an entity
+      tags: [Documents]
+      responses:
+        '200':
+          description: Document uploaded
+
+  # ── Tags ──
+  /banksia-os/tags:
+    get:
+      summary: List tags
+      tags: [Tags]
+      responses:
+        '200':
+          description: Tags list
+
+  # ── Company Settings ──
+  /banksia-os/company-settings:
+    get:
+      summary: Get company settings
+      tags: [Settings]
+      responses:
+        '200':
+          description: Company settings
+    post:
+      summary: Update company settings
+      tags: [Settings]
+      responses:
+        '200':
+          description: Settings updated
+
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        username:
+          type: string
+        role:
+          type: string
+          enum: [super_admin, admin, finance, hmo_manager, str_manager, maintenance, lettings, projects, viewer]
+        email:
+          type: string
+
+    PropertyInput:
+      type: object
+      properties:
+        name:
+          type: string
+        address_line_1:
+          type: string
+        address_line_2:
+          type: string
+        city:
+          type: string
+        postcode:
+          type: string
+        property_type:
+          type: string
+          enum: [HMO/Guaranteed, HMO/Management, Single/Guaranteed, Single/Management]
+        status:
+          type: string
+        ref:
+          type: string
+
+    TenancyInput:
+      type: object
+      properties:
+        property_id:
+          type: integer
+        unit_id:
+          type: integer
+        main_tenant_name:
+          type: string
+        main_tenant_email:
+          type: string
+        rent_amount:
+          type: number
+        rent_frequency:
+          type: string
+        deposit_amount:
+          type: number
+        move_in_date:
+          type: string
+          format: date
+        status:
+          type: string
+
+    DashboardResponse:
+      type: object
+      properties:
+        total_properties:
+          type: integer
+        total_units:
+          type: integer
+        occupied_units:
+          type: integer
+        vacant_units:
+          type: integer
+        total_tenancies:
+          type: integer
+        active_tenancies:
+          type: integer
+        total_tenants:
+          type: integer
+        monthly_rent_roll:
+          type: number
+        total_arrears:
+          type: number
+        unit_occupancy_rate:
+          type: number
