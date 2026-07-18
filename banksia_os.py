@@ -202,7 +202,7 @@ def api_sync_fingerprint():
 def api_sync_activity():
     """Return recent activity log entries."""
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 50)
+    per_page = int_param(request.args.get("per_page"), 50, max_val=MAX_PAGE_SIZE)
 
     since_id = request.args.get("since_id")
     if since_id:
@@ -269,11 +269,19 @@ def _save_users(users):
     os.replace(tmp_path, USERS_FILE)
 
 
-def int_param(val, default=1):
+def int_param(val, default=1, max_val=None):
     try:
-        return max(1, int(val))
+        result = max(1, int(val))
     except (TypeError, ValueError):
-        return default
+        result = default
+    if max_val is not None:
+        result = min(result, max_val)
+    return result
+
+
+# Hard ceiling on any page-size / limit param to prevent a single request
+# loading an entire table into memory (memory-exhaustion protection under load).
+MAX_PAGE_SIZE = 200
 
 
 def float_param(val):
@@ -673,7 +681,7 @@ def api_dashboard():
 def api_dashboard_activity():
     db = get_dict_db()
     try:
-        limit = int_param(request.args.get("limit", 30), 30)
+        limit = int_param(request.args.get("limit", 30), 30, max_val=MAX_PAGE_SIZE)
         since = request.args.get("since")
         activity = []
         has_since = bool(since)
@@ -788,7 +796,7 @@ def api_dashboard_activity():
 def api_submissions():
     db = get_dict_db()
     try:
-        limit = int_param(request.args.get("limit", 60), 60)
+        limit = int_param(request.args.get("limit", 60), 60, max_val=MAX_PAGE_SIZE)
         stype = (request.args.get("type") or "all").lower()      # all|referencing|maintenance|message
         only_new = str(request.args.get("new", "")).lower() in ("1", "true", "yes")
         items = []
@@ -950,7 +958,7 @@ def api_maintenance_jobs():
     db = get_dict_db()
     try:
         page = int_param(request.args.get("page"))
-        per_page = int_param(request.args.get("per_page"), 50)
+        per_page = int_param(request.args.get("per_page"), 50, max_val=MAX_PAGE_SIZE)
         search = (request.args.get("search") or "").strip()
         status_filter = request.args.get("status", "")
         type_filter = request.args.get("type", "")
@@ -1471,6 +1479,8 @@ def api_sync_from_monday():
         inserted = 0
         updated = 0
         unchanged = 0
+        pending = 0  # writes accumulated since last commit — batched to keep
+                     # the write lock from being held for the whole loop
 
         for item in all_items:
             cols = _parse_monday_cols(item.get("column_values", []))
@@ -1568,6 +1578,7 @@ def api_sync_from_monday():
                         values,
                     )
                     updated += 1
+                    pending += 1
                 else:
                     unchanged += 1
             else:
@@ -1599,6 +1610,14 @@ def api_sync_from_monday():
                     ],
                 )
                 inserted += 1
+                pending += 1
+
+            # Commit in batches so the write lock is released periodically,
+            # letting concurrent user saves through instead of waiting on one
+            # giant transaction spanning every item.
+            if pending >= 50:
+                db.commit()
+                pending = 0
 
         db.commit()
         return json_success(
@@ -1675,7 +1694,7 @@ def api_properties():
     if request.method == "POST":
         return api_create_property()
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20)
+    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
     search = request.args.get("search", "").strip()
     occ_filter = request.args.get("occupancy", "").strip().lower()
     rent_min = float_param(request.args.get("rent_min"))
@@ -1957,6 +1976,11 @@ def api_sync_monday_property_list():
 
         if not found:
             unmatched_monday.append(mname)
+
+        # Batch commits so the write lock is released periodically rather than
+        # held for the entire loop.
+        if updated and updated % 50 == 0:
+            db.commit()
 
     db.commit()
     db.close()
@@ -2963,7 +2987,7 @@ def api_delete_property(prop_id):
 def api_property_activity(prop_id):
     """Return paginated activity log entries for a specific property."""
     page = int_param(request.args.get("page"), default=1)
-    limit = int_param(request.args.get("per_page", 50), default=50)
+    limit = int_param(request.args.get("per_page", 50), default=50, max_val=MAX_PAGE_SIZE)
     offset = (page - 1) * limit
 
     db = get_dict_db()
@@ -3003,7 +3027,7 @@ def api_get_activity():
     entity_type = request.args.get("entity_type", "")
     entity_id_str = request.args.get("entity_id", "")
     entity_id = int(entity_id_str) if entity_id_str and entity_id_str.isdigit() else None
-    limit = int_param(request.args.get("limit", 50), default=50)
+    limit = int_param(request.args.get("limit", 50), default=50, max_val=MAX_PAGE_SIZE)
     page = int_param(request.args.get("page", 1), default=1)
     offset = (page - 1) * limit
 
@@ -3347,7 +3371,7 @@ def api_units():
     if request.method == "POST":
         return api_create_unit()
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20)
+    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
     status_filter = request.args.get("status", "").strip()
     property_id = request.args.get("property_id", "").strip()
     search = request.args.get("search", "").strip()
@@ -3517,7 +3541,7 @@ def api_unit(unit_id):
 @banksia_os_bp.route("/tenancies")
 def api_tenancies():
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20)
+    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
     status_filter = request.args.get("status", "").strip()
     search = request.args.get("search", "").strip()
 
@@ -3900,7 +3924,7 @@ def api_financials():
 @banksia_os_bp.route("/arrears")
 def api_arrears():
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20)
+    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
     db = get_dict_db()
     try:
         # Get tenancies with outstanding transactions (tenancy_id in transactions
@@ -3927,7 +3951,7 @@ def api_maintenance_list():
     db = get_dict_db()
     try:
         page = int_param(request.args.get("page"))
-        per_page = int_param(request.args.get("per_page"), 50)
+        per_page = int_param(request.args.get("per_page"), 50, max_val=MAX_PAGE_SIZE)
         search = (request.args.get("search") or "").strip()
         status_filter = request.args.get("status", "")
         type_filter = request.args.get("type", "")
@@ -4203,7 +4227,7 @@ def api_scan_orders_inbox():
 @banksia_os_bp.route("/activity")
 def api_activity():
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 30)
+    per_page = int_param(request.args.get("per_page"), 30, max_val=MAX_PAGE_SIZE)
     db = get_dict_db()
     try:
         rows = db.execute("""
@@ -4229,7 +4253,7 @@ def api_activity():
 @banksia_os_bp.route("/tenants")
 def api_tenants():
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20)
+    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
     search = request.args.get("search", "").strip()
     property_id = request.args.get("property_id", "").strip()
     status_filter = request.args.get("status", "").strip()
@@ -4351,7 +4375,7 @@ def api_tenant(tenant_id):
 @banksia_os_bp.route("/guarantors")
 def api_guarantors():
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20)
+    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
     search = request.args.get("search", "").strip()
 
     where_parts = [
@@ -4411,7 +4435,7 @@ def api_guarantor(guarantor_id):
 @banksia_os_bp.route("/referencing")
 def api_referencing():
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20)
+    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
     search = request.args.get("search", "").strip()
     status_filter = request.args.get("status", "").strip()
 
@@ -4568,7 +4592,7 @@ def api_finance_overview():
 @banksia_os_bp.route("/finance/transactions")
 def api_transactions():
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20)
+    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
     is_overdue = request.args.get("is_overdue", "").strip()
     is_outstanding = request.args.get("is_outstanding", "").strip()
     property_id = request.args.get("property_id", "").strip()
@@ -4697,7 +4721,7 @@ def api_deposits():
 def api_banksia_deposits():
     """Paginated deposit list with summary stats."""
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20)
+    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
     search = request.args.get("search", "").strip()
     status_filter = request.args.get("status", "").strip()
     protection_filter = request.args.get("protection", "").strip()
@@ -4958,6 +4982,10 @@ def api_deposits_migrate():
                      amount, deposit_type, scheme, protection_status, t["start_date"])
                 )
                 inserted += 1
+                # Batch commits so a several-hundred-row migration doesn't hold
+                # the write lock as one transaction, blocking live user saves.
+                if inserted % 50 == 0:
+                    db.commit()
             except Exception:
                 errors += 1
                 continue
@@ -6324,7 +6352,7 @@ def api_upload_comment_media():
 @banksia_os_bp.route("/comments/recent")
 def api_recent_comments():
     """Return the 20 most recent non-deleted comments across all entities."""
-    limit = min(int_param(request.args.get("limit"), 20), 20)
+    limit = min(int_param(request.args.get("limit"), 20, max_val=MAX_PAGE_SIZE), 20)
     current_user, _ = _get_current_user()
     users_data = _load_comment_users()
     db = get_dict_db()
@@ -7047,7 +7075,7 @@ def api_tenancy_summary(tenancy_id):
 def api_access_list():
     """List access records with pagination + property_id/unit_id filters."""
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20)
+    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
     property_id = request.args.get("property_id")
     unit_id = request.args.get("unit_id")
 
@@ -7516,7 +7544,7 @@ def api_tag(tag_id):
 @banksia_os_bp.route("/property-owners")
 def api_property_owners():
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20)
+    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
     search = request.args.get("search","").strip()
     db = get_dict_db()
     try:
@@ -7626,7 +7654,7 @@ def api_contractor_jobs(contractor_name):
     from urllib.parse import unquote
     name = unquote(contractor_name)
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20)
+    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
 
     rows, total = paginate(
         f"SELECT * FROM maintenance_jobs WHERE contractor = ? ORDER BY created DESC",
@@ -8038,7 +8066,7 @@ def api_update_company_settings():
 @banksia_os_bp.route("/properties/enhanced")
 def api_properties_enhanced():
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20)
+    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
     search = request.args.get("search","").strip()
     condition = request.args.get("condition","").strip()  # Comma-separated filter codes
     tag_filter = request.args.get("tag","").strip()
@@ -8237,7 +8265,7 @@ REFERENCING_VALID_TRANSITIONS = {
 def api_applicants_list():
     """List applicants with search, pagination, status filter."""
     page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20)
+    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
     status_filter = request.args.get("status", "").strip()
     search = request.args.get("search", "").strip()
 
@@ -9584,7 +9612,7 @@ def api_universal_timeline():
     entity_type = request.args.get("entity_type", "").strip().lower()
     entity_id_str = request.args.get("entity_id", "").strip()
     page = int_param(request.args.get("page"), default=1)
-    per_page = int_param(request.args.get("per_page"), default=20)
+    per_page = int_param(request.args.get("per_page"), default=20, max_val=MAX_PAGE_SIZE)
 
     if not entity_type or not entity_id_str:
         return json_error("entity_type and entity_id are required", 400)
