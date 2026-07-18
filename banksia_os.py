@@ -37,6 +37,35 @@ except Exception:
 
 
 # ── Global auth for the entire blueprint ──
+# ── Role → blocked route-family policy ──
+# Route families are matched against the path relative to /api/banksia-os.
+# super_admin and admin are never scoped here (handled by the early return in
+# the guard). Every other role is denied the families listed in "block".
+_FAM_FINANCE = ("/transactions", "/invoices", "/rent", "/deposits", "/finance")
+_FAM_PII     = ("/tenants", "/tenancies", "/guarantors")
+_FAM_APPS    = ("/applicants", "/submissions")
+_FAM_MAINT   = ("/maintenance", "/contractors", "/orders")
+_FAM_DOCS    = ("/documents", "/entity-documents")
+
+_ROLE_POLICY = {
+    # Finance: money + read tenant context; no applications, no maintenance.
+    "finance":     {"block": _FAM_APPS + _FAM_MAINT,                         "read_only": False},
+    # HMO / STR managers: full ops incl. tenant PII + maintenance; no finance.
+    "hmo_manager": {"block": _FAM_FINANCE,                                   "read_only": False},
+    "str_manager": {"block": _FAM_FINANCE,                                   "read_only": False},
+    # Maintenance: jobs + contractors + read tenant contact; no money, no apps.
+    "maintenance": {"block": _FAM_FINANCE + _FAM_APPS,                       "read_only": False},
+    # Lettings & viewings: applications only; no live-tenant PII, no money.
+    "lettings":    {"block": _FAM_FINANCE + _FAM_PII + _FAM_MAINT + _FAM_DOCS, "read_only": False},
+    # Projects (dev/PM): properties/units + applications; no PII, no money.
+    "projects":    {"block": _FAM_FINANCE + _FAM_PII + _FAM_MAINT + _FAM_DOCS, "read_only": False},
+    # Viewer: read-only dashboards/reports/properties; nothing sensitive.
+    "viewer":      {"block": _FAM_FINANCE + _FAM_PII + _FAM_APPS + _FAM_MAINT + _FAM_DOCS, "read_only": True},
+    # Unknown roles get the most restrictive treatment.
+    "_default":    {"block": _FAM_FINANCE + _FAM_PII + _FAM_APPS + _FAM_MAINT + _FAM_DOCS, "read_only": True},
+}
+
+
 @banksia_os_bp.before_request
 def _require_banksia_auth():
     """All routes in this blueprint require a logged-in session."""
@@ -49,19 +78,22 @@ def _require_banksia_auth():
         return jsonify({"success": False, "error": "Not logged in"}), 401
     request.current_user = user
 
-    # ── Role-based data scoping ──
-    # Only super_admin/admin may access tenant PII and financial data.
-    # Restricted roles (e.g. 'projects') are limited to maintenance, properties
-    # and dashboard context — they are blocked from PII/financial route families.
+    # ── Role-based data scoping (server-side source of truth) ──
+    # Backend mirror of packages/permissions/roles.ts. The UI hides what a role
+    # cannot use; this makes the API refuse it even if the UI is bypassed.
+    # Each role is blocked from whole route families it has no business in.
     role = (user.get("role") or "").lower()
     if role not in ("super_admin", "admin"):
         rel = request.path[len("/api/banksia-os"):] or "/"
-        RESTRICTED_PREFIXES = (
-            "/tenants", "/tenancies", "/guarantors", "/applicants",
-            "/deposits", "/transactions", "/invoices", "/rent",
-            "/documents", "/entity-documents", "/submissions", "/finance",
-        )
-        if rel.startswith(RESTRICTED_PREFIXES):
+        policy = _ROLE_POLICY.get(role, _ROLE_POLICY["_default"])
+        # Read-only roles may only issue GET/HEAD/OPTIONS.
+        if policy["read_only"] and request.method not in ("GET", "HEAD", "OPTIONS"):
+            return jsonify({
+                "success": False,
+                "error": "Your role has read-only access",
+            }), 403
+        # Whole-family blocks (any method).
+        if rel.startswith(policy["block"]):
             return jsonify({
                 "success": False,
                 "error": "You do not have permission to access this data",
@@ -196,6 +228,12 @@ def api_sync_activity():
 
 # ── User helpers ──
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
+
+# Canonical role set — must match app.py VALID_ROLES and the Next.js Role union.
+VALID_ROLES = (
+    "super_admin", "admin", "finance", "hmo_manager", "str_manager",
+    "maintenance", "lettings", "projects", "viewer",
+)
 
 _PBKDF2_ITERATIONS = 210_000  # OWASP floor — must match app.py
 
@@ -6687,12 +6725,14 @@ def api_users():
 def api_add_user():
     user = session.get("user", {})
     role = user.get("role", "")
-    if role not in ("super_admin", "admin"):
-        return json_error("Forbidden — admin or super admin only", 403)
+    # Creating login accounts is super-admin only (was admin+super — a
+    # privilege-escalation path).
+    if role != "super_admin":
+        return json_error("Forbidden — only super admins can create users", 403)
     data = request.get_json()
     username = data.get("username", "").strip()
     password = data.get("password", "").strip()
-    new_role = data.get("role", "admin").strip()
+    new_role = data.get("role", "viewer").strip()
     if not username or not password:
         return json_error("username and password required", 400)
     ok, msg = _validate_password_strength(password)
@@ -6700,13 +6740,11 @@ def api_add_user():
         return json_error(msg, 400)
     if username in _load_users():
         return json_error("A user with that username already exists", 409)
-    if new_role not in ("admin", "super_admin", "projects"):
-        new_role = "admin"
-    # Only super_admin can create other super_admin accounts
-    if new_role == "super_admin" and role != "super_admin":
-        return json_error("Only super admins can create super admin accounts", 403)
+    if new_role not in VALID_ROLES:
+        new_role = "viewer"
     users = _load_users()
-    users[username] = {"password": _hash_password(password), "role": new_role}
+    users[username] = {"password": _hash_password(password), "role": new_role,
+                       "email": data.get("email", "").strip()}
     _save_users(users)
     return json_success({"user": {"username": username, "role": new_role}})
 
@@ -6739,9 +6777,11 @@ def api_update_user(username):
     for f in allowed_fields:
         if f in data:
             users[username][f] = data[f]
-    # Only super admin can change role
+    # Only super admin can change role, and only to a known role.
     if is_super and "role" in data:
-        users[username]["role"] = data["role"]
+        _nr = str(data["role"]).strip()
+        if _nr in VALID_ROLES:
+            users[username]["role"] = _nr
     # Password update / reset.
     # A user may reset their own password; only super_admin may reset ANOTHER user's password.
     if "password" in data and data["password"]:
@@ -6759,16 +6799,12 @@ def api_update_user(username):
 def api_delete_user(username):
     current = session.get("user", {})
     current_role = current.get("role", "")
-    if current_role not in ("super_admin", "admin"):
-        return json_error("Forbidden", 403)
+    # Deleting login accounts is super-admin only.
+    if current_role != "super_admin":
+        return json_error("Forbidden — only super admins can delete users", 403)
     if username == "Sami":
         return json_error("Cannot delete super admin", 400)
     users = _load_users()
-    target = users.get(username, {})
-    target_role = target.get("role", "admin") if isinstance(target, dict) else "admin"
-    # Admins can only delete non-super_admin users
-    if current_role == "admin" and target_role == "super_admin":
-        return json_error("Admins cannot delete super admins", 403)
     if username in users:
         del users[username]
         _save_users(users)

@@ -180,6 +180,13 @@ _login_attempts: dict[str, list[float]] = {}
 MAX_LOGIN_ATTEMPTS = 10
 LOGIN_WINDOW = 300  # 5 minutes
 
+# Canonical role set — must stay in sync with packages/types/src/user.ts
+# and packages/permissions/src/roles.ts on the Next.js side.
+VALID_ROLES = (
+    "super_admin", "admin", "finance", "hmo_manager", "str_manager",
+    "maintenance", "lettings", "projects", "viewer",
+)
+
 import hmac as _hmac
 
 _PBKDF2_ITERATIONS = 210_000  # OWASP-recommended floor for PBKDF2-HMAC-SHA256
@@ -861,24 +868,27 @@ def api_list_users():
 def api_add_user():
     user = session.get("user", {})
     role = user.get("role", "")
-    if role not in ("super_admin", "admin"):
-        return jsonify({"error": "Forbidden — admin or super admin only"}), 403
+    # Creating login accounts is a super-admin-only action. Previously any
+    # 'admin' could mint new accounts (incl. other admins) — a privilege-
+    # escalation path. Locked to super_admin.
+    if role != "super_admin":
+        return jsonify({"error": "Forbidden — only super admins can create users"}), 403
     data = request.get_json()
     username = data.get("username", "").strip()
     password = data.get("password", "").strip()
-    new_role = data.get("role", "admin").strip()
+    new_role = data.get("role", "viewer").strip()
     if not username or not password:
         return jsonify({"error": "username and password required"}), 400
     ok, msg = _validate_password_strength(password)
     if not ok:
         return jsonify({"error": msg}), 400
-    if new_role not in ("admin", "super_admin", "projects"):
-        new_role = "admin"
-    # Only super_admin can create other super_admin accounts
-    if new_role == "super_admin" and role != "super_admin":
-        return jsonify({"error": "Only super admins can create super admin accounts"}), 403
+    if new_role not in VALID_ROLES:
+        new_role = "viewer"
     users = _load_users()
-    users[username] = {"password": _hash_password(password), "role": new_role}
+    if username in users:
+        return jsonify({"error": "A user with that name already exists"}), 409
+    users[username] = {"password": _hash_password(password), "role": new_role,
+                       "email": data.get("email", "").strip()}
     _save_users(users)
     return jsonify({"success": True, "user": {"username": username, "role": new_role}})
 
@@ -928,9 +938,11 @@ def api_update_user(username):
     for f in allowed_fields:
         if f in data:
             users[username][f] = data[f]
-    # Only super admin can change role
+    # Only super admin can change role, and only to a known role.
     if is_super and "role" in data:
-        users[username]["role"] = data["role"]
+        new_role = str(data["role"]).strip()
+        if new_role in VALID_ROLES:
+            users[username]["role"] = new_role
     # Password update — always hash
     if "password" in data and data["password"]:
         users[username]["password"] = _hash_password(data["password"])
@@ -942,16 +954,12 @@ def api_update_user(username):
 def api_delete_user(username):
     current = session.get("user", {})
     current_role = current.get("role", "")
-    if current_role not in ("super_admin", "admin"):
-        return jsonify({"error": "Forbidden"}), 403
+    # Deleting login accounts is super-admin only.
+    if current_role != "super_admin":
+        return jsonify({"error": "Forbidden — only super admins can delete users"}), 403
     if username == "Sami":
         return jsonify({"error": "Cannot delete super admin"}), 400
     users = _load_users()
-    target = users.get(username, {})
-    target_role = target.get("role", "admin") if isinstance(target, dict) else "admin"
-    # Admins can only delete non-super_admin users
-    if current_role == "admin" and target_role == "super_admin":
-        return jsonify({"error": "Admins cannot delete super admins"}), 403
     if username in users:
         del users[username]
         _save_users(users)
