@@ -1,0 +1,85 @@
+{
+  "Sami": {
+    "password": "pbkdf2$210000$02855d6af425dbf1cccbc8f143ebfb51$d52e497f68c1fe3c01fc3d1b661bdad7347b74b6e17897a182d5672cbff86f70",
+    "role": "super_admin",
+    "email": "sami@vervrooms.com",
+    "biography": "CEO at Verv Group"
+  },
+  "Norbert": {
+    "password": "pbkdf2$210000$fd086b7fed8a42ee1284cd523a7ed4f3$78a88a8bc238c4b6e6ab95f367b25e0b26efd341d128d340b9064d0a9118f996",
+    "role": "super_admin",
+    "email": "norbert@vervrooms.com",
+    "phone": "",
+    "date_of_birth": "",
+    "biography": "",
+    "department": "",
+    "position": ""
+  },
+  "Roo": {
+    "password": "pbkdf2$210000$77d6978a3ed683191bc7ce698bc529b5$456d33d493d27d0cd25acd93f54fd18ef83a5d67a7070fc49f52f7e75f26e4d3",
+    "role": "super_admin",
+    "email": "roo@vervrooms.com",
+    "phone": "",
+    "date_of_birth": "",
+    "biography": "COO",
+    "department": "",
+    "position": ""
+  },
+  "Sadman": {
+    "password": "47287260e0b37e50:1507e5e58f4dd4fcb210694f88408dd625dfe84e4a83d603138aa7a6f2e859f0",
+    "role": "super_admin",
+    "email": ""
+  },
+  "Tom": {
+    "password": "46c0193330af30b5:6f2162711d9767db68e8f08eac953ee3f3246252d1317ba4aca60004212c5bd2",
+    "role": "projects",
+    "email": "tom@test.com",
+    "phone": "+44"
+  },
+  "Fareeha": {
+    "password": "ea33091acfe770c4:488afb5f7b4204cda8ee91d4ab4c96342d364edaa127094fdbce0054e3b167b5",
+    "role": "str_manager",
+    "email": "fareeha@vervrooms.com",
+    "phone": "+44"
+  },
+  "Edina": {
+    "password": "6fb6e0427cdd8e56:9b8cabfdaa87757361d60a6ff5db30da8859ce7ff81bb501d639c5ec411bf99f",
+    "role": "hmo_manager",
+    "email": ""
+  },
+  "Waleed": {
+    "password": "378aed7f4bbbec79:d9de7a36fcd22b8a4195682b653ff5b90d7efe72ae7781095d3cc0c579265075",
+    "role": "str_manager",
+    "email": ""
+  },
+  "Dua": {
+    "password": "d25b052baa64bc18:1481b9c1d2e11c8fc1c9bd8337efdea4ce89d2f8bbdb4a188e3e04d13d5dd121",
+    "role": "maintenance",
+    "email": ""
+  },
+  "Nahiyan": {
+    "password": "e0d461a0826a3a8c:7073d2621aa9a3893bb46f5dbcdb323209276ec84521cc979ea2d83f90acb274",
+    "role": "hmo_manager",
+    "email": ""
+  },
+  "Saif": {
+    "password": "a745e19716cc57ab:aaf3cfde04fa6737ce5378fe22f849fbd57e6735b8484c424f1a8ee64cfcde45",
+    "role": "str_manager",
+    "email": ""
+  },
+  "Hafiza": {
+    "password": "b708a0b3a74ecb9f:f328ba493109007697e0f2aebf041afe8fc31511277ddfab8f3638418a7eda70",
+    "role": "lettings",
+    "email": ""
+  },
+  "James": {
+    "password": "08b4b786d4ec75b4:83fb31c1d7066c9504775c456e5bd5328c4392a3ad4a00e6e37f56992565b64c",
+    "role": "lettings",
+    "email": ""
+  },
+  "Rahat": {
+    "password": "49b91c8e297c5d34:55a6a2b220eaff59940d5137289b0c329eaac8d4f4dab6e5b77c3c31dfc2a8c1",
+    "role": "projects",
+    "email": "rahat@vervrooms.com"
+  }
+}

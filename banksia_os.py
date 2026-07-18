@@ -303,6 +303,23 @@ def build_search_clause(fields, search_term):
     return f"({' OR '.join(clauses)})", params
 
 
+def build_order_by(sortable_map, default_clause):
+    """Safe ORDER BY fragment from request args.
+
+    Reads ?sort_by= and ?sort_dir= from the request and returns a trusted SQL
+    ORDER BY expression. `sortable_map` whitelists allowed sort keys → SQL
+    expressions, so no user input is ever interpolated into SQL — this is the
+    only reason it is injection-safe. Falls back to `default_clause` when the
+    requested column isn't whitelisted (or none was requested).
+    """
+    sort_by = request.args.get("sort_by", "").strip()
+    sort_dir = request.args.get("sort_dir", "asc").strip().lower()
+    if sort_by in sortable_map:
+        direction = "DESC" if sort_dir == "desc" else "ASC"
+        return f"{sortable_map[sort_by]} {direction}"
+    return default_clause
+
+
 def api_update_resource(table, item_id):
     """Generic PATCH handler — updates any field on any table by item ID."""
     data = request.get_json()
@@ -3567,6 +3584,13 @@ def api_tenancies():
 
     where = " AND ".join(where_parts)
 
+    order_clause = build_order_by({
+        "ref": "t.ref", "full_address": "t.full_address",
+        "main_tenant_name": "t.main_tenant_name", "status": "t.status",
+        "start_date": "t.start_date", "end_date": "t.end_date",
+        "rent_amount": "t.rent_amount", "property_name": "property_name",
+    }, "t.start_date DESC")
+
     rows, total = paginate(
         f"SELECT t.*, "
         f"(SELECT COALESCE(NULLIF(p.name, 'multi'), p.address_line_1) FROM properties p WHERE p.id = t.property_id) AS property_name, "
@@ -3574,7 +3598,7 @@ def api_tenancies():
         f"(SELECT u.unit_ref FROM units u WHERE u.id = t.unit_id) AS unit_ref, "
         f"(SELECT u.unit_type FROM units u WHERE u.id = t.unit_id) AS unit_type_name, "
         f"t.deposit_registered_amount AS deposit_amount "
-        f"FROM tenancies t WHERE {where} ORDER BY start_date DESC",
+        f"FROM tenancies t WHERE {where} ORDER BY {order_clause}",
         f"SELECT COUNT(*) AS cnt FROM tenancies t WHERE {where}",
         params, page, per_page
     )
@@ -4289,6 +4313,13 @@ def api_tenants():
 
     where = " AND ".join(where_parts)
 
+    order_clause = build_order_by({
+        "last_name": "tn.last_name", "first_name": "tn.first_name",
+        "email": "tn.email", "status": "tn.status",
+        "property_name": "property_name", "rent_amount": "rent_amount",
+        "arrears": "arrears", "created": "tn.created",
+    }, "tn.last_name ASC, tn.first_name ASC")
+
     rows, total = paginate(
         f"SELECT tn.id, tn.arthur_id, tn.arthur_person_id, tn.tenancy_id, tn.unit_id, tn.property_id, "
         f"tn.full_address, tn.title, tn.first_name, tn.last_name, tn.date_of_birth, tn.gender, tn.citizen, "
@@ -4303,7 +4334,7 @@ def api_tenants():
         f"COALESCE((SELECT u2.unit_ref FROM units u2 WHERE u2.id = tn.unit_id), '') AS unit_ref, "
         f"COALESCE((SELECT t2.rent_amount FROM tenancies t2 WHERE t2.id = tn.tenancy_id LIMIT 1), 0) AS rent_amount, "
         f"COALESCE((SELECT SUM(x.amount_outstanding) FROM transactions x WHERE x.tenancy_id = tn.tenancy_id AND x.is_outstanding = 1), 0) AS arrears "
-        f"FROM tenants tn WHERE {where} ORDER BY tn.last_name ASC, tn.first_name ASC",
+        f"FROM tenants tn WHERE {where} ORDER BY {order_clause}",
         f"SELECT COUNT(*) AS cnt FROM tenants WHERE {where}",
         params, page, per_page
     )
@@ -4412,8 +4443,14 @@ def api_guarantors():
         "t.employment_company AS employer_name"
     )
 
+    order_clause = build_order_by({
+        "guarantor_last_name": "t.guarantor_last_name",
+        "guarantor_first_name": "t.guarantor_first_name",
+        "guarantor_email": "t.guarantor_email",
+    }, "t.guarantor_last_name ASC, t.guarantor_first_name ASC")
+
     rows, total = paginate(
-        f"SELECT {base_cols} FROM tenants t WHERE {where} ORDER BY t.guarantor_last_name ASC, t.guarantor_first_name ASC",
+        f"SELECT {base_cols} FROM tenants t WHERE {where} ORDER BY {order_clause}",
         f"SELECT COUNT(*) AS cnt FROM tenants t WHERE {where}",
         params, page, per_page
     )
@@ -4462,6 +4499,12 @@ def api_referencing():
 
     where = " AND ".join(where_parts)
 
+    order_clause = build_order_by({
+        "last_name": "rf.last_name", "first_name": "rf.first_name",
+        "email": "rf.email", "status": "rf.status",
+        "created": "rf.created", "property_name": "property_name",
+    }, "rf.created DESC")
+
     query = (
         "SELECT rf.id, rf.first_name, rf.last_name, rf.email, rf.status, "
         "rf.created, rf.submitted_at, "
@@ -4472,7 +4515,7 @@ def api_referencing():
         "LEFT JOIN applicants a ON rf.applicant_id = a.id "
         "LEFT JOIN properties p ON a.property_id = p.id "
         "LEFT JOIN units u ON a.unit_id = u.id "
-        f"WHERE {where} ORDER BY rf.created DESC"
+        f"WHERE {where} ORDER BY {order_clause}"
     )
 
     count_query = f"SELECT COUNT(*) AS cnt FROM referencing_forms rf WHERE {where}"
@@ -4619,8 +4662,14 @@ def api_transactions():
 
     where = " AND ".join(where_parts)
 
+    order_clause = build_order_by({
+        "date": "date", "amount": "amount", "type": "type",
+        "status": "status", "description": "description",
+        "amount_outstanding": "amount_outstanding",
+    }, "date DESC")
+
     rows, total = paginate(
-        f"SELECT * FROM transactions WHERE {where} ORDER BY date DESC",
+        f"SELECT * FROM transactions WHERE {where} ORDER BY {order_clause}",
         f"SELECT COUNT(*) AS cnt FROM transactions WHERE {where}",
         params, page, per_page
     )
@@ -5069,6 +5118,49 @@ def api_deposits_detail(deposit_id):
         db.close()
 
 
+@banksia_os_bp.route("/deposits/<int:deposit_id>", methods=["PATCH"])
+def api_update_deposit(deposit_id):
+    """PATCH /api/banksia-os/deposits/{id} — update deposit fields."""
+    data = request.get_json(silent=True)
+    if not data:
+        return json_error("No data provided", 400)
+
+    db = get_dict_db()
+    try:
+        deposit = db.execute("SELECT * FROM deposits WHERE id = ?", (deposit_id,)).fetchone()
+        if not deposit:
+            return json_error("Deposit not found", 404)
+
+        real_cols = {r["name"] for r in db.execute("PRAGMA table_info(deposits)").fetchall()}
+        protected_keys = {"id", "created", "modified"}
+
+        set_parts = []
+        params = []
+        for key, val in data.items():
+            if key in protected_keys or key not in real_cols:
+                continue
+            set_parts.append(f"{key} = ?")
+            params.append(val)
+
+        if not set_parts:
+            return json_error("No valid fields to update", 400)
+
+        now = datetime.now(timezone.utc).isoformat()
+        set_parts.append("modified = ?")
+        params.append(now)
+        params.append(deposit_id)
+
+        db.execute(f"UPDATE deposits SET {', '.join(set_parts)} WHERE id = ?", params)
+        db.commit()
+
+        updated = db.execute("SELECT * FROM deposits WHERE id = ?", (deposit_id,)).fetchone()
+        return json_success(updated)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
 # ═══════════════════════════════════════════════
 # RENT CHARGES — Per-month editable schedule
 # ═══════════════════════════════════════════════
@@ -5278,13 +5370,35 @@ def api_search():
             [like_val] * 5
         ).fetchall()
 
+        # Maintenance jobs
+        maintenance = db.execute(
+            "SELECT mj.id, mj.title, mj.reference, mj.address AS full_address, mj.status, "
+            "p.name AS property_name, 'maintenance' AS result_type "
+            "FROM maintenance_jobs mj LEFT JOIN properties p ON mj.property_id = p.id "
+            "WHERE mj.title LIKE ? OR mj.reference LIKE ? OR mj.address LIKE ? "
+            "LIMIT 10",
+            [like_val] * 3
+        ).fetchall()
+
+        # Documents
+        documents = db.execute(
+            "SELECT id, filename, name, related_to AS entity_type, "
+            "'document' AS result_type FROM documents "
+            "WHERE (filename IS NOT NULL AND filename LIKE ?) OR (name IS NOT NULL AND name LIKE ?) "
+            "LIMIT 10",
+            [like_val] * 2
+        ).fetchall()
+
         results = {
             "properties": properties,
             "units": units,
             "tenancies": tenancies,
             "tenants": tenants,
             "applicants": applicants,
-            "total_count": len(properties) + len(units) + len(tenancies) + len(tenants) + len(applicants),
+            "maintenance": maintenance,
+            "documents": documents,
+            "total_count": len(properties) + len(units) + len(tenancies)
+            + len(tenants) + len(applicants) + len(maintenance) + len(documents),
         }
 
         return json_success(results)
@@ -7546,17 +7660,21 @@ def api_property_owners():
     page = int_param(request.args.get("page"))
     per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
     search = request.args.get("search","").strip()
+    order_clause = build_order_by({
+        "name": "name", "company_name": "company_name",
+        "main_contact_name": "main_contact_name", "email": "email",
+    }, "name ASC")
     db = get_dict_db()
     try:
         if search:
             where = "WHERE name LIKE ? OR company_name LIKE ? OR main_contact_name LIKE ?"
             like = f"%{search}%"
             total = db.execute(f"SELECT COUNT(*) AS cnt FROM property_owners {where}", (like,like,like)).fetchone()["cnt"]
-            rows = db.execute(f"SELECT * FROM property_owners {where} ORDER BY name LIMIT ? OFFSET ?",
+            rows = db.execute(f"SELECT * FROM property_owners {where} ORDER BY {order_clause} LIMIT ? OFFSET ?",
                               (like,like,like,per_page,(page-1)*per_page)).fetchall()
         else:
             total = db.execute("SELECT COUNT(*) AS cnt FROM property_owners").fetchone()["cnt"]
-            rows = db.execute("SELECT * FROM property_owners ORDER BY name LIMIT ? OFFSET ?",
+            rows = db.execute(f"SELECT * FROM property_owners ORDER BY {order_clause} LIMIT ? OFFSET ?",
                               (per_page,(page-1)*per_page)).fetchall()
         return json_success(rows, total, page, per_page)
     except Exception as e:
@@ -8163,7 +8281,7 @@ def api_properties_enhanced():
 # 18. INVOICE DETAIL / PAY / CANCEL
 # ═══════════════════════════════════════════════
 
-@banksia_os_bp.route("/invoices/<int:invoice_id>")
+@banksia_os_bp.route("/invoices/<int:invoice_id>", methods=["GET"])
 def api_invoice_detail(invoice_id):
     db = get_dict_db()
     try:
@@ -8178,6 +8296,49 @@ def api_invoice_detail(invoice_id):
                 if prop:
                     inv["property_name"] = prop.get("name") or prop.get("ref") or prop.get("address_line_1")
         return json_success(inv)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/invoices/<int:invoice_id>", methods=["PATCH"])
+def api_update_invoice(invoice_id):
+    """PATCH /api/banksia-os/invoices/{id} — update invoice fields."""
+    data = request.get_json(silent=True)
+    if not data:
+        return json_error("No data provided", 400)
+
+    db = get_dict_db()
+    try:
+        inv = db.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+        if not inv:
+            return json_error("Not found", 404)
+
+        real_cols = {r["name"] for r in db.execute("PRAGMA table_info(invoices)").fetchall()}
+        protected_keys = {"id", "created", "modified"}
+
+        set_parts = []
+        params = []
+        for key, val in data.items():
+            if key in protected_keys or key not in real_cols:
+                continue
+            set_parts.append(f"{key} = ?")
+            params.append(val)
+
+        if not set_parts:
+            return json_error("No valid fields to update", 400)
+
+        now = datetime.now(timezone.utc).isoformat()
+        set_parts.append("modified = ?")
+        params.append(now)
+        params.append(invoice_id)
+
+        db.execute(f"UPDATE invoices SET {', '.join(set_parts)} WHERE id = ?", params)
+        db.commit()
+
+        updated = db.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+        return json_success(updated)
     except Exception as e:
         return json_error(str(e), 500)
     finally:
@@ -8285,8 +8446,14 @@ def api_applicants_list():
 
     where = " AND ".join(where_parts)
 
+    order_clause = build_order_by({
+        "created": "created", "status": "status",
+        "last_name": "last_name", "first_name": "first_name",
+        "email": "email",
+    }, "created DESC")
+
     rows, total = paginate(
-        f"SELECT * FROM applicants WHERE {where} ORDER BY created DESC",
+        f"SELECT * FROM applicants WHERE {where} ORDER BY {order_clause}",
         f"SELECT COUNT(*) AS cnt FROM applicants WHERE {where}",
         params, page, per_page
     )
@@ -9203,7 +9370,7 @@ def api_unit_occupancy(unit_id):
 # ═══════════════════════════════════════════════════════════════
 
 
-@banksia_os_bp.route("/search", methods=["GET"])
+@banksia_os_bp.route("/search/global", methods=["GET"])
 def global_search():
     """
     Global search across all entity types.
