@@ -198,10 +198,28 @@ def _hash_password(password: str) -> str:
     dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, _PBKDF2_ITERATIONS)
     return f"pbkdf2${_PBKDF2_ITERATIONS}${salt.hex()}${dk.hex()}"
 
+def _wrap_legacy_hash(stored_legacy: str) -> str:
+    """Strengthen a legacy salt:sha256 password AT REST without needing the plaintext.
+    Wraps the existing sha256 hex inside PBKDF2 (210k iterations). No user disruption —
+    on the user's next login this collapses to a clean pbkdf2$ via _migrate_password_to_hash.
+    Format: pbkdf2wrap$<iterations>$<wrapsalt_hex>$<dk_hex>$<legacysalt>"""
+    legacy_salt, sha_hex = str(stored_legacy).split(":", 1)
+    wrapsalt = secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", sha_hex.encode(), wrapsalt, _PBKDF2_ITERATIONS)
+    return f"pbkdf2wrap${_PBKDF2_ITERATIONS}${wrapsalt.hex()}${dk.hex()}${legacy_salt}"
+
 def _check_password(password: str, stored: str) -> bool:
-    """Verify against pbkdf2 (current), legacy salt:sha256, or legacy plaintext.
-    Uses constant-time comparison to avoid timing side-channels."""
+    """Verify against pbkdf2 (current), pbkdf2wrap (strengthened legacy), legacy
+    salt:sha256, or legacy plaintext. Constant-time comparison avoids timing leaks."""
     stored = str(stored or "")
+    if stored.startswith("pbkdf2wrap$"):
+        try:
+            _, iters, wrapsalt_hex, dk_hex, legacy_salt = stored.split("$", 4)
+            sha_hex = hashlib.sha256((legacy_salt + password).encode()).hexdigest()
+            dk = hashlib.pbkdf2_hmac("sha256", sha_hex.encode(), bytes.fromhex(wrapsalt_hex), int(iters))
+            return _hmac.compare_digest(dk.hex(), dk_hex)
+        except Exception:
+            return False
     if stored.startswith("pbkdf2$"):
         try:
             _, iters, salt_hex, hash_hex = stored.split("$", 3)
@@ -248,9 +266,20 @@ def _check_rate_limit(ip: str) -> bool:
 def _record_login_attempt(ip: str):
     _login_attempts.setdefault(ip, []).append(time.time())
 
+def _bootstrap_password() -> str:
+    """Default admin password used ONLY when users.json is missing (first-run bootstrap).
+    Read from env; if unset, generate a random one-time password and log it so no
+    secret is ever hardcoded in source."""
+    pw = os.environ.get("BANKSIA_DEFAULT_PASSWORD")
+    if not pw:
+        pw = "Bk-" + secrets.token_urlsafe(12)
+        sys.stderr.write(f"[banksia] BANKSIA_DEFAULT_PASSWORD not set — generated bootstrap admin password: {pw}\n")
+        sys.stderr.flush()
+    return pw
+
 def _load_users():
     if not os.path.exists(USERS_FILE):
-        default_hash = _hash_password("Newpassword1323!")
+        default_hash = _hash_password(_bootstrap_password())
         return {"Sami": {"password": default_hash, "role": "super_admin"}}
     return json.load(open(USERS_FILE))
 

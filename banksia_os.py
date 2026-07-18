@@ -256,7 +256,9 @@ def _validate_password_strength(pw: str):
 
 def _load_users():
     if not os.path.exists(USERS_FILE):
-        return {"Sami": {"password": "Newpassword1323!", "role": "super_admin"}}
+        import secrets as _secrets
+        pw = os.environ.get("BANKSIA_DEFAULT_PASSWORD") or ("Bk-" + _secrets.token_urlsafe(12))
+        return {"Sami": {"password": pw, "role": "super_admin"}}
     return json.load(open(USERS_FILE))
 
 def _save_users(users):
