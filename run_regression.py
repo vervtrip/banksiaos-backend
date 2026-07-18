@@ -23,8 +23,8 @@ from http.cookiejar import CookieJar
 from collections.abc import Mapping
 
 BASE = "http://127.0.0.1:5050"
-DB = "/root/verv-dashboard/banksia_os.db"
-SNAPSHOT = "/root/verv-dashboard/regression_snapshot_20260714_212453.json"
+DB = "/root/banksia-dashboard/banksia_os.db"
+SNAPSHOT = "/root/banksia-dashboard/regression_snapshot_20260714_212453.json"
 PASS, FAIL = 0, 0
 ERRORS = []
 
@@ -715,12 +715,12 @@ else:
 print("\n--- 17. INFRASTRUCTURE ---")
 
 r = subprocess.run(["git", "rev-parse", "HEAD"],
-                   capture_output=True, text=True, cwd="/root/verv-dashboard")
+                   capture_output=True, text=True, cwd="/root/banksia-dashboard")
 commit_hash = r.stdout.strip()[:12] if r.returncode == 0 else "ERROR"
 ok(f"Git commit: {commit_hash}", r.returncode == 0, detail=r.stderr)
 
 r2 = subprocess.run(["git", "tag", "-l", "BANKSIA_OS_STABLE*"],
-                    capture_output=True, text=True, cwd="/root/verv-dashboard")
+                    capture_output=True, text=True, cwd="/root/banksia-dashboard")
 has_tag = "BANKSIA_OS_STABLE_BASELINE_V1" in r2.stdout
 ok(f"Tag: {r2.stdout.strip()}", has_tag, detail=f"tags found: {r2.stdout.strip()}")
 

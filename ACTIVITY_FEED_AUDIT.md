@@ -2,7 +2,7 @@
 
 **Endpoint:** `GET /api/banksia-os/dashboard/activity`
 **Implementation:** `banksia_os.py`, `api_dashboard_activity()` (lines 409–503)
-**DB:** `/root/verv-dashboard/verv_os.db`
+**DB:** `/root/banksia-dashboard/verv_os.db`
 **Audit date:** 2026-07-15
 **Auth:** requires an authenticated session (returns 401 unauthenticated — verified live).
 

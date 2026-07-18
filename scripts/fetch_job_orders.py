@@ -29,7 +29,7 @@ MARKETING_DOMAIN_PARTS = ['members.wayfair', 'em.screwfix', 'reply.ebay', 't.ao.
 def get_db():
     """Connect to the verv dashboard database."""
     import sqlite3
-    conn = sqlite3.connect('/root/verv-dashboard/banksia_os.db')
+    conn = sqlite3.connect('/root/banksia-dashboard/banksia_os.db')
     conn.row_factory = sqlite3.Row
     return conn
 

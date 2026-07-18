@@ -182,7 +182,7 @@ def run_transaction_tests():
     # Test 2: Simulate DB lock — start a slow transaction
     print("\n  [Test 2] PRAGMA verification on live connection:")
     import sqlite3
-    conn = sqlite3.connect("/root/verv-dashboard/banksia_os.db", timeout=5)
+    conn = sqlite3.connect("/root/banksia-dashboard/banksia_os.db", timeout=5)
     pragmas = {}
     for p in ["journal_mode", "synchronous", "foreign_keys", "busy_timeout", "cache_size"]:
         cur = conn.execute(f"PRAGMA {p}")
@@ -194,13 +194,13 @@ def run_transaction_tests():
     # Test 3: Verify teardown rollback works by making a delayed write
     print("\n  [Test 3] Concurrent reads while a write holds a lock (5s busy_timeout test):")
     # Start a write transaction, then immediately read
-    write_conn = sqlite3.connect("/root/verv-dashboard/banksia_os.db", timeout=1)
+    write_conn = sqlite3.connect("/root/banksia-dashboard/banksia_os.db", timeout=1)
     write_conn.execute("BEGIN IMMEDIATE")
     write_conn.execute("UPDATE properties SET notes = 'LOCK_TEST' WHERE id = 1")
     
     start = time.time()
     try:
-        read_conn = sqlite3.connect("/root/verv-dashboard/banksia_os.db", timeout=2)
+        read_conn = sqlite3.connect("/root/banksia-dashboard/banksia_os.db", timeout=2)
         read_conn.execute("SELECT COUNT(*) FROM properties")
         read_conn.close()
         elapsed = time.time() - start
@@ -216,12 +216,12 @@ def run_transaction_tests():
     
     # Test 4: WAL allows concurrent reads during write
     print("\n  [Test 4] WAL concurrent read test:")
-    w_conn = sqlite3.connect("/root/verv-dashboard/banksia_os.db", timeout=5)
+    w_conn = sqlite3.connect("/root/banksia-dashboard/banksia_os.db", timeout=5)
     w_conn.execute("PRAGMA journal_mode=WAL")
     w_conn.execute("BEGIN")
     w_conn.execute("UPDATE properties SET modified = datetime('now') WHERE id = 1")
     
-    r_conn = sqlite3.connect("/root/verv-dashboard/banksia_os.db", timeout=5)
+    r_conn = sqlite3.connect("/root/banksia-dashboard/banksia_os.db", timeout=5)
     r_conn.execute("PRAGMA journal_mode=WAL")
     try:
         count = r_conn.execute("SELECT COUNT(*) FROM properties").fetchone()[0]

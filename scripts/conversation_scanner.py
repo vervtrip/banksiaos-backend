@@ -13,7 +13,7 @@ from datetime import datetime
 # Add parent for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-DB_PATH = "/root/verv-dashboard/banksia_os.db"
+DB_PATH = "/root/banksia-dashboard/banksia_os.db"
 
 # Contractor keywords mapped to names
 CONTRACTOR_KEYWORDS = {
@@ -126,7 +126,7 @@ def scan():
     
     # Get recent observations from priority groups
     # Last indexed observation ID from state file
-    state_file = "/root/verv-dashboard/.ct_state.json"
+    state_file = "/root/banksia-dashboard/.ct_state.json"
     last_id = 0
     if os.path.isfile(state_file):
         with open(state_file) as f:

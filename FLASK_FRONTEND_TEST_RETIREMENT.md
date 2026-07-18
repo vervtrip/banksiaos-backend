@@ -7,7 +7,7 @@
 
 The original Banksia OS frontend was served directly by Flask via `/banksia-os` (templates/banksia_os.html). This has been fully replaced by a Next.js application at `/root/verv-platform/apps/banksia-os/`, served on port 5051 through the Next.js production server and proxied via Traefik.
 
-The old Flask browser regression suite at `/root/verv-dashboard/regression_playwright.py` tested the Flask-rendered SPA. That SPA is no longer the primary user-facing interface.
+The old Flask browser regression suite at `/root/banksia-dashboard/regression_playwright.py` tested the Flask-rendered SPA. That SPA is no longer the primary user-facing interface.
 
 ## Coverage Map
 

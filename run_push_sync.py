@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cron entry point: push pending maintenance jobs to Monday.com."""
 import sys
-sys.path.insert(0, "/root/verv-dashboard")
+sys.path.insert(0, "/root/banksia-dashboard")
 
 from banksia_os_db import get_dict_db
 from monday_push import push_all_pending

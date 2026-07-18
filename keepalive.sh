@@ -2,7 +2,7 @@
 # Banksia OS dashboard keep-alive — restarts the Flask app on port 5050 if it's down.
 # Uses the hermes venv python (has Flask). Runs from cron every 5 min.
 PORT=5050
-DIR=/root/verv-dashboard
+DIR=/root/banksia-dashboard
 PY=/usr/local/lib/hermes-agent/venv/bin/python
 LOG=/tmp/banksia_5050.log
 

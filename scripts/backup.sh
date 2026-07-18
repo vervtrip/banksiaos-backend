@@ -2,7 +2,7 @@
 # Banksia OS — Automated Backup
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BASE_DIR="/root/verv-dashboard"
+BASE_DIR="/root/banksia-dashboard"
 BACKUP_DIR="${BACKUP_DIR:-/root/banksia-backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"

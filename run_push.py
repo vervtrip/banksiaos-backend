@@ -2,11 +2,11 @@
 """Run the Monday push sync — called by cron."""
 import sqlite3
 import sys
-sys.path.insert(0, "/root/verv-dashboard")
+sys.path.insert(0, "/root/banksia-dashboard")
 
 from monday_push import push_all_pending
 
-db = sqlite3.connect("/root/verv-dashboard/banksia_os.db")
+db = sqlite3.connect("/root/banksia-dashboard/banksia_os.db")
 db.row_factory = sqlite3.Row
 
 result = push_all_pending(db)

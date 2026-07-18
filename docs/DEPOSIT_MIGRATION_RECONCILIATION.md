@@ -87,5 +87,5 @@ since been excluded, while the deposit migration targeted only tenancies without
 - **Checksum:** On completion, a SHA-256 checksum (first 16 hex chars) is computed from `deposit_migration_v1|<count>|<total>|<timestamp>`
   and stored in the migration_log record.
 - **Source of data:** Tenancy-level `deposit_registered_amount`, `deposit_scheme`, and `deposit_registered` fields from the `tenancies` table.
-- **Run data migration script:** `/root/verv-dashboard/run_data_migration.py` contains a standalone CLI version of the migration.
+- **Run data migration script:** `/root/banksia-dashboard/run_data_migration.py` contains a standalone CLI version of the migration.
 - **Deposits table schema:** Defined in `verv_os_db.py` section 12.

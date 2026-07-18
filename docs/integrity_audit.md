@@ -1,7 +1,7 @@
 
 # Banksia OS — Database Integrity Audit
 **Generated:** 2026-07-15T20:34:43.441888
-**Database:** /root/verv-dashboard/banksia_os.db
+**Database:** /root/banksia-dashboard/banksia_os.db
 
 ## 1. Table Overview
 | Table | Records | PK Columns | Has created | Has modified | FK Count | Index Count |

@@ -6070,7 +6070,7 @@ except Exception as _e:
 # ── Helper: load users.json ──
 def _load_comment_users():
     try:
-        return json.load(open("/root/verv-dashboard/users.json"))
+        return json.load(open("/root/banksia-dashboard/users.json"))
     except Exception:
         return {}
 
@@ -6101,7 +6101,7 @@ def api_get_current_user():
     username, role = _get_current_user()
     users_data = _load_comment_users()
     user_info = users_data.get(username, {})
-    avatar_url = f"/static/uploads/avatars/{username}.jpg" if username and os.path.isfile(f"/root/verv-dashboard/static/uploads/avatars/{username}.jpg") else None
+    avatar_url = f"/static/uploads/avatars/{username}.jpg" if username and os.path.isfile(f"/root/banksia-dashboard/static/uploads/avatars/{username}.jpg") else None
     return json_success({
         "username": username,
         "name": user_info.get("display_name") or username,
@@ -6139,7 +6139,7 @@ def api_get_comments(entity_type, entity_id):
             author_id = r.get("author_id") or r.get("author", "")
             user_info = users_data.get(author_id, {})
             author_name = user_info.get("display_name") or author_id or r.get("author", "Unknown")
-            avatar_url = f"/static/uploads/avatars/{author_id}.jpg" if author_id and os.path.isfile(f"/root/verv-dashboard/static/uploads/avatars/{author_id}.jpg") else None
+            avatar_url = f"/static/uploads/avatars/{author_id}.jpg" if author_id and os.path.isfile(f"/root/banksia-dashboard/static/uploads/avatars/{author_id}.jpg") else None
             can_delete = (current_user == author_id or current_role == "super_admin")
             try:
                 mp = json.loads(r.get("media_paths") or "[]")
