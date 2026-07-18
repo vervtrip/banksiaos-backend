@@ -49,7 +49,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_for=1)
 
 # ── Single authoritative per-thread DB connection ──
-from verv_os_db import get_db, get_dict_db, _vos_local
+from banksia_os_db import get_db, get_dict_db, _vos_local
 
 # ── Flask teardown: clean up thread-local connection ──
 @app.teardown_appcontext

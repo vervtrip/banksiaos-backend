@@ -23,7 +23,7 @@ from http.cookiejar import CookieJar
 from collections.abc import Mapping
 
 BASE = "http://127.0.0.1:5050"
-DB = "/root/verv-dashboard/verv_os.db"
+DB = "/root/verv-dashboard/banksia_os.db"
 SNAPSHOT = "/root/verv-dashboard/regression_snapshot_20260714_212453.json"
 PASS, FAIL = 0, 0
 ERRORS = []

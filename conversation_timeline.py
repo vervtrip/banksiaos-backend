@@ -17,7 +17,7 @@ import sys
 import re
 from datetime import datetime, timezone
 
-DB_PATH = "/root/verv-dashboard/verv_os.db"
+DB_PATH = "/root/verv-dashboard/banksia_os.db"
 OBS_DB_PATH = "/opt/data/.neo/observation/observation.db"
 
 GROUP_NAMES = {

@@ -4,7 +4,7 @@ Verv OS Schema Update v2 — adds applicant pipeline, access management, propert
 """
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from verv_os_db import get_db, init_db, _lock
+from banksia_os_db import get_db, init_db, _lock
 
 SCHEMA_V2 = """
 CREATE TABLE IF NOT EXISTS applicants (

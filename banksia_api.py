@@ -10,7 +10,7 @@ from flask import Blueprint, jsonify, request, session
 from functools import wraps
 from datetime import datetime, timezone, timedelta
 
-from verv_os_db import *
+from banksia_os_db import *
 
 banksia = Blueprint("banksia", __name__, url_prefix="/api/banksia")
 

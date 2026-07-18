@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flask import Blueprint, jsonify, request, session
 from functools import wraps
 
-from verv_os_db import get_db, get_dict_db, count, dict_from_row, raw_query
+from banksia_os_db import get_db, get_dict_db, count, dict_from_row, raw_query
 
 banksia_os_bp = Blueprint("banksia_os", __name__, url_prefix="/api/banksia-os")
 

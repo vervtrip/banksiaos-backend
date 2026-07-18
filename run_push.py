@@ -6,7 +6,7 @@ sys.path.insert(0, "/root/verv-dashboard")
 
 from monday_push import push_all_pending
 
-db = sqlite3.connect("/root/verv-dashboard/verv_os.db")
+db = sqlite3.connect("/root/verv-dashboard/banksia_os.db")
 db.row_factory = sqlite3.Row
 
 result = push_all_pending(db)

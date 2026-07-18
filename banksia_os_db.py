@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Verv OS Database Layer.
+Banksia OS Database Layer.
 SQLite-backed persistent store mirroring
 the HMO rental operations data model.
 Complete schema with all fields.
@@ -9,7 +9,7 @@ import json, os, sqlite3, time, uuid, threading
 from datetime import datetime, timezone
 from threading import Lock
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "verv_os.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "banksia_os.db")
 _lock = Lock()
 # Per-thread connections for request-scoped use
 _vos_local = threading.local()

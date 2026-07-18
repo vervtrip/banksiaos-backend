@@ -17,7 +17,7 @@ import argparse, json, os, subprocess, sys, time
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from verv_os_db import (
+from banksia_os_db import (
     insert, update, get_by_field, get_db, raw_execute,
     count, init_db, dict_from_row
 )

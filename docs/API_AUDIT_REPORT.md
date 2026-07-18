@@ -1,7 +1,7 @@
 # Banksia OS Backend API Audit Report
 
 **Date**: 2026-07-16  
-**DB**: `/root/verv-dashboard/verv_os.db`  
+**DB**: `/root/verv-dashboard/banksia_os.db`  
 **Source**: `/root/verv-dashboard/banksia_os.py`, `/root/verv-dashboard/banksia_api.py`, `/root/verv-dashboard/verv_os_db.py`, `/root/verv-dashboard/referencing_api.py`
 
 ---

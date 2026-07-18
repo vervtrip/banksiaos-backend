@@ -12,7 +12,7 @@ import sys
 import os
 from datetime import datetime, timezone
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "verv_os.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "banksia_os.db")
 
 passed = 0
 failed = 0

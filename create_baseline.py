@@ -16,7 +16,7 @@ import json, os, sqlite3, subprocess, sys, hashlib, shutil, time
 from datetime import datetime, timezone
 
 BASE = "/root/verv-dashboard"
-DB_PATH = os.path.join(BASE, "verv_os.db")
+DB_PATH = os.path.join(BASE, "banksia_os.db")
 NOW = datetime.now(timezone.utc)
 TS = NOW.strftime("%Y%m%d_%H%M%S")
 

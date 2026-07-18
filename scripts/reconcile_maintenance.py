@@ -16,7 +16,7 @@ import os, sys, json, re
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from verv_os_db import get_dict_db
+from banksia_os_db import get_dict_db
 
 REPORT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs")
 os.makedirs(REPORT_DIR, exist_ok=True)

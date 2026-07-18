@@ -3,7 +3,7 @@
 import sys
 sys.path.insert(0, "/root/verv-dashboard")
 
-from verv_os_db import get_dict_db
+from banksia_os_db import get_dict_db
 from monday_push import push_all_pending
 
 db = get_dict_db()

@@ -28,8 +28,8 @@ import sys
 import threading
 from datetime import datetime, timezone
 
-# ── Same DB path as verv_os_db.py ──────────────────────────────────
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "verv_os.db")
+# ── Same DB path as banksia_os_db.py ──────────────────────────────────
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "banksia_os.db")
 
 
 def get_conn():
@@ -60,7 +60,7 @@ def create_deposits_table(conn, dry_run: bool) -> str:
 
     # The table DDL is defined here so this script is self-contained.
     # Note: We intentionally skip CREATE INDEX here because the indexes
-    # are managed by verv_os_db.py's SCHEMA_SQL / init_db(). If the table
+    # are managed by banksia_os_db.py's SCHEMA_SQL / init_db(). If the table
     # didn't exist yet, it means init_db() hasn't been called with the
     # latest schema, so we create the table here but don't duplicate index
     # creation — init_db() will add them when called.
@@ -470,7 +470,7 @@ def main():
 
     if not os.path.exists(DB_PATH):
         print(f"Error: Database not found at {DB_PATH}")
-        print("Run 'python verv_os_db.py' first to initialise the database.")
+        print("Run 'python banksia_os_db.py' first to initialise the database.")
         sys.exit(1)
 
     report = run_data_migration(dry_run=args.dry_run)

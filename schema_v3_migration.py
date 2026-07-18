@@ -8,7 +8,7 @@ Schema v3 — Polymorphic Entity Documents system.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
-from verv_os_db import get_db, get_dict_db, DB_PATH
+from banksia_os_db import get_db, get_dict_db, DB_PATH
 
 
 def migrate():

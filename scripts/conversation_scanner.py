@@ -13,7 +13,7 @@ from datetime import datetime
 # Add parent for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-DB_PATH = "/root/verv-dashboard/verv_os.db"
+DB_PATH = "/root/verv-dashboard/banksia_os.db"
 
 # Contractor keywords mapped to names
 CONTRACTOR_KEYWORDS = {

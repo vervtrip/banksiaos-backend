@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ["REFERENCING_EMAIL_DRYRUN"] = "1"
 
 import app as appmod
-from verv_os_db import get_db
+from banksia_os_db import get_db
 
 PASS, FAIL = [], []
 def ok(name, cond, detail=""):

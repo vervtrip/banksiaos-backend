@@ -29,7 +29,7 @@ STOP_WORDS = {'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'for', 'on', 'at'
 
 def get_db():
     """Connect to the verv dashboard database to get job info."""
-    db_path = '/root/verv-dashboard/verv_os.db'
+    db_path = '/root/verv-dashboard/banksia_os.db'
     import sqlite3
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row

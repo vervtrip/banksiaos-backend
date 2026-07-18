@@ -8,7 +8,7 @@ import os, json, shutil, uuid, io
 from datetime import datetime, date
 from docx import Document
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
-from verv_os_db import get_dict_db
+from banksia_os_db import get_dict_db
 
 DOCUMENTS_DIR = os.path.join(os.path.dirname(__file__), "documents")
 TEMPLATES_DIR = os.path.join(DOCUMENTS_DIR, "templates")

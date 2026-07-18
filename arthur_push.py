@@ -23,7 +23,7 @@ Verified capabilities (2026-07-11):
 """
 import os, json, time, subprocess, sqlite3, argparse, datetime
 
-DB = os.path.join(os.path.dirname(__file__), "verv_os.db")
+DB = os.path.join(os.path.dirname(__file__), "banksia_os.db")
 ARTHUR_TOKEN_FILE = "/root/.hermes/state/arthur_token.json"
 BASE = "https://api.arthuronline.co.uk/v2"
 
@@ -115,7 +115,7 @@ def _log_conflict(con, table, arthur_id, kind, detail):
 def push_dirty(table, dry_run=True, limit=None):
     """Push every sync_dirty row of `table` to Arthur, verifying each write.
     Clears the dirty flag ONLY on a fully-confirmed write."""
-    DB = os.environ.get("VERV_DB_PATH", os.path.join(os.path.dirname(__file__), "verv_os.db"))
+    DB = os.environ.get("VERV_DB_PATH", os.path.join(os.path.dirname(__file__), "banksia_os.db"))
     fmap = FIELD_MAP.get(table)
     con = sqlite3.connect(DB, timeout=30)
     con.execute("PRAGMA busy_timeout=5000")

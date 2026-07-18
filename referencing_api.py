@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flask import Blueprint, jsonify, request, session as flask_session, send_file
 from functools import wraps
 from werkzeug.utils import secure_filename
-from verv_os_db import get_db, get_dict_db, dict_from_row
+from banksia_os_db import get_db, get_dict_db, dict_from_row
 
 referencing_bp = Blueprint("referencing", __name__, url_prefix="/api/referencing")
 

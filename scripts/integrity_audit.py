@@ -17,7 +17,7 @@ import sys
 import sqlite3
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "verv_os.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "banksia_os.db")
 REPORT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "integrity_audit.md")
 os.makedirs(os.path.dirname(REPORT_PATH), exist_ok=True)
 

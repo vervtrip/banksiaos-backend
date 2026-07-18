@@ -3,7 +3,7 @@
 import sys
 sys.path.insert(0, '/root/verv-dashboard')
 from monday_push import push_all_pending
-from verv_os_db import get_db
+from banksia_os_db import get_db
 
 db = get_db()
 result = push_all_pending(db)

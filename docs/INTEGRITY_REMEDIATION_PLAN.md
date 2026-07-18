@@ -2,7 +2,7 @@
 
 **Generated:** 2026-07-15T20:35:00 UTC  
 **Source:** integrity_audit.md (audit run 2026-07-15T20:34:43)  
-**Database:** /root/verv-dashboard/verv_os.db  
+**Database:** /root/verv-dashboard/banksia_os.db  
 
 ## Overview
 
