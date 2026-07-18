@@ -139,8 +139,8 @@ def add_cache_headers(response):
     return response
 
 
-# ── Application start time for uptime tracking ──
-_start_time = datetime.now(timezone.utc)
+# ── Application start time for uptime tracking (float for consistent arithmetic) ──
+APP_START = time.time()
 
 
 # ── Health endpoint (no auth required) ──
@@ -168,7 +168,7 @@ def api_health():
     return jsonify({
         "status": "healthy" if db_ok else "degraded",
         "timestamp": now.isoformat(),
-        "uptime_seconds": int((now - _start_time).total_seconds()),
+        'uptime_seconds': int(time.time() - APP_START),
         "database": {
             "connected": db_ok,
             "size_bytes": db_size,
