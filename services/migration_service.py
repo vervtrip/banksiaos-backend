@@ -112,6 +112,15 @@ MIGRATIONS = {
         CREATE INDEX IF NOT EXISTS idx_notifications_username
         ON notifications(username)
     """)),
+
+    8: ("Two-sided signing — team countersign columns + index", lambda db: _run_safe(db, """
+        ALTER TABLE esignature_requests ADD COLUMN team_signer_name TEXT DEFAULT NULL
+    """)),
+
+    9: ("Add remaining countersign columns", lambda db: _run(db, """
+        ALTER TABLE esignature_requests ADD COLUMN team_pdf_signed_path TEXT DEFAULT NULL;
+        CREATE INDEX IF NOT EXISTS idx_esign_team_token ON esignature_requests(team_token)
+    """)),
 }
 
 
@@ -122,3 +131,9 @@ def _run_safe(db, sql):
         db.commit()
     except Exception:
         db.rollback()
+
+
+def _run(db, sql):
+    """Execute SQL, raising errors."""
+    db.executescript(sql)
+    db.commit()

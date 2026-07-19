@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Countersign Document — Team Countersign Banksia OS</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Caveat:wght@600&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,sans-serif;background:#f1f5f9;color:#1e293b;-webkit-font-smoothing:antialiased;min-height:100vh}
+.hero{background:#1e293b;color:#fff;padding:26px 20px}
+.hero .wrap{max-width:680px;margin:0 auto}
+.hero h1{font-size:20px;font-weight:800}
+.hero p{font-size:13px;color:#cbd5e1;margin-top:3px}
+.wrap{max-width:680px;margin:0 auto;padding:24px 20px 80px}
+.card{background:#fff;border:1px solid #e8edf3;border-radius:16px;box-shadow:0 1px 3px rgba(15,23,42,.05);padding:26px;margin-top:-30px}
+.doc-meta{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px;margin-bottom:22px}
+.doc-meta .k{font-size:11px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.doc-meta .v{font-size:14px;font-weight:600;margin-top:2px}
+h2{font-size:15px;font-weight:700;margin:22px 0 10px}
+.tabsw{display:flex;gap:4px;background:#f1f5f9;padding:4px;border-radius:9px;width:fit-content;margin-bottom:14px}
+.tsw{padding:7px 16px;border-radius:6px;font-size:13px;font-weight:600;color:#64748b;cursor:pointer}
+.tsw.active{background:#fff;color:#1e293b;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+#padWrap{border:2px dashed #cbd5e1;border-radius:12px;background:#fafbfc;position:relative}
+canvas{display:block;width:100%;height:180px;border-radius:12px;touch-action:none;cursor:crosshair}
+.padhint{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#cbd5e1;font-size:14px;pointer-events:none}
+.clearbtn{position:absolute;top:10px;right:12px;font-size:12px;color:#64748b;cursor:pointer;background:#fff;border:1px solid #e2e8f0;padding:4px 10px;border-radius:6px}
+#typedWrap input{width:100%;padding:16px 18px;border:2px solid #e2e8f0;border-radius:12px;font-family:'Caveat',cursive;font-size:34px;color:#1e293b;outline:none;text-align:center}
+#typedWrap input:focus{border-color:#6366f1}
+.consent{display:flex;gap:10px;align-items:flex-start;margin:22px 0;padding:14px;background:#f8fafc;border-radius:10px}
+.consent input{margin-top:2px;width:18px;height:18px;accent-color:#6366f1}
+.consent label{font-size:12.5px;color:#475569;line-height:1.5}
+.btn{width:100%;padding:15px;border-radius:12px;background:#6366f1;color:#fff;font-size:15px;font-weight:700;border:none;cursor:pointer;font-family:inherit}
+.btn:hover{background:#4f46e5}.btn:disabled{background:#cbd5e1;cursor:not-allowed}
+.legal{font-size:11px;color:#94a3b8;text-align:center;margin-top:14px;line-height:1.5}
+.done{text-align:center;padding:40px 20px}
+.done .big{font-size:54px;margin-bottom:12px}
+.done h2{font-size:20px;margin-bottom:6px}
+.done p{color:#64748b;font-size:14px}
+.state{text-align:center;padding:60px 20px;color:#94a3b8}
+@media(max-width:560px){.doc-meta{grid-template-columns:1fr}}
+.info-box{padding:14px;background:#f0fdf4;border-radius:10px;margin-bottom:20px;font-size:12.5px;color:#065f46;line-height:1.6;border:1px solid #bbf7d0}.info-box strong{color:#047857}
+</style>
+</head>
+<body>
+<div class="hero"><div class="wrap"><h1>Banksia OS</h1><p>Team countersignature</p></div></div>
+<div class="wrap">
+  <div class="card" id="card"><div class="state">Loading countersign request...</div></div>
+</div>
+<script>
+const TOKEN="{{ token }}";
+const API='/api/referencing';
+let mode='draw', hasDrawn=false, ctx, canvas, req;
+
+async function load(){
+  try{
+    const r=await fetch(`${API}/esignature/team-sign/${TOKEN}`);
+    const j=await r.json();
+    if(!r.ok||!j.success){document.getElementById('card').innerHTML=`<div class="state">${(j.error||'This signing link is invalid or has expired.')}</div>`;return;}
+    req=j.data;
+    if(req.status==='completed'||req.status==='signed'){renderDone();return;}
+    render();
+  }catch(e){document.getElementById('card').innerHTML=`<div class="state">Unable to load countersign request. Please try again.</div>`;}
+}
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+function render(){
+  document.getElementById('card').innerHTML=`
+    <div class="doc-meta">
+      <div><div class="k">Document</div><div class="v">${esc(req.document_title)}</div></div>
+      <div><div class="k">Type</div><div class="v">${esc((req.document_type||'').replace(/_/g,' '))}</div></div>
+      <div><div class="k">Signer</div><div class="v">${esc(req.created_for)}</div></div>
+      <div><div class="k">Email</div><div class="v">${esc(req.created_for_email)}</div></div>
+    </div>
+    <h2>Add your countersignature</h2>
+    <div class="tabsw">
+      <div class="tsw active" id="tsw-draw" onclick="setMode('draw')">Draw</div>
+      <div class="tsw" id="tsw-type" onclick="setMode('type')">Type</div>
+    </div>
+    <div id="drawWrap">
+      <div id="padWrap">
+        <span class="padhint" id="padhint">Sign here with your mouse or finger</span>
+        <span class="clearbtn" onclick="clearPad()">Clear</span>
+        <canvas id="pad"></canvas>
+      </div>
+    </div>
+    <div id="typedWrap" style="display:none"><input id="typedName" placeholder="Type your full name" oninput="typedChange()"></div>
+    <div class="consent">
+      <input type="checkbox" id="consent">
+      <label for="consent">I confirm my authority to countersign this document on behalf of Banksia, and I consent to electronic signing. ${esc(req.created_for)}.</label>
+    </div>
+    <button class="btn" id="submitBtn" onclick="submitSig()">Countersign Document</button>
+    <div class="legal">Your IP address and device will be recorded in the audit trail. A merged PDF with both signatures will be generated.</div>`;
+  setupCanvas();
+}
+
+function setupCanvas(){
+  canvas=document.getElementById('pad');
+  const r=canvas.getBoundingClientRect();
+  canvas.width=r.width*2;canvas.height=180*2;
+  ctx=canvas.getContext('2d');ctx.scale(2,2);
+  ctx.strokeStyle='#1e293b';ctx.lineWidth=2.2;ctx.lineCap='round';ctx.lineJoin='round';
+  let drawing=false,lx,ly;
+  const pos=e=>{const b=canvas.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return[t.clientX-b.left,t.clientY-b.top];};
+  const start=e=>{drawing=true;[lx,ly]=pos(e);hasDrawn=true;document.getElementById('padhint').style.display='none';e.preventDefault();};
+  const move=e=>{if(!drawing)return;const[x,y]=pos(e);ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(x,y);ctx.stroke();[lx,ly]=[x,y];e.preventDefault();};
+  const end=()=>{drawing=false;};
+  canvas.addEventListener('mousedown',start);canvas.addEventListener('mousemove',move);window.addEventListener('mouseup',end);
+  canvas.addEventListener('touchstart',start,{passive:false});canvas.addEventListener('touchmove',move,{passive:false});canvas.addEventListener('touchend',end);
+}
+function setMode(m){mode=m;document.getElementById('tsw-draw').classList.toggle('active',m==='draw');document.getElementById('tsw-type').classList.toggle('active',m==='type');document.getElementById('drawWrap').style.display=m==='draw'?'':'none';document.getElementById('typedWrap').style.display=m==='type'?'':'none';}
+function clearPad(){ctx.clearRect(0,0,canvas.width,canvas.height);hasDrawn=false;document.getElementById('padhint').style.display='';}
+function typedChange(){}
+
+async function submitSig(){
+  if(!document.getElementById('consent').checked){alert('Please tick the consent box to continue.');return;}
+  let sig='';
+  if(mode==='draw'){if(!hasDrawn){alert('Please draw your signature.');return;}sig=canvas.toDataURL('image/png');}
+  else{sig=document.getElementById('typedName').value.trim();if(!sig){alert('Please type your name.');return;}}
+  const btn=document.getElementById('submitBtn');btn.disabled=true;btn.textContent='Countersigning…';
+  try{
+    const r=await fetch(`${API}/esignature/team-sign/${TOKEN}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({consent:true,signature:sig})});
+    const j=await r.json();
+    if(!r.ok||!j.success)throw new Error(j.error||'Countersign failed');
+    renderDone();
+  }catch(e){alert(e.message);btn.disabled=false;btn.textContent='Countersign Document';}
+}
+
+function renderDone(){
+  document.getElementById('card').innerHTML=`<div class="done"><div class="big">✅</div><h2>Document Countersigned</h2><p>Thank you. Your countersignature has been recorded alongside the applicant&#39;s signature. A merged certified copy has been generated.</p></div>`;
+}
+// Countersign-specific: info box added in render()
+load();
+</script>
+</body>
+</html>

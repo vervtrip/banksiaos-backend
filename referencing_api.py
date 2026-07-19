@@ -479,11 +479,21 @@ def api_get_form(form_id):
             [form_id]
         ).fetchall() if is_team else []
 
+        # Include esignature requests for this form
+        esignatures = db.execute(
+            "SELECT id, document_type, document_title, status, created_for, created_for_email, "
+            "created, sent_at, viewed_at, signed_at, completed_at, "
+            "team_signer_name, team_signed_at "
+            "FROM esignature_requests WHERE form_id = ? ORDER BY created DESC",
+            [form_id]
+        ).fetchall() if is_team else []
+
         return json_success({
             "form": form,
             "documents": documents,
             "sections": sections,
-            "checks": checks
+            "checks": checks,
+            "esignatures": esignatures,
         })
     finally:
         db.close()
@@ -694,6 +704,71 @@ def api_update_form_status(form_id):
         )
         db.commit()
         updated = db.execute("SELECT * FROM referencing_forms WHERE id = ?", [form_id]).fetchone()
+
+        # ── Auto-create e-signature on approval ──
+        if status == "approved":
+            try:
+                form = updated
+                signer_name = f"{form.get('first_name','')} {form.get('last_name','')}".strip() or "Tenant"
+                signer_email = form.get('email', '')
+                applicant_id = form.get('applicant_id')
+
+                if signer_email:
+                    # Get property info
+                    prop_name = ""
+                    unit_ref = ""
+                    if applicant_id:
+                        app = db.execute("SELECT property_id, unit_id FROM applicants WHERE id = ?", [applicant_id]).fetchone()
+                        if app:
+                            prop_row = db.execute("SELECT name, address_line_1 FROM properties WHERE id = ?", [app['property_id']]).fetchone()
+                            if prop_row:
+                                prop_name = prop_row.get('name') or prop_row.get('address_line_1', '')
+                            unit_row = db.execute("SELECT ref FROM units WHERE id = ?", [app['unit_id']]).fetchone()
+                            if unit_row:
+                                unit_ref = unit_row.get('ref', '')
+
+                    # Determine template — use first available tenancy_agreement template
+                    tmpl = db.execute(
+                        "SELECT id FROM document_templates WHERE document_type = 'tenancy_agreement' ORDER BY id DESC LIMIT 1"
+                    ).fetchone()
+                    template_id = str(tmpl['id']) if tmpl else None
+
+                    # Create the esign request
+                    import uuid
+                    from datetime import datetime, timezone, timedelta
+                    signer_token = uuid.uuid4().hex[:32]
+                    team_token = uuid.uuid4().hex[:32]
+
+                    team_name = _current_username() or "Banksia Team"
+                    team_email = (db.execute("SELECT email FROM users WHERE username = ?", [_current_username()]).fetchone() or {}).get("email", "team@banksialondon.com")
+
+                    db.execute(
+                        """INSERT INTO esignature_requests
+                           (form_id, document_type, document_title, status,
+                            created_for, created_for_email, signer_token, expires_at, created_by,
+                            template_id, team_signer_name, team_signer_email, team_token)
+                        VALUES (?, 'tenancy_agreement', 'Tenancy Agreement', 'draft',
+                                ?, ?, ?, ?, ?,
+                                ?, ?, ?, ?)""",
+                        [form['id'],
+                         signer_name, signer_email, signer_token,
+                         (datetime.now(timezone.utc) + timedelta(days=14)).isoformat(),
+                         _current_username(),
+                         template_id, team_name, team_email, team_token]
+                    )
+                    esign_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()['rid']
+
+                    db.execute(
+                        "INSERT INTO esignature_audit_log (request_id, event_type, event_detail) VALUES (?, 'created', ?)",
+                        [esign_id, f"Auto-created on referencing form #{form['id']} approval"]
+                    )
+
+                    # Send the esign request
+                    new_req = db.execute("SELECT * FROM esignature_requests WHERE id = ?", [esign_id]).fetchone()
+                    _deliver_esignature(db, new_req, actual_send=True)
+            except Exception:
+                pass  # Don't fail approval if esign creation errors
+
         return json_success(updated)
     finally:
         db.close()
@@ -1163,7 +1238,16 @@ def run_cross_referencing_checks(form, documents, analyses=None):
 @referencing_bp.route("/esignature/create", methods=["POST"])
 @require_team_auth
 def api_create_esignature():
-    """Create a new e-signature request."""
+    """Create a new e-signature request with two-sided signing support.
+
+    Two-sided flow:
+      1. This endpoint creates the request with TWO tokens (signer + team countersign)
+      2. Email goes to tenant first with their signing link
+      3. After tenant signs, team can countersign via /esignature/team-sign/<token>
+      4. Merged PDF includes both signatures with audit trail
+
+    Accepts template_id + layout_data for generating via template editor.
+    """
     data = request.get_json() or {}
     form_id = data.get("form_id")
     tenancy_id = data.get("tenancy_id")
@@ -1171,37 +1255,53 @@ def api_create_esignature():
     document_title = data.get("document_title", "Tenancy Agreement")
     signer_name = data.get("signer_name", "").strip()
     signer_email = data.get("signer_email", "").strip()
+    template_id = data.get("template_id")
+    layout_data = data.get("layout_data")
+
+    # Team countersign details
+    team_name = data.get("team_name", "").strip()
+    team_email = data.get("team_email", "").strip()
+    is_two_sided = bool(team_name and team_email)
 
     if not signer_name or not signer_email:
         return json_error("Signer name and email are required")
 
-    # Generate unique signer token
+    # Generate tokens
     signer_token = generate_token()
+    team_token = generate_token() if is_two_sided else None
     expires_at = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
 
     db = get_dict_db()
     try:
         db.execute(
-            """INSERT INTO esignature_requests (form_id, tenancy_id, document_type, document_title, status,
-               created_for, created_for_email, signer_token, expires_at, created_by)
-            VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)""",
-            [form_id, tenancy_id, document_type, document_title, signer_name, signer_email, signer_token, expires_at, _current_username()]
+            """INSERT INTO esignature_requests
+               (form_id, tenancy_id, document_type, document_title, status,
+                created_for, created_for_email, signer_token, expires_at, created_by,
+                template_id, layout_data, team_signer_name, team_signer_email, team_token)
+            VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [form_id, tenancy_id, document_type, document_title,
+             signer_name, signer_email, signer_token, expires_at, _current_username(),
+             template_id, json.dumps(layout_data) if layout_data else None,
+             team_name if is_two_sided else None,
+             team_email if is_two_sided else None,
+             team_token]
         )
         req_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
 
         # Log audit entry
+        created_detail = f"Created by {_current_username()} for {signer_name}"
+        if is_two_sided:
+            created_detail += f" with team countersign for {team_name}"
         db.execute(
             "INSERT INTO esignature_audit_log (request_id, event_type, event_detail, ip_address, user_agent) VALUES (?, 'created', ?, ?, ?)",
-            [req_id, f"Created by {_current_username()}", request.remote_addr or '', request.headers.get("User-Agent", "")]
+            [req_id, created_detail, request.remote_addr or '', request.headers.get("User-Agent", "")]
         )
 
         delivery = None
-        # One-step "create & send" — email the signing link straight away.
         if data.get("send"):
             req_row = db.execute("SELECT * FROM esignature_requests WHERE id = ?", [req_id]).fetchone()
             ok, delivery = _deliver_esignature(db, req_row, actual_send=True)
             if not ok:
-                # Keep the draft — team can retry send — but surface the failure.
                 db.commit()
                 request_data = db.execute("SELECT * FROM esignature_requests WHERE id = ?", [req_id]).fetchone()
                 return json_success(request_data, delivery=delivery, warning="Request created as draft but email delivery failed")
@@ -1349,25 +1449,188 @@ def api_esignature_sign(token):
                 f.write(f"Document: {req['document_title']}\nSigner: {req['created_for']}\n")
                 f.write(f"Signed At: {datetime.now(timezone.utc).isoformat()}\nError: {pdf_err}\n")
 
+        # Two-sided signing: applicant signs first, then team countersigns
+        has_team = bool(req.get("team_token"))
+        new_status = "applicant_signed" if has_team else "completed"
+
         db.execute(
-            """UPDATE esignature_requests SET status = 'completed', signed_at = datetime('now'), completed_at = datetime('now'), 
+            """UPDATE esignature_requests SET status = ?, signed_at = datetime('now'),
                ip_address = ?, user_agent = ?, pdf_signed_path = ? WHERE id = ?""",
-            [request.remote_addr or '', request.headers.get("User-Agent", ""), signed_path, req["id"]]
+            [new_status, request.remote_addr or '', request.headers.get("User-Agent", ""), signed_path, req["id"]]
         )
 
         db.execute(
             "INSERT INTO esignature_audit_log (request_id, event_type, event_detail, ip_address, user_agent) VALUES (?, 'signed', ?, ?, ?)",
-            [req["id"], "Document signed electronically", request.remote_addr or '', request.headers.get("User-Agent", "")]
+            [req["id"], f"Signed by {req['created_for']} ({req['created_for_email']})", request.remote_addr or '', request.headers.get("User-Agent", "")]
         )
 
-        db.execute(
-            "INSERT INTO esignature_audit_log (request_id, event_type, event_detail) VALUES (?, 'completed', ?)",
-            [req["id"], "E-signature process completed"]
-        )
+        if has_team:
+            db.execute(
+                "INSERT INTO esignature_audit_log (request_id, event_type, event_detail) VALUES (?, 'awaiting_countersign', ?)",
+                [req["id"], f"Awaiting countersignature from {req['team_signer_name']}"]
+            )
+            resp = {"status": "applicant_signed", "message": "Signed successfully. Awaiting team countersignature.", "requires_countersign": True}
+        else:
+            db.execute(
+                "INSERT INTO esignature_audit_log (request_id, event_type, event_detail) VALUES (?, 'completed', ?)",
+                [req["id"], "E-signature process completed"]
+            )
+            resp = {"status": "completed", "message": "Document signed successfully."}
 
         db.commit()
+        return json_success(resp)
+    except Exception as e:
+        db.rollback()
+        return json_error(str(e), 500)
+    finally:
+        db.close()
 
-        return json_success({"status": "completed", "message": "Document signed successfully"})
+
+@referencing_bp.route("/esignature/team-sign/<token>", methods=["GET"])
+def api_esignature_team_view(token):
+    """View team countersign request."""
+    db = get_dict_db()
+    try:
+        req = db.execute("SELECT * FROM esignature_requests WHERE team_token = ?", [token]).fetchone()
+        if not req:
+            return json_error("Invalid or expired countersign link", 404)
+        if req["status"] != "applicant_signed":
+            return json_error("Applicant has not signed yet or signing is already complete", 400)
+        return json_success(req)
+    finally:
+        db.close()
+
+
+@referencing_bp.route("/esignature/team-sign/<token>", methods=["POST"])
+def api_esignature_team_sign(token):
+    """Team member countersigns after applicant has signed."""
+    data = request.get_json() or {}
+    consent = data.get("consent", False)
+    signature_data = data.get("signature", "")
+
+    if not consent:
+        return json_error("You must consent to electronic signing")
+    if not signature_data:
+        return json_error("Signature is required")
+
+    db = get_dict_db()
+    try:
+        req = db.execute("SELECT * FROM esignature_requests WHERE team_token = ?", [token]).fetchone()
+        if not req:
+            return json_error("Invalid countersign link", 404)
+        if req["status"] != "applicant_signed":
+            return json_error("Applicant has not signed yet or countersign already completed", 400)
+
+        signed_ts = datetime.now(timezone.utc).isoformat()
+
+        # Generate merged PDF with both signatures
+        if req.get("pdf_signed_path") and os.path.exists(req["pdf_signed_path"]):
+            merged_filename = f"merged_{uuid.uuid4().hex}.pdf"
+            merged_path = os.path.join(SIGNED_DIR, merged_filename)
+            try:
+                pdf_doc = fitz.open(req["pdf_signed_path"])
+                page = pdf_doc[-1]  # Add to last page
+                page_height = page.rect.height
+
+                # Draw team signature overlay on a new page
+                pdf_doc.new_page(width=595, height=842)
+                new_page = pdf_doc[-1]
+
+                NAVY = (0.117, 0.161, 0.231)
+                GREY = (0.42, 0.45, 0.50)
+
+                new_page.insert_text((40, 60), "TEAM COUNTERSIGNATURE", fontname="hebo", fontsize=14, color=NAVY)
+                new_page.insert_text((40, 85), f"Countersigned by: {req.get('team_signer_name', 'Authorised Signatory')}", fontname="helv", fontsize=11, color=NAVY)
+                new_page.insert_text((40, 105), f"Email: {req.get('team_signer_email', '')}", fontname="helv", fontsize=9, color=GREY)
+                new_page.insert_text((40, 125), f"Countersigned at: {signed_ts}", fontname="helv", fontsize=9, color=GREY)
+                new_page.insert_text((40, 145), f"IP: {request.remote_addr or ''}", fontname="helv", fontsize=9, color=GREY)
+
+                # Signature block
+                sig_rect = fitz.Rect(40, 170, 300, 260)
+                new_page.draw_rect(sig_rect, color=(0.85, 0.87, 0.90), width=1)
+                new_page.insert_text((48, 190), "Authorised Signatory", fontname="hebo", fontsize=9, color=GREY)
+
+                embedded = False
+                if isinstance(signature_data, str) and signature_data.startswith("data:image"):
+                    try:
+                        import base64 as b64mod
+                        b64 = signature_data.split(",", 1)[1]
+                        img = b64mod.b64decode(b64)
+                        new_page.insert_image(fitz.Rect(48, 198, 292, 252), stream=img)
+                        embedded = True
+                    except:
+                        pass
+                if not embedded:
+                    new_page.insert_text((55, 235), str(signature_data)[:40], fontname="heit", fontsize=26, color=NAVY)
+
+                # Integrity hash
+                integrity_src = f"{req.get('id')}|{req.get('document_title')}|countersign|{req.get('team_signer_name')}|{signed_ts}|{signature_data}"
+                integrity_hash = hashlib.sha256(integrity_src.encode()).hexdigest()
+                new_page.insert_text((40, 290), "COUNTERSIGN INTEGRITY HASH (SHA-256)", fontname="hebo", fontsize=9, color=GREY)
+                for ci, chunk in enumerate([integrity_hash[i:i+64] for i in range(0, len(integrity_hash), 64)]):
+                    new_page.insert_text((40, 308 + ci * 14), chunk, fontname="cour", fontsize=9, color=(0.388, 0.400, 0.945))
+
+                pdf_doc.save(merged_path)
+                pdf_doc.close()
+
+                # Update DB
+                db.execute(
+                    """UPDATE esignature_requests SET status = 'completed',
+                       team_signed_at = ?, team_ip_address = ?, team_user_agent = ?,
+                       team_signature_data = ?, team_pdf_signed_path = ?, completed_at = ?
+                       WHERE id = ?""",
+                    [signed_ts, request.remote_addr or '', request.headers.get("User-Agent", ""),
+                     signature_data, merged_path, signed_ts, req["id"]]
+                )
+                db.execute(
+                    "INSERT INTO esignature_audit_log (request_id, event_type, event_detail, ip_address, user_agent) VALUES (?, 'countersigned', ?, ?, ?)",
+                    [req["id"], f"Countersigned by {req.get('team_signer_name','Team')} ({req.get('team_signer_email','')})",
+                     request.remote_addr or '', request.headers.get("User-Agent", "")]
+                )
+                db.execute(
+                    "INSERT INTO esignature_audit_log (request_id, event_type, event_detail) VALUES (?, 'completed', ?)",
+                    [req["id"], "Two-sided e-signature process completed"]
+                )
+
+                # ── Auto-create tenancy on full completion ──
+                tenancy_created = False
+                try:
+                    form_id = req.get("form_id")
+                    if form_id:
+                        ref_form = db.execute(
+                            "SELECT applicant_id, status FROM referencing_forms WHERE id = ?",
+                            [form_id]
+                        ).fetchone()
+                        if ref_form and ref_form.get("applicant_id") and ref_form.get("status") == "approved":
+                            app_id = ref_form["applicant_id"]
+                            # Check if tenancy already exists
+                            existing = db.execute(
+                                "SELECT id FROM tenancies WHERE id IN (SELECT tenancy_id FROM tenants WHERE id IN "
+                                "(SELECT id FROM applicants WHERE id = ?))",
+                                [app_id]
+                            ).fetchone()
+                            if not existing:
+                                # Import and call the tenancy creation from banksia_os blueprint
+                                # We'll call the API internally via a direct function call
+                                try:
+                                    resp = _call_create_tenancy(app_id, db)
+                                    if resp.get("success"):
+                                        tenancy_created = True
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+
+                db.commit()
+                resp_data = {"status": "completed", "message": "Document countersigned successfully. Both signatures recorded."}
+                if tenancy_created:
+                    resp_data["message"] += " Tenancy has been created automatically."
+                    resp_data["tenancy_created"] = True
+                return json_success(resp_data)
+            except Exception as merge_err:
+                return json_error(f"Failed to generate merged PDF: {str(merge_err)}", 500)
+
+        return json_error("Applicant signed PDF not found", 500)
     except Exception as e:
         db.rollback()
         return json_error(str(e), 500)
@@ -1382,6 +1645,7 @@ def api_list_esignature_requests():
     page = int(request.args.get("page", 1))
     per_page = int(request.args.get("per_page", 20))
     status = request.args.get("status")
+    search = request.args.get("search", "").strip()
 
     db = get_dict_db()
     try:
@@ -1390,6 +1654,10 @@ def api_list_esignature_requests():
         if status:
             where += " AND status = ?"
             params.append(status)
+        if search:
+            where += " AND (created_for LIKE ? OR created_for_email LIKE ? OR document_title LIKE ?)"
+            s = f"%{search}%"
+            params.extend([s, s, s])
 
         total = db.execute(f"SELECT COUNT(*) as cnt FROM esignature_requests {where}", params).fetchone()["cnt"]
         offset = (page - 1) * per_page
@@ -1419,6 +1687,40 @@ def api_esignature_audit(req_id):
         ).fetchall()
 
         return json_success({"request": req, "audit_log": audit_log})
+    finally:
+        db.close()
+
+
+@referencing_bp.route("/esignature/<int:req_id>/download-signed", methods=["GET"])
+@require_team_auth
+def api_download_signed_pdf(req_id):
+    """Download the signed PDF for an e-signature request."""
+    db = get_dict_db()
+    try:
+        req = db.execute("SELECT * FROM esignature_requests WHERE id = ?", [req_id]).fetchone()
+        if not req:
+            return json_error("Request not found", 404)
+        pdf_path = req.get("team_pdf_signed_path") or req.get("pdf_signed_path")
+        if not pdf_path or not os.path.exists(pdf_path):
+            return json_error("Signed PDF not found", 404)
+        return send_file(pdf_path, as_attachment=True, download_name=f"signed_{req_id}_{req.get('document_title','document').replace(' ','_')}.pdf")
+    finally:
+        db.close()
+
+
+@referencing_bp.route("/esignature/<int:req_id>/download-merged", methods=["GET"])
+@require_team_auth
+def api_download_merged_pdf(req_id):
+    """Download the merged (both signatures) PDF for two-sided signing."""
+    db = get_dict_db()
+    try:
+        req = db.execute("SELECT * FROM esignature_requests WHERE id = ?", [req_id]).fetchone()
+        if not req:
+            return json_error("Request not found", 404)
+        pdf_path = req.get("team_pdf_signed_path")
+        if not pdf_path or not os.path.exists(pdf_path):
+            return json_error("Merged PDF not found. Has the team countersigned yet?", 404)
+        return send_file(pdf_path, as_attachment=True, download_name=f"merged_{req_id}_{req.get('document_title','document').replace(' ','_')}.pdf")
     finally:
         db.close()
 
@@ -1753,25 +2055,40 @@ def api_portal_maintenance_create():
 @referencing_bp.route("/portal/documents", methods=["GET"])
 @require_auth
 def api_portal_documents():
-    """Documents visible to the tenant: their uploaded referencing docs and any
-    completed (signed) e-signature PDFs."""
+    """Documents visible to the tenant: their uploaded referencing docs, any
+    completed (signed) e-signature PDFs, and pending e-signature requests."""
     pu = request.portal_user
     db = get_dict_db()
     try:
         email = (pu.get("email") or "").lower()
+
+        # Uploaded referencing documents
         uploaded = db.execute(
             "SELECT d.id, d.category, d.original_filename, d.file_size, d.uploaded_at, d.is_verified "
             "FROM referencing_documents d JOIN referencing_forms f ON d.form_id = f.id "
             "WHERE lower(f.email) = ? ORDER BY d.uploaded_at DESC",
             [email]
         ).fetchall()
+
+        # Completed/signed esignature documents
         signed = db.execute(
             "SELECT id, document_title, document_type, status, signed_at, completed_at "
             "FROM esignature_requests WHERE lower(created_for_email) = ? AND status = 'completed' "
             "ORDER BY completed_at DESC",
             [email]
         ).fetchall()
-        return json_success({"uploaded": uploaded, "signed": signed})
+
+        # Pending esignature requests (awaiting applicant's signature)
+        pending = db.execute(
+            "SELECT id, document_title, document_type, status, created, expires_at, "
+            "signer_token, team_signer_name "
+            "FROM esignature_requests WHERE lower(created_for_email) = ? "
+            "AND status IN ('draft', 'sent', 'viewed') "
+            "ORDER BY created DESC",
+            [email]
+        ).fetchall()
+
+        return json_success({"uploaded": uploaded, "signed": signed, "pending": pending})
     finally:
         db.close()
 
@@ -2586,6 +2903,97 @@ def api_available_units():
         return json_success(rows, count=len(rows))
     finally:
         db.close()
+
+
+# ────────────────────────────────────────────
+# AUTO-CREATE TENANCY HELPER
+# ────────────────────────────────────────────
+
+def _call_create_tenancy(app_id, db):
+    """Internal helper to create a tenancy from an applicant after esign completes.
+
+    Replicates the core logic from banksia_os.py api_create_tenancy_from_applicant
+    but uses an existing DB connection and returns a dict.
+    """
+    try:
+        app = db.execute("SELECT * FROM applicants WHERE id = ?", [app_id]).fetchone()
+        if not app:
+            return {"success": False, "error": "Applicant not found"}
+        app_status = (app.get("status") or "").strip().lower()
+        if app_status not in ("approved",):
+            return {"success": False, "error": f"Applicant status must be 'approved', got '{app_status}'"}
+
+        property_id = app.get("property_id")
+        unit_id = app.get("unit_id")
+        if not property_id or not unit_id:
+            return {"success": False, "error": "Applicant must have property_id and unit_id"}
+
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        first_name = app.get("first_name", "")
+        last_name = app.get("last_name", "")
+        email = app.get("email", "")
+        phone = app.get("phone", "") or app.get("mobile", "")
+        main_tenant_name = f"{first_name} {last_name}".strip()
+        start_date = app.get("desired_move_in") or now_iso[:10]
+
+        from dateutil.relativedelta import relativedelta
+        try:
+            start_dt = datetime.fromisoformat(start_date) if "T" in str(start_date) else datetime.strptime(str(start_date), "%Y-%m-%d")
+        except (ValueError, TypeError):
+            start_dt = now
+        end_dt = start_dt + relativedelta(months=6)
+        end_date = end_dt.strftime("%Y-%m-%d")
+        rent_amount = app.get("proposed_rent")
+        deposit_amount = app.get("proposed_deposit")
+
+        tenancy_cur = db.execute(
+            "INSERT INTO tenancies (property_id, unit_id, main_tenant_name, status, "
+            "start_date, end_date, rent_amount, rent_frequency, created, modified) "
+            "VALUES (?, ?, ?, 'active', ?, ?, ?, 'pcm', ?, ?)",
+            [property_id, unit_id, main_tenant_name, start_date, end_date,
+             rent_amount, now_iso, now_iso]
+        )
+        tenancy_id = tenancy_cur.lastrowid
+
+        tenant_cur = db.execute(
+            "INSERT INTO tenants (first_name, last_name, email, phone_home, mobile, "
+            "property_id, unit_id, tenancy_id, main_tenant, status, created, modified) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'active', ?, ?)",
+            [first_name, last_name, email, phone, phone,
+             property_id, unit_id, tenancy_id, now_iso, now_iso]
+        )
+        tenant_id = tenant_cur.lastrowid
+
+        dep_cur = db.execute(
+            "INSERT INTO deposits (tenancy_id, tenant_id, unit_id, property_id, "
+            "amount, current_status, protection_status, date_received, created, modified) "
+            "VALUES (?, ?, ?, ?, ?, 'held', 'unprotected', ?, ?, ?)",
+            [tenancy_id, tenant_id, unit_id, property_id,
+             deposit_amount or 0, start_date, now_iso, now_iso]
+        )
+
+        old_app_status = app.get("status", "")
+        db.execute("UPDATE applicants SET status = 'tenancy_created', modified = ? WHERE id = ?",
+                   [now_iso, app_id])
+
+        refs = db.execute(
+            "SELECT id, status FROM referencing_forms WHERE applicant_id = ? AND status NOT IN ('tenancy_created', 'withdrawn')",
+            [app_id]
+        ).fetchall()
+        for ref in refs:
+            db.execute("UPDATE referencing_forms SET status = 'tenancy_created', modified = ? WHERE id = ?",
+                       [now_iso, ref["id"]])
+
+        if start_date and str(start_date)[:10] <= now_iso[:10]:
+            db.execute(
+                "UPDATE units SET unit_status = 'Occupied', unit_vacant = 0, status = 'occupied', modified = ? WHERE id = ?",
+                [now_iso, unit_id]
+            )
+
+        return {"success": True, "tenancy_id": tenancy_id, "tenant_id": tenant_id}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 # ────────────────────────────────────────────

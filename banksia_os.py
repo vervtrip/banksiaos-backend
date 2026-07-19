@@ -562,6 +562,16 @@ def api_dashboard():
             "referencing_pipeline": referencing_pipeline,
             "tenancies_in_arrears_count": tenancies_in_arrears_count,
             "arrears_by_tenancy": arrears_by_tenancy_list,
+            # E-signature stats
+            "esign_pending": db.execute(
+                "SELECT COUNT(*) AS cnt FROM esignature_requests WHERE status IN ('draft', 'sent', 'viewed', 'applicant_signed')"
+            ).fetchone()["cnt"],
+            "esign_completed_this_month": db.execute(
+                "SELECT COUNT(*) AS cnt FROM esignature_requests WHERE status = 'completed' AND completed_at >= datetime('now', 'start of month')"
+            ).fetchone()["cnt"],
+            "esign_needing_action": db.execute(
+                "SELECT COUNT(*) AS cnt FROM esignature_requests WHERE status = 'applicant_signed'"
+            ).fetchone()["cnt"],
         })
     except Exception as e:
         return json_error(str(e), 500)
@@ -4275,6 +4285,18 @@ def api_tenant(tenant_id):
             ).fetchone()
             tenant["unit"] = unit
 
+        # Linked esignature requests via tenancy or referencing form
+        tenant["esignatures"] = []
+        tenancy_id = tenant.get("tenancy_id")
+        if tenancy_id:
+            tenant["esignatures"] = db.execute(
+                "SELECT id, document_type, document_title, status, created_for, "
+                "created, sent_at, signed_at, completed_at "
+                "FROM esignature_requests WHERE tenancy_id = ? "
+                "ORDER BY created DESC LIMIT 5",
+                [tenancy_id]
+            ).fetchall()
+
         return json_success(tenant)
     except Exception as e:
         return json_error(str(e), 500)
@@ -5452,6 +5474,8 @@ def api_create_tenant():
 # ═══════════════════════════════════════════════
 
 from document_engine import generate_document, save_template, list_templates, delete_template, list_generated_documents, record_generated_document, get_template_info
+import mammoth
+import fitz  # PyMuPDF
 
 
 @banksia_os_bp.route("/documents/templates", methods=["GET"])
@@ -5527,6 +5551,337 @@ def api_download_generated(doc_id):
         return json_error("File not found", 404)
     from flask import send_file
     return send_file(path, as_attachment=True, download_name=info["filename"])
+
+
+# ═══════════════════════════════════════════════
+# 10b. TEMPLATE EDITOR API (Phase 2 — Visual Editor)
+# ═══════════════════════════════════════════════
+
+DOCUMENTS_TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "documents", "templates")
+
+
+@banksia_os_bp.route("/documents/templates/<template_id>/preview", methods=["GET"])
+def api_template_preview(template_id):
+    """Convert a .docx template to HTML + paragraph structure for the visual editor."""
+    info = get_template_info(template_id)
+    if not info:
+        return json_error("Template not found", 404)
+    path = os.path.join(DOCUMENTS_TEMPLATES_DIR, info["filename"])
+    if not os.path.exists(path):
+        return json_error("Template file not found on disk", 404)
+    try:
+        # Mammoth HTML conversion
+        with open(path, "rb") as f:
+            result = mammoth.convert_to_html(f)
+            html = result.value
+
+        # python-docx paragraph extraction for the editor structure
+        from docx import Document
+        doc = Document(path)
+        paragraphs = []
+        for i, p in enumerate(doc.paragraphs):
+            text = p.text.strip()
+            if text:
+                style_name = p.style.name if p.style else "Normal"
+                paragraphs.append({
+                    "index": i,
+                    "text": text[:200],  # first 200 chars for preview
+                    "style": style_name,
+                })
+
+        # Also extract table preview
+        tables = []
+        for ti, table in enumerate(doc.tables):
+            rows = []
+            for row in table.rows[:3]:  # first 3 rows preview
+                cells = [cell.text.strip()[:50] for cell in row.cells]
+                rows.append(cells)
+            tables.append({"index": ti, "rows": rows, "total_rows": len(table.rows)})
+
+        return json_success({
+            "html": html,
+            "paragraphs": paragraphs,
+            "tables": tables,
+            "filename": info["filename"],
+            "name": info["name"],
+        })
+    except Exception as e:
+        return json_error(f"Preview failed: {str(e)}", 500)
+
+
+@banksia_os_bp.route("/documents/templates/<template_id>/layout", methods=["GET"])
+def api_get_template_layout(template_id):
+    """Load the stored field layout for a template."""
+    info = get_template_info(template_id)
+    if not info:
+        return json_error("Template not found", 404)
+    layout_path = os.path.join(DOCUMENTS_TEMPLATES_DIR, f"{template_id}.layout.json")
+    if not os.path.exists(layout_path):
+        return json_success({"fields": [], "signature_blocks": [], "page_width": 0, "page_height": 0})
+    try:
+        with open(layout_path) as f:
+            layout = json.load(f)
+        return json_success(layout)
+    except Exception as e:
+        return json_error(f"Failed to load layout: {str(e)}", 500)
+
+
+@banksia_os_bp.route("/documents/templates/<template_id>/layout", methods=["POST"])
+def api_save_template_layout(template_id):
+    """Save the field layout for a template."""
+    info = get_template_info(template_id)
+    if not info:
+        return json_error("Template not found", 404)
+    data = request.get_json(silent=True) or {}
+    layout_path = os.path.join(DOCUMENTS_TEMPLATES_DIR, f"{template_id}.layout.json")
+    try:
+        layout = {
+            "fields": data.get("fields", []),
+            "signature_blocks": data.get("signature_blocks", []),
+            "page_width": data.get("page_width", 595),  # A4 default pts
+            "page_height": data.get("page_height", 842),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with open(layout_path, "w") as f:
+            json.dump(layout, f, indent=2)
+        return json_success({"saved": True})
+    except Exception as e:
+        return json_error(f"Failed to save layout: {str(e)}", 500)
+
+
+@banksia_os_bp.route("/documents/merge-fields", methods=["GET"])
+def api_get_merge_fields():
+    """Return all available merge fields grouped by category."""
+    fields = {
+        "Tenant Info": {
+            "tenant_name": {"label": "Tenant Name(s)", "description": "Full names of all tenants", "type": "text"},
+            "main_tenant_name": {"label": "Main Tenant Name", "description": "Primary tenant full name", "type": "text"},
+            "tenant_first_name": {"label": "Tenant First Name", "description": "Primary tenant first name", "type": "text"},
+            "tenant_last_name": {"label": "Tenant Last Name", "description": "Primary tenant last name", "type": "text"},
+            "tenant_email": {"label": "Tenant Email", "description": "Primary tenant email address", "type": "text"},
+            "tenant_phone": {"label": "Tenant Phone", "description": "Primary tenant phone number", "type": "text"},
+            "tenant_dob": {"label": "Tenant Date of Birth", "description": "Primary tenant date of birth", "type": "text"},
+            "tenant_employer": {"label": "Tenant Employer", "description": "Primary tenant employer/company", "type": "text"},
+            "tenant_ni": {"label": "Tenant NI Number", "description": "National Insurance number", "type": "text"},
+            "tenant_passport": {"label": "Tenant Passport", "description": "Passport number", "type": "text"},
+        },
+        "Guarantor": {
+            "guarantor_name": {"label": "Guarantor Name", "description": "Guarantor full name", "type": "text"},
+            "guarantor_email": {"label": "Guarantor Email", "description": "Guarantor email address", "type": "text"},
+        },
+        "Property": {
+            "property_name": {"label": "Property Name", "description": "Property name/ref", "type": "text"},
+            "property_ref": {"label": "Property Ref", "description": "Property reference code", "type": "text"},
+            "property_address": {"label": "Full Address", "description": "Full property address", "type": "text"},
+            "property_address_line_1": {"label": "Address Line 1", "description": "First line of address", "type": "text"},
+            "property_city": {"label": "City", "description": "Property city/town", "type": "text"},
+            "property_postcode": {"label": "Postcode", "description": "Property postcode", "type": "text"},
+            "council_tax_band": {"label": "Council Tax Band", "description": "Council tax band", "type": "text"},
+        },
+        "Unit": {
+            "unit_ref": {"label": "Unit Ref", "description": "Unit/room reference", "type": "text"},
+            "unit_type": {"label": "Unit Type", "description": "Studio/1-bed/2-bed etc", "type": "text"},
+            "unit_address": {"label": "Unit Address", "description": "Full unit address line", "type": "text"},
+            "unit_bedrooms": {"label": "Bedrooms", "description": "Number of bedrooms", "type": "text"},
+            "unit_max_occupancy": {"label": "Max Occupancy", "description": "Maximum occupants", "type": "text"},
+        },
+        "Rent & Deposit": {
+            "rent_amount": {"label": "Rent Amount (formatted)", "description": "Rent amount with £ symbol", "type": "text"},
+            "rent_amount_numeric": {"label": "Rent Amount (numeric)", "description": "Rent amount as number only", "type": "text"},
+            "rent_frequency": {"label": "Rent Frequency", "description": "pcm/pw/etc", "type": "text"},
+            "deposit_amount": {"label": "Deposit Amount", "description": "Deposit with £ symbol", "type": "text"},
+            "deposit_scheme": {"label": "Deposit Scheme", "description": "DPS/TDS/MyDeposits", "type": "text"},
+            "deposit_held_by": {"label": "Deposit Held By", "description": "Who holds the deposit", "type": "text"},
+        },
+        "Dates": {
+            "tenancy_start_date": {"label": "Start Date", "description": "Tenancy start date", "type": "text"},
+            "tenancy_end_date": {"label": "End Date", "description": "Tenancy end date", "type": "text"},
+            "renewal_start": {"label": "Renewal Start", "description": "Renewal period start", "type": "text"},
+            "renewal_end": {"label": "Renewal End", "description": "Renewal period end", "type": "text"},
+            "break_clause_date": {"label": "Break Clause Date", "description": "Break clause date", "type": "text"},
+            "move_in_date": {"label": "Move In Date", "description": "Move in date", "type": "text"},
+            "move_out_date": {"label": "Move Out Date", "description": "Move out date", "type": "text"},
+            "notice_period": {"label": "Notice Period", "description": "Notice period required", "type": "text"},
+        },
+        "Landlord / Agent": {
+            "landlord_name": {"label": "Landlord Name", "description": "Property owner/landlord", "type": "text"},
+            "landlord_address": {"label": "Landlord Address", "description": "Landlord's address", "type": "text"},
+            "agent_name": {"label": "Agent Name", "description": "Managing agent name", "type": "text"},
+            "agent_address": {"label": "Agent Address", "description": "Agent office address", "type": "text"},
+            "agent_email": {"label": "Agent Email", "description": "Agent contact email", "type": "text"},
+            "agent_phone": {"label": "Agent Phone", "description": "Agent contact phone", "type": "text"},
+        },
+        "Today": {
+            "date": {"label": "Date (dd/mm/yyyy)", "description": "Today's date short format", "type": "text"},
+            "date_long": {"label": "Date (long format)", "description": "Today's date long format", "type": "text"},
+            "year": {"label": "Year", "description": "Current year", "type": "text"},
+            "month": {"label": "Month", "description": "Current month name", "type": "text"},
+            "day": {"label": "Day", "description": "Current day number", "type": "text"},
+        },
+        "Signature Blocks": {
+            "tenant_signature": {"label": "Tenant Signature Block", "description": "Signed by tenant", "type": "signature"},
+            "team_signature": {"label": "Banksia Authorised Signatory", "description": "Signed by authorised team member", "type": "signature"},
+        },
+    }
+    return json_success(fields)
+
+
+@banksia_os_bp.route("/documents/templates/<template_id>/generate-with-layout", methods=["POST"])
+def api_generate_with_layout(template_id):
+    """Generate document using layout-based field positions + merge data."""
+    data = request.get_json(silent=True) or {}
+    tenancy_id = data.get("tenancy_id")
+    if not tenancy_id:
+        return json_error("tenancy_id is required")
+
+    info = get_template_info(template_id)
+    if not info:
+        return json_error("Template not found", 404)
+
+    template_path = os.path.join(DOCUMENTS_TEMPLATES_DIR, info["filename"])
+    if not os.path.exists(template_path):
+        return json_error("Template file not found", 404)
+
+    # Load layout from request or stored file
+    layout = data.get("layout")
+    if not layout:
+        layout_path = os.path.join(DOCUMENTS_TEMPLATES_DIR, f"{template_id}.layout.json")
+        if os.path.exists(layout_path):
+            try:
+                with open(layout_path) as f:
+                    layout = json.load(f)
+            except:
+                layout = {}
+        else:
+            layout = {}
+
+    # Generate the base document
+    output_path, err = generate_document(template_path, tenancy_id)
+    if err:
+        return json_error(err)
+
+    # Convert to PDF for signature overlay
+    try:
+        doc_pdf_path = output_path.replace(".docx", ".pdf")
+        # Use python-docx to save then fitz to overlay
+        from docx import Document as DocxDocument
+        doc = DocxDocument(output_path)
+
+        # Use subprocess to convert via LibreOffice if available
+        import subprocess
+        pdf_ok = False
+        try:
+            subprocess.run(
+                ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir",
+                 os.path.dirname(doc_pdf_path), output_path],
+                capture_output=True, timeout=30, check=False,
+            )
+            if os.path.exists(doc_pdf_path):
+                pdf_ok = True
+        except:
+            pass
+
+        if pdf_ok:
+            # Add signature placeholder overlays
+            sig_blocks = layout.get("signature_blocks", [])
+            if sig_blocks:
+                pdf_doc = fitz.open(doc_pdf_path)
+                for page in pdf_doc:
+                    for block in sig_blocks:
+                        x = block.get("x", 50)
+                        y = block.get("y", 700)
+                        w = block.get("width", 200)
+                        h = block.get("height", 80)
+                        label = block.get("type", "signature")
+                        # Draw signature placeholder rectangle
+                        rect = fitz.Rect(x, y, x + w, y + h)
+                        page.draw_rect(rect, color=(0.2, 0.2, 0.2), width=0.5)
+                        # Add label
+                        sig_label = "Tenant Signature" if label == "tenant" else "Banksia Authorised Signatory"
+                        page.insert_text(
+                            fitz.Point(x + 5, y + 15),
+                            sig_label,
+                            fontsize=8,
+                            color=(0.4, 0.4, 0.4),
+                        )
+                        page.insert_text(
+                            fitz.Point(x + 5, y + h - 5),
+                            "_________________________",
+                            fontsize=8,
+                            color=(0.6, 0.6, 0.6),
+                        )
+                out_sig_path = doc_pdf_path.replace(".pdf", "_signed.pdf")
+                pdf_doc.save(out_sig_path)
+                pdf_doc.close()
+                doc_pdf_path = out_sig_path
+
+        # Record and return
+        doc_id = record_generated_document(
+            output_path, info["name"], tenancy_id, "Tenant"
+        )
+        return json_success({
+            "id": doc_id,
+            "filename": os.path.basename(output_path),
+            "pdf_path": doc_pdf_path if pdf_ok else None,
+            "has_layout": len(sig_blocks) > 0 if sig_blocks else False,
+        })
+    except Exception as e:
+        return json_error(f"PDF generation failed: {str(e)}", 500)
+
+
+@banksia_os_bp.route("/documents/generate-template-preview", methods=["POST"])
+def api_generate_template_preview():
+    """Generate a PDF and return base64 PNG preview pages."""
+    data = request.get_json(silent=True) or {}
+    template_id = data.get("template_id")
+    tenancy_id = data.get("tenancy_id")
+    if not template_id or not tenancy_id:
+        return json_error("template_id and tenancy_id are required")
+
+    # First generate the document
+    info = get_template_info(template_id)
+    if not info:
+        return json_error("Template not found", 404)
+
+    template_path = os.path.join(DOCUMENTS_TEMPLATES_DIR, info["filename"])
+    output_path, err = generate_document(template_path, tenancy_id)
+    if err:
+        return json_error(err)
+
+    # Convert to PDF
+    import subprocess
+    doc_pdf_path = output_path.replace(".docx", ".pdf")
+    try:
+        subprocess.run(
+            ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir",
+             os.path.dirname(doc_pdf_path), output_path],
+            capture_output=True, timeout=30, check=False,
+        )
+    except:
+        pass
+
+    pages = []
+    if os.path.exists(doc_pdf_path):
+        pdf_doc = fitz.open(doc_pdf_path)
+        for page_num in range(len(pdf_doc)):
+            page = pdf_doc[page_num]
+            pix = page.get_pixmap(dpi=150)
+            img_data = pix.tobytes("png")
+            import base64
+            b64 = base64.b64encode(img_data).decode()
+            pages.append(f"data:image/png;base64,{b64}")
+        pdf_doc.close()
+
+    doc_id = record_generated_document(
+        output_path, info["name"], tenancy_id, "Tenant"
+    )
+
+    return json_success({
+        "pages": pages,
+        "doc_id": doc_id,
+        "filename": os.path.basename(output_path),
+        "total_pages": len(pages),
+    })
 
 
 # ═══════════════════════════════════════════════

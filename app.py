@@ -2907,6 +2907,12 @@ def esignature_sign_page(token):
     return render_template("referencing_sign.html", token=token)
 
 
+# ── Team Countersign Page (public, team-token-gated) ──
+@app.route("/countersign/<token>")
+def esignature_countersign_page(token):
+    return render_template("referencing_countersign.html", token=token)
+
+
 # ── Tenant / Applicant Portal (public login) ──
 @app.route("/portal")
 def tenant_portal_page():

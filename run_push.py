@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
-"""Run the Monday push sync — called by cron."""
-import sqlite3
+"""Run push_all_pending from monday_push module."""
 import sys
-sys.path.insert(0, "/root/banksia-dashboard")
+sys.path.insert(0, '/root/verv-dashboard')
 
+from verv_os_db import get_dict_db
 from monday_push import push_all_pending
 
-db = sqlite3.connect("/root/banksia-dashboard/banksia_os.db")
-db.row_factory = sqlite3.Row
-
+db = get_dict_db()
 result = push_all_pending(db)
 db.close()
 
-print(f"Pushed: {result['pushed']}, Failed: {result['failed']}")
-if result.get("errors"):
-    for e in result["errors"]:
-        print(f"  ERROR: {e}")
-print(result["message"])
+print(f"Pushed: {result['pushed']}")
+print(f"Failed: {result['failed']}")
+if result.get('errors'):
+    print(f"Errors: {result['errors']}")
+print(f"Message: {result['message']}")
