@@ -5,7 +5,14 @@ from datetime import datetime, timedelta, date, timezone
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, redirect, session
 
+# Init structured logging before app factory
+from services.logging_service import init_logging, log_info, log_error
+
 app = Flask(__name__)
+
+# ── Init structured logging ──
+log = init_logging(app)
+log_info("Banksia OS starting up")
 
 def _load_secret_key() -> str:
     """Use FLASK_SECRET_KEY if set; otherwise persist a random key to disk.
