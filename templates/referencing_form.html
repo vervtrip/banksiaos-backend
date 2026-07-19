@@ -135,6 +135,12 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#f8fafc;color:#0f17
   </div>
 </div>
 
+<!-- 3-Day Deadline Banner -->
+<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:16px 24px;margin:0 auto 24px;max-width:960px;display:flex;align-items:center;gap:12px;font-size:14px;color:#92400e;line-height:1.5">
+  <span style="font-size:24px">⏰</span>
+  <span>Please complete and return this form within <strong>3 days</strong>. Providing comprehensive and accurate information will help increase the likelihood of a successful referencing outcome.</span>
+</div>
+
 <!-- Form Container -->
 <div class="form-container" id="formContainer">
   <div id="formContent"></div>
@@ -289,7 +295,7 @@ const SECTIONS = [
     fields: [
       {key:'bank_name',label:'Bank Name',type:'text',required:true},
       {key:'bank_account_name',label:'Account Name',type:'text',required:true},
-      {key:'bank_sort_code',label:'Sort Code',type:'text',placeholder:'00-00-00',required:true},
+      {key:'bank_sort_code',label:'Sort Code',type:'text',placeholder:'00-00-00',required:true,inputAttrs:'oninput="formatSortCode(this)" maxlength="8"'},
       {key:'bank_account_number',label:'Account Number',type:'text',required:true},
     ]
   },
@@ -405,8 +411,10 @@ function renderForm() {
         <div class="form-grid">
           ${section.fields.map(f => renderField(f, idx)).join('')}
           ${idx === SECTIONS.length - 1 ? renderDeclaration() : ''}
-          ${idx === 1 ? renderDocumentUpload('passport') : ''}
-          ${[3,4].includes(idx) ? renderDocumentUpload(['payslip','bank_statement'].includes) : ''}
+          ${idx === 1 ? renderDocumentUpload('passport') + renderDocumentUpload('driving_licence') : ''}
+          ${idx === 3 ? renderDocumentUpload('payslip') + renderDocumentUpload('bank_statement') + renderDocumentUpload('employment_contract') : ''}
+          ${idx === 5 ? renderDocumentUpload('student_letter') + renderDocumentUpload('student_id') : ''}
+          ${idx === 6 ? renderDocumentUpload('guarantor_id') : ''}
         </div>
         <div class="section-footer">
           <span style="font-size:12px;color:#94a3b8">${isComplete ? '✅ Completed' : '○ Not completed'}</span>
@@ -446,7 +454,8 @@ function renderField(field, sectionIdx) {
     case 'tel':
     case 'number':
     case 'date':
-      input = `<input type="${field.type}" id="field-${field.key}" value="${escapeHtml(val)}" ${field.placeholder ? `placeholder="${escapeHtml(field.placeholder)}"` : ''} ${field.required ? 'required' : ''}>`;
+      const attrs = field.inputAttrs ? ' ' + field.inputAttrs : '';
+      input = `<input type="${field.type}" id="field-${field.key}" value="${escapeHtml(val)}" ${field.placeholder ? `placeholder="${escapeHtml(field.placeholder)}"` : ''} ${field.required ? 'required' : ''}${attrs}>`;
       break;
     case 'select':
       const opts = field.options.map(o => `<option value="${o}" ${val === o ? 'selected' : ''}>${o}</option>`).join('');
@@ -477,30 +486,43 @@ function renderDeclaration() {
       <div class="declaration-box">
         <p><strong>Declaration</strong></p>
         <p style="margin-top:8px">I confirm that the information provided in this application is true and complete. I authorise Banksia to verify the information provided and to carry out a credit reference check. I understand that providing false or misleading information may result in my application being rejected.</p>
-        <p style="margin-top:8px">I consent to Banksia processing my personal data in accordance with their privacy policy for the purposes of tenancy referencing and management.</p>
+        <p style="margin-top:12px">I consent to Banksia processing my personal data in accordance with their privacy policy for the purposes of tenancy referencing and management.</p>
         <div class="checkbox-row" style="margin-top:12px">
           <input type="checkbox" id="field-declaration_confirmed" ${formData.declaration_confirmed ? 'checked' : ''}>
           <label for="field-declaration_confirmed">I confirm and agree to the above declaration</label>
         </div>
       </div>
+    </div>
+    <div class="form-group full">
+      <div class="declaration-box" style="border-color:#dbeafe;background:#eff6ff">
+        <p><strong>Terms &amp; Conditions</strong></p>
+        <p style="margin-top:8px;font-size:12px;color:#1e40af;line-height:1.6">By submitting your application you are agreeing to the following terms:</p>
+        <ol style="margin-top:8px;font-size:12px;color:#1e3a5f;line-height:1.7;padding-left:20px">
+          <li><strong>Truthfulness:</strong> The information provided is true to the best of my knowledge.</li>
+          <li><strong>Consent for Referencing:</strong> My details may be used for referencing purposes; my chosen contacts (including those outside the EEA) may be contacted to verify earnings, employment dates, and previous tenancy.</li>
+          <li><strong>Data Storage:</strong> All submitted data is stored online in compliance with the Banksia privacy policy.</li>
+        </ol>
+        <div class="checkbox-row" style="margin-top:12px">
+          <input type="checkbox" id="field-terms_confirmed" ${formData.terms_confirmed ? 'checked' : ''}>
+          <label for="field-terms_confirmed">I agree to the Terms &amp; Conditions above</label>
+        </div>
+      </div>
     </div>`;
 }
 
-function renderDocumentUpload(categories) {
-  const cats = Array.isArray(categories) ? categories : [categories];
-  return cats.map(cat => {
-    const info = DOC_CATEGORIES[cat] || {label:cat, accept:'.pdf,.jpg,.jpeg,.png', maxSize:10};
-    const existing = uploadedDocs.filter(d => d.category === cat);
-    return `
+function renderDocumentUpload(category) {
+  const info = DOC_CATEGORIES[category] || {label:category, accept:'.pdf,.jpg,.jpeg,.png', maxSize:10};
+  const existing = uploadedDocs.filter(d => d.category === category);
+  return `
       <div class="form-group full" style="margin-top:8px">
         <label>${info.label}</label>
-        <div class="upload-area" data-category="${cat}" onclick="document.getElementById('fileInput-${cat}').click()" ondragover="this.classList.add('dragover');event.preventDefault()" ondragleave="this.classList.remove('dragover')" ondrop="handleDrop(event,'${cat}')">
+        <div class="upload-area" data-category="${category}" onclick="document.getElementById('fileInput-${category}').click()" ondragover="this.classList.add('dragover');event.preventDefault()" ondragleave="this.classList.remove('dragover')" ondrop="handleDrop(event,'${category}')">
           <div class="icon">📄</div>
           <div class="text">Click to upload or drag and drop</div>
           <div class="subtext">${info.accept} (max ${info.maxSize}MB)</div>
-          <input type="file" id="fileInput-${cat}" accept="${info.accept}" style="display:none" ${info.multiple ? 'multiple' : ''} onchange="uploadFile(event,'${cat}')">
+          <input type="file" id="fileInput-${category}" accept="${info.accept}" style="display:none" ${info.multiple ? 'multiple' : ''} onchange="uploadFile(event,'${category}')">
         </div>
-        <div class="file-list" id="fileList-${cat}">
+        <div class="file-list" id="fileList-${category}">
           ${existing.map(f => `
             <div class="file-item">
               <span class="file-icon">📄</span>
@@ -513,7 +535,6 @@ function renderDocumentUpload(categories) {
           `).join('')}
         </div>
       </div>`;
-  }).join('');
 }
 
 // ── Section Management ──
@@ -540,10 +561,14 @@ async function saveSection(idx) {
     }
   }
 
-  // Also collect declaration
+  // Also collect declaration & terms
   const declEl = document.getElementById('field-declaration_confirmed');
   if (declEl) {
     updates.declaration_confirmed = declEl.checked ? 1 : 0;
+  }
+  const termsEl = document.getElementById('field-terms_confirmed');
+  if (termsEl) {
+    updates.terms_confirmed = termsEl.checked ? 1 : 0;
   }
 
   try {
@@ -643,7 +668,7 @@ async function submitForm() {
 // ── Progress Tracking ──
 function isSectionComplete(idx) {
   const section = SECTIONS[idx];
-  if (idx === SECTIONS.length - 1) return formData.declaration_confirmed;
+  if (idx === SECTIONS.length - 1) return formData.declaration_confirmed && formData.terms_confirmed;
   
   return section.fields.every(f => {
     if (!f.required) return true;
@@ -681,7 +706,18 @@ function escapeHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 }
 
-// ── Start ──
+// Sort Code Formatting
+function formatSortCode(input) {
+  let val = input.value.replace(/[^0-9]/g, '');
+  if (val.length > 6) val = val.slice(0, 6);
+  const parts = [];
+  if (val.length > 0) parts.push(val.slice(0, 2));
+  if (val.length > 2) parts.push(val.slice(2, 4));
+  if (val.length > 4) parts.push(val.slice(4, 6));
+  input.value = parts.join('-');
+}
+
+// Start
 document.addEventListener('DOMContentLoaded', init);
 </script>
 </body>

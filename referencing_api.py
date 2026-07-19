@@ -840,7 +840,10 @@ def api_upload_document():
 
 @referencing_bp.route("/documents/<int:doc_id>", methods=["GET"])
 def api_get_document(doc_id):
-    """Get document metadata or download file."""
+    """Get document metadata or download file.
+    Requires team auth (dashboard session) for download. Metadata is public
+    enough — just a filename and category — but the actual file content is
+    gated behind the team session."""
     db = get_dict_db()
     try:
         doc = db.execute("SELECT * FROM referencing_documents WHERE id = ?", [doc_id]).fetchone()
@@ -849,6 +852,8 @@ def api_get_document(doc_id):
 
         dl = request.args.get("download", "").lower() in ("1", "true", "yes")
         if dl:
+            if "user" not in flask_session:
+                return json_error("Not authenticated", 401)
             return send_file(doc["file_path"], as_attachment=True, download_name=doc["original_filename"])
 
         return json_success(doc)
@@ -1692,14 +1697,29 @@ def api_esignature_audit(req_id):
 
 
 @referencing_bp.route("/esignature/<int:req_id>/download-signed", methods=["GET"])
-@require_team_auth
 def api_download_signed_pdf(req_id):
-    """Download the signed PDF for an e-signature request."""
+    """Download the signed PDF for an e-signature request.
+    Can be accessed by team (dashboard session) or applicant (portal Bearer token)."""
+    auth_header = request.headers.get("Authorization", "")
+    is_portal = auth_header.startswith("Bearer ")
+    is_team = "user" in flask_session
+    if not is_portal and not is_team:
+        return json_error("Not authenticated", 401)
+
     db = get_dict_db()
     try:
         req = db.execute("SELECT * FROM esignature_requests WHERE id = ?", [req_id]).fetchone()
         if not req:
             return json_error("Request not found", 404)
+        # Portal users can only download their own documents
+        if is_portal:
+            token = auth_header[7:]
+            pu = db.execute(
+                "SELECT pu.email FROM portal_sessions ps JOIN portal_users pu ON ps.user_id = pu.id WHERE ps.session_token = ? AND ps.expires_at > datetime('now')",
+                [token]
+            ).fetchone()
+            if not pu or (pu.get("email") or "").lower() != (req.get("created_for_email") or "").lower():
+                return json_error("Not authorised to download this document", 403)
         pdf_path = req.get("team_pdf_signed_path") or req.get("pdf_signed_path")
         if not pdf_path or not os.path.exists(pdf_path):
             return json_error("Signed PDF not found", 404)
@@ -2212,6 +2232,28 @@ def api_portal_upload_document():
     except Exception as e:
         db.rollback()
         return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+# ── Portal: download a referencing document ──
+
+@referencing_bp.route("/portal/download-document/<int:doc_id>", methods=["GET"])
+@require_auth
+def api_portal_download_document(doc_id):
+    """Download a referencing document that belongs to the logged-in portal user."""
+    pu = request.portal_user
+    email = (pu.get("email") or "").lower()
+    db = get_dict_db()
+    try:
+        doc = db.execute(
+            "SELECT d.* FROM referencing_documents d JOIN referencing_forms f ON d.form_id = f.id "
+            "WHERE d.id = ? AND lower(f.email) = ?",
+            [doc_id, email]
+        ).fetchone()
+        if not doc:
+            return json_error("Document not found or not authorised", 404)
+        return send_file(doc["file_path"], as_attachment=True, download_name=doc["original_filename"])
     finally:
         db.close()
 

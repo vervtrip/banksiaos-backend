@@ -55,8 +55,9 @@ app.config.update(
 from werkzeug.middleware.proxy_fix import ProxyFix
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_for=1)
 
-# ── Single authoritative per-thread DB connection ──
+# ── Local Imports ──
 from banksia_os_db import get_db, get_dict_db, _vos_local
+from services.auth_service import log_auth_event
 
 # ── Flask teardown: clean up thread-local connection ──
 @app.teardown_appcontext

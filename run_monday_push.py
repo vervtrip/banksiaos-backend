@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Cron entry point: push pending local dashboard changes to Monday.com."""
+"""Cron entry point: push pending maintenance changes to Monday.com."""
 import sys
-sys.path.insert(0, '/root/banksia-dashboard')
+sys.path.insert(0, '/root/verv-dashboard')
+
+from verv_os_db import get_db
 from monday_push import push_all_pending
-from banksia_os_db import get_db
 
 db = get_db()
-result = push_all_pending(db)
-print(result["message"])
-sys.exit(0 if result["failed"] == 0 else 1)
+count = push_all_pending(db)
+print(f"Pushed {count} pending maintenance item(s) to Monday.com board 18401159622.")
