@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Apply — Banksia OS</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,sans-serif;background:#f4f6fb;color:#0b1220;min-height:100vh;-webkit-font-smoothing:antialiased}
+.center{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(15,23,42,.12);width:100%;max-width:440px;padding:40px 36px}
+.card .brand{text-align:center;margin-bottom:28px}
+.card .brand .logo{width:56px;height:56px;border-radius:14px;background:#111827;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:24px;margin:0 auto 14px}
+.card .brand h1{font-size:24px;font-weight:800;letter-spacing:-.5px;color:#0b1220}
+.card .brand p{color:#6b7688;font-size:13px;margin-top:4px;line-height:1.5}
+.fg{margin-bottom:16px}
+.fg label{display:block;font-size:12px;font-weight:600;color:#475569;margin-bottom:6px}
+.fg input,.fg select{width:100%;padding:12px 14px;border-radius:11px;border:1px solid #e2e8f0;font-size:14px;font-family:inherit;outline:none;background:#fff;transition:border .15s,box-shadow .15s}
+.fg input:focus,.fg select:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+.fg .hint{font-size:11px;color:#94a3b8;margin-top:4px}
+.btn{width:100%;padding:13px;border-radius:11px;background:#111827;color:#fff;font-size:14px;font-weight:700;border:none;cursor:pointer;font-family:inherit;transition:transform .1s,background .15s}
+.btn:hover{background:#000}.btn:active{transform:scale(.99)}
+.btn:disabled{opacity:.5;cursor:not-allowed}.btn:disabled:active{transform:none}
+.btn-secondary{background:#6366f1}.btn-secondary:hover{background:#4f46e5}
+.err{background:#fee2e2;color:#b91c1c;padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:14px;display:none}
+.ok{background:#dcfce7;color:#15803d;padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:14px;display:none}
+.divider{text-align:center;margin:20px 0;position:relative}
+.divider::before{content:'';position:absolute;top:50%;left:0;right:0;height:1px;background:#e2e8f0}
+.divider span{background:#fff;padding:0 14px;font-size:12px;color:#94a3b8;position:relative}
+.footer{text-align:center;margin-top:20px;font-size:12px;color:#94a3b8}
+.footer a{color:#6366f1;font-weight:600;text-decoration:none}
+.footer a:hover{text-decoration:underline}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.benefits{background:#f8fafc;border-radius:12px;padding:16px;margin-bottom:20px}
+.benefits p{font-size:12px;color:#475569;line-height:1.7;padding-left:20px;position:relative}
+.benefits p::before{content:'✓';position:absolute;left:0;color:#10b981;font-weight:700}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="center">
+    <div class="card">
+      <div class="brand">
+        <div class="logo">B</div>
+        <h1>Set up your account</h1>
+        <p>Create your applicant portal to start your referencing application</p>
+      </div>
+      <div class="err" id="err"></div>
+      <div class="benefits">
+        <p>Track your application status in real time</p>
+        <p>Upload documents securely from your phone</p>
+        <p>Sign your tenancy agreement digitally</p>
+        <p>Message your lettings team directly</p>
+      </div>
+      <div class="fg">
+        <label>First name</label>
+        <input id="first_name" type="text" placeholder="John" autocomplete="given-name">
+      </div>
+      <div class="fg">
+        <label>Last name</label>
+        <input id="last_name" type="text" placeholder="Doe" autocomplete="family-name">
+      </div>
+      <div class="fg">
+        <label>Email address</label>
+        <input id="email" type="email" placeholder="john@example.com" autocomplete="email">
+      </div>
+      <div class="fg">
+        <label>Choose a password</label>
+        <input id="pw" type="password" placeholder="At least 8 characters" autocomplete="new-password">
+      </div>
+      <div class="fg">
+        <label>Confirm password</label>
+        <input id="pw2" type="password" placeholder="Repeat your password" autocomplete="new-password" onkeydown="if(event.key==='Enter')doRegister()">
+      </div>
+      <button class="btn" id="regBtn" onclick="doRegister()">Create account & start application</button>
+      <div class="divider"><span>or</span></div>
+      <button class="btn btn-secondary" onclick="location.href='/portal/login'">I already have an account</button>
+      <div class="footer">
+        By creating an account you agree to our <a href="#">Terms</a> and <a href="#">Privacy Policy</a>.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+async function doRegister() {
+  const fn = document.getElementById('first_name').value.trim();
+  const ln = document.getElementById('last_name').value.trim();
+  const email = document.getElementById('email').value.trim().toLowerCase();
+  const pw = document.getElementById('pw').value;
+  const pw2 = document.getElementById('pw2').value;
+  const err = document.getElementById('err');
+  const btn = document.getElementById('regBtn');
+
+  if (!fn) { err.textContent = 'Please enter your first name'; err.style.display = 'block'; return; }
+  if (!ln) { err.textContent = 'Please enter your last name'; err.style.display = 'block'; return; }
+  if (!email) { err.textContent = 'Please enter your email address'; err.style.display = 'block'; return; }
+  if (!pw || pw.length < 8) { err.textContent = 'Password must be at least 8 characters'; err.style.display = 'block'; return; }
+  if (pw !== pw2) { err.textContent = 'Passwords do not match'; err.style.display = 'block'; return; }
+  err.style.display = 'none';
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Creating your account...';
+
+  try {
+    // Step 1: Create referencing form + portal user in one go
+    const r = await fetch('/api/referencing/portal/applicant-signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ first_name: fn, last_name: ln, email, password: pw })
+    });
+    const j = await r.json();
+    if (!r.ok || !j.success) throw new Error(j.error || 'Could not create your account');
+
+    // Step 2: Auto-login
+    const token = j.data.token;
+    localStorage.setItem('portal_token', token);
+
+    // Step 3: Redirect directly to the referencing form (auto-auth via portal_token is not needed)
+    // The form is public via form_token, so we go straight there
+    window.location.href = '/apply/' + j.data.form_token;
+  } catch (e) {
+    err.textContent = e.message;
+    err.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Create account & start application';
+  }
+}
+</script>
+</body>
+</html>

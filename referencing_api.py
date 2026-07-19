@@ -9,6 +9,7 @@ Mounts at /api/referencing/
 
 import json, os, sys, uuid, hashlib, hmac, secrets, re
 from datetime import datetime, timezone, timedelta
+import fitz  # PyMuPDF — used for PDF signing (module-level so all functions can access it)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flask import Blueprint, jsonify, request, session as flask_session, send_file
@@ -488,6 +489,42 @@ def api_get_form(form_id):
             [form_id]
         ).fetchall() if is_team else []
 
+        # ── Resolve property + unit names from the linked applicant ──
+        property_name = None
+        unit_ref = None
+        property_id = None
+        unit_id = None
+        applicant_id = form.get("applicant_id")
+        if applicant_id:
+            app = db.execute(
+                "SELECT a.property_id, a.unit_id, "
+                "COALESCE(NULLIF(p.ref, ''), NULLIF(p.address_line_1, ''), p.name) AS pname, "
+                "u.unit_ref "
+                "FROM applicants a "
+                "LEFT JOIN properties p ON a.property_id = p.id "
+                "LEFT JOIN units u ON a.unit_id = u.id "
+                "WHERE a.id = ?",
+                [applicant_id]
+            ).fetchone()
+            if app:
+                property_id = app.get("property_id")
+                unit_id = app.get("unit_id")
+                property_name = app.get("pname")
+                unit_ref = app.get("unit_ref")
+        # If no applicant-linked property, try the old form-level property fields
+        if not property_name:
+            property_name = form.get("property_name")
+            unit_ref = form.get("unit_ref")
+            property_id = form.get("property_id")
+            unit_id = form.get("unit_id")
+
+        # Attach resolved property info into the form dict so the frontend
+        # renders it without a second API call
+        form["property_name"] = property_name
+        form["unit_ref"] = unit_ref
+        form["property_id"] = property_id
+        form["unit_id"] = unit_id
+
         return json_success({
             "form": form,
             "documents": documents,
@@ -578,6 +615,44 @@ def api_update_form(form_id):
             params
         )
 
+        # ── Propagate key fields to linked applicant record ──
+        form_applicant_id = form.get("applicant_id")
+        if form_applicant_id:
+            # Map form field names to applicant column names
+            field_map = {
+                "preferred_move_in_date": "desired_move_in",
+                "annual_salary": "employment_salary",
+                "employer_name": "employment_company",
+                "employer_address": "employment_address",
+                "mobile_phone": "mobile",
+                "current_address_line1": "full_address",
+            }
+            # Also handle rent/deposit if stored on referencing_forms
+            rent = data.get("agreed_rent") or data.get("proposed_rent")
+            deposit = data.get("deposit_amount") or data.get("proposed_deposit")
+            move_in = data.get("preferred_move_in_date") or data.get("desired_move_in")
+
+            app_updates = {}
+            for form_field, app_column in field_map.items():
+                if form_field in data:
+                    app_updates[app_column] = data[form_field]
+
+            if "desired_move_in" in data:
+                app_updates["desired_move_in"] = data["desired_move_in"]
+            if "proposed_rent" in data:
+                app_updates["proposed_rent"] = data["proposed_rent"]
+            if "proposed_deposit" in data:
+                app_updates["proposed_deposit"] = data["proposed_deposit"]
+
+            if app_updates:
+                app_set = ", ".join(f"{col} = ?" for col in app_updates)
+                app_vals = list(app_updates.values())
+                app_vals.append(form_applicant_id)
+                db.execute(
+                    f"UPDATE applicants SET {app_set} WHERE id = ?",
+                    app_vals
+                )
+
         # Track section completion
         section_map = {
             'title': 'personal', 'first_name': 'personal', 'date_of_birth': 'personal',
@@ -656,6 +731,39 @@ def api_submit_form(form_id):
 
         db.commit()
 
+        # ── Auto-trigger AI document review ──
+        try:
+            documents = db.execute(
+                "SELECT * FROM referencing_documents WHERE form_id = ?", [form_id]
+            ).fetchall()
+            if documents:
+                form_row = db.execute("SELECT * FROM referencing_forms WHERE id = ?", [form_id]).fetchone()
+                analyses = {}
+                for doc in documents:
+                    analysis = run_document_analysis(doc, form_row)
+                    analyses[doc["id"]] = analysis
+                    db.execute(
+                        "UPDATE referencing_documents SET ai_analysis = ?, ai_verified = ?, ai_confidence = ?, ai_flagged = ?, ai_flag_reason = ? WHERE id = ?",
+                        [json.dumps(analysis), 1 if analysis.get("verified") else 0,
+                         analysis.get("confidence", 0), 1 if analysis.get("flagged") else 0,
+                         analysis.get("flag_reason", ""), doc["id"]]
+                    )
+                checks = run_cross_referencing_checks(form_row, documents, analyses)
+                for check in checks:
+                    # Remove existing pending checks for this type and insert live results
+                    db.execute(
+                        "DELETE FROM referencing_checks WHERE form_id = ? AND check_type = ?",
+                        [form_id, check["type"]]
+                    )
+                    db.execute(
+                        "INSERT INTO referencing_checks (form_id, check_type, status, details, confidence, summary) VALUES (?, ?, ?, ?, ?, ?)",
+                        [form_id, check["type"], check["status"], json.dumps(check.get("details", {})),
+                         check.get("confidence", 0), check.get("summary", "")]
+                    )
+                db.commit()
+        except Exception:
+            pass  # Never block submission on AI review failure
+
         # Confirmation email + invitation to set up the tracking portal.
         try:
             setup_url = f"{PUBLIC_BASE_URL}/portal?setup={form['form_token']}"
@@ -678,6 +786,78 @@ def api_submit_form(form_id):
 
         updated = db.execute("SELECT * FROM referencing_forms WHERE id = ?", [form_id]).fetchone()
         return json_success(updated)
+    except Exception as e:
+        db.rollback()
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@referencing_bp.route("/forms/<int:form_id>/assign-property", methods=["POST"])
+@require_team_auth
+def api_assign_form_property(form_id):
+    """Delta team assigns a property and unit to this referencing form's applicant.
+
+    Sets property_id + unit_id on the linked applicant record so the
+    auto-tenancy-creation flow knows which unit this person is moving into.
+    """
+    data = request.get_json() or {}
+    property_id = data.get("property_id")
+    unit_id = data.get("unit_id")
+
+    if not property_id or not unit_id:
+        return json_error("property_id and unit_id are required")
+
+    db = get_dict_db()
+    try:
+        form = db.execute("SELECT * FROM referencing_forms WHERE id = ?", [form_id]).fetchone()
+        if not form:
+            return json_error("Form not found", 404)
+
+        # Validate property + unit
+        prop = db.execute("SELECT id, name, address_line_1 FROM properties WHERE id = ?", [property_id]).fetchone()
+        if not prop:
+            return json_error(f"Property {property_id} not found", 404)
+
+        unit = db.execute(
+            "SELECT id, unit_ref, unit_status FROM units WHERE id = ? AND property_id = ?",
+            [unit_id, property_id]
+        ).fetchone()
+        if not unit:
+            return json_error(f"Unit {unit_id} not found under property {property_id}", 404)
+
+        now = datetime.now(timezone.utc).isoformat()
+        applicant_id = form.get("applicant_id")
+        changes = []
+
+        # Update the applicant record with property_id + unit_id
+        if applicant_id:
+            app = db.execute("SELECT * FROM applicants WHERE id = ?", [applicant_id]).fetchone()
+            if app:
+                old_prop = app.get("property_id")
+                old_unit = app.get("unit_id")
+                db.execute(
+                    "UPDATE applicants SET property_id = ?, unit_id = ?, modified = ? WHERE id = ?",
+                    [property_id, unit_id, now, applicant_id]
+                )
+                changes.append(f"applicant #{applicant_id}: property {old_prop}→{property_id}, unit {old_unit}→{unit_id}")
+
+        # Also update referencing form metadata if needed
+        db.execute(
+            "UPDATE referencing_forms SET modified = ? WHERE id = ?",
+            [now, form_id]
+        )
+
+        db.commit()
+
+        return json_success({
+            "property_id": property_id,
+            "unit_id": unit_id,
+            "property_name": prop.get("name") or prop.get("address_line_1") or "",
+            "unit_ref": unit.get("unit_ref") or "",
+            "applicant_id": applicant_id,
+            "changes": changes,
+        })
     except Exception as e:
         db.rollback()
         return json_error(str(e), 500)
@@ -713,26 +893,31 @@ def api_update_form_status(form_id):
                 signer_email = form.get('email', '')
                 applicant_id = form.get('applicant_id')
 
+                # Propagate rent/deposit/move-in from form data to applicant for tenancy creation
+                if applicant_id:
+                    form_rent = form.get("proposed_rent") or form.get("agreed_rent")
+                    form_deposit = form.get("proposed_deposit") or form.get("deposit_amount")
+                    form_move_in = form.get("preferred_move_in_date") or form.get("desired_move_in")
+
+                    # Always update applicant status to 'approved'
+                    app_updates_list = ["status = 'approved'"]
+                    app_params_list = []
+                    if form_rent:
+                        app_updates_list.append("proposed_rent = ?")
+                        app_params_list.append(float(form_rent))
+                    if form_deposit:
+                        app_updates_list.append("proposed_deposit = ?")
+                        app_params_list.append(float(form_deposit))
+                    if form_move_in:
+                        app_updates_list.append("desired_move_in = ?")
+                        app_params_list.append(str(form_move_in)[:10])
+                    app_params_list.append(applicant_id)
+                    db.execute(
+                        f"UPDATE applicants SET {', '.join(app_updates_list)} WHERE id = ?",
+                        app_params_list
+                    )
+
                 if signer_email:
-                    # Get property info
-                    prop_name = ""
-                    unit_ref = ""
-                    if applicant_id:
-                        app = db.execute("SELECT property_id, unit_id FROM applicants WHERE id = ?", [applicant_id]).fetchone()
-                        if app:
-                            prop_row = db.execute("SELECT name, address_line_1 FROM properties WHERE id = ?", [app['property_id']]).fetchone()
-                            if prop_row:
-                                prop_name = prop_row.get('name') or prop_row.get('address_line_1', '')
-                            unit_row = db.execute("SELECT ref FROM units WHERE id = ?", [app['unit_id']]).fetchone()
-                            if unit_row:
-                                unit_ref = unit_row.get('ref', '')
-
-                    # Determine template — use first available tenancy_agreement template
-                    tmpl = db.execute(
-                        "SELECT id FROM document_templates WHERE document_type = 'tenancy_agreement' ORDER BY id DESC LIMIT 1"
-                    ).fetchone()
-                    template_id = str(tmpl['id']) if tmpl else None
-
                     # Create the esign request
                     import uuid
                     from datetime import datetime, timezone, timedelta
@@ -740,7 +925,15 @@ def api_update_form_status(form_id):
                     team_token = uuid.uuid4().hex[:32]
 
                     team_name = _current_username() or "Banksia Team"
-                    team_email = (db.execute("SELECT email FROM users WHERE username = ?", [_current_username()]).fetchone() or {}).get("email", "team@banksialondon.com")
+                    try:
+                        # User data is in the JSON file, not a DB table
+                        import json as _json
+                        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.json")) as _uf:
+                            _users = _json.load(_uf)
+                        _team_user = _users.get(_current_username(), {})
+                        team_email = _team_user.get("email", "team@banksialondon.com")
+                    except Exception:
+                        team_email = "team@banksialondon.com"
 
                     db.execute(
                         """INSERT INTO esignature_requests
@@ -754,7 +947,7 @@ def api_update_form_status(form_id):
                          signer_name, signer_email, signer_token,
                          (datetime.now(timezone.utc) + timedelta(days=14)).isoformat(),
                          _current_username(),
-                         template_id, team_name, team_email, team_token]
+                         None, team_name, team_email, team_token]
                     )
                     esign_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()['rid']
 
@@ -766,9 +959,33 @@ def api_update_form_status(form_id):
                     # Send the esign request
                     new_req = db.execute("SELECT * FROM esignature_requests WHERE id = ?", [esign_id]).fetchone()
                     _deliver_esignature(db, new_req, actual_send=True)
-            except Exception:
+            except Exception as e:
+                import traceback
+                print(f"[AUTO-ESIGN] Failed: {e}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
                 pass  # Don't fail approval if esign creation errors
 
+            db.commit()  # Commit esign creation + status update
+
+        return json_success(updated)
+    finally:
+        db.close()
+
+
+@referencing_bp.route("/forms/<int:form_id>/guarantor-toggle", methods=["POST"])
+@require_team_auth
+def api_toggle_guarantor(form_id):
+    """Toggle whether a guarantor is required for this applicant."""
+    data = request.get_json() or {}
+    required = data.get("guarantor_required", True)
+    db = get_dict_db()
+    try:
+        db.execute(
+            "UPDATE referencing_forms SET has_guarantor = ?, modified = datetime('now') WHERE id = ?",
+            [1 if required else 0, form_id]
+        )
+        db.commit()
+        updated = db.execute("SELECT * FROM referencing_forms WHERE id = ?", [form_id]).fetchone()
         return json_success(updated)
     finally:
         db.close()
@@ -857,6 +1074,25 @@ def api_get_document(doc_id):
             return send_file(doc["file_path"], as_attachment=True, download_name=doc["original_filename"])
 
         return json_success(doc)
+    finally:
+        db.close()
+
+
+@referencing_bp.route("/documents/<int:doc_id>/preview", methods=["GET"])
+def api_preview_document(doc_id):
+    """View a referencing document inline in the browser.
+    Requires team auth. Serves the file without Content-Disposition: attachment
+    so the browser displays it natively (PDF, image, etc.)."""
+    if "user" not in flask_session:
+        return json_error("Not authenticated", 401)
+    db = get_dict_db()
+    try:
+        doc = db.execute("SELECT * FROM referencing_documents WHERE id = ?", [doc_id]).fetchone()
+        if not doc:
+            return json_error("Document not found", 404)
+        from mimetypes import guess_type
+        mime = doc.get("mime_type") or guess_type(doc["original_filename"])[0] or "application/octet-stream"
+        return send_file(doc["file_path"], mimetype=mime, as_attachment=False, download_name=doc["original_filename"])
     finally:
         db.close()
 
@@ -1000,7 +1236,6 @@ def extract_document_text(doc):
     ext = os.path.splitext(path)[1].lower()
     try:
         if ext == ".pdf":
-            import fitz
             d = fitz.open(path)
             text = "\n".join(p.get_text() for p in d)
             d.close()
@@ -1110,6 +1345,29 @@ def run_document_analysis(doc, form=None):
         sc = _SORT_RE.search(text)
         if sc:
             analysis["extracted"]["sort_code"] = sc.group(1)
+        # ── Funds analysis: parse opening/closing balances and all transactions ──
+        opening = re.search(r'(?:opening balance|balance brought|b/f|brought forward)\s*[:\s]*£?\s*([0-9,.]+)', low)
+        closing = re.search(r'(?:closing balance|balance carried|c/f|carried forward)\s*[:\s]*£?\s*([0-9,.]+)', low)
+        if opening:
+            analysis["extracted"]["opening_balance"] = float(opening.group(1).replace(",",""))
+        if closing:
+            analysis["extracted"]["closing_balance"] = float(closing.group(1).replace(",",""))
+        # Count credits (income) and debits (outgoings) as rough indicators
+        credit_lines = re.findall(r'(?:credit|deposit|salary|wages|transfer in|paid in)\s*[:\s]*£?\s*([0-9,.]+)', low)
+        debit_lines = re.findall(r'(?:debit|withdrawal|direct debit|standing order|transfer out|payment|card purchase)\s*[:\s]*£?\s*([0-9,.]+)', low)
+        if credit_lines:
+            analysis["extracted"]["total_credits"] = sum(float(c.replace(",","")) for c in credit_lines if c)
+        if debit_lines:
+            analysis["extracted"]["total_debits"] = sum(float(d.replace(",","")) for d in debit_lines if d)
+        if analysis["extracted"].get("closing_balance") and form:
+            monthly_rent = float(form.get("annual_salary") or 0) / 12 if form.get("annual_salary") else 0
+            balance = analysis["extracted"]["closing_balance"]
+            if monthly_rent > 0 and balance >= monthly_rent:
+                analysis["extracted"]["funds_check"] = "sufficient"
+            elif monthly_rent > 0:
+                analysis["extracted"]["funds_check"] = "low_balance"
+                analysis["flagged"] = True
+                analysis["flag_reason"] = f"Closing balance (£{balance:,.0f}) is less than one month's rent (~£{monthly_rent:,.0f})"
 
     # 6. Verdict
     score = 0.5
@@ -1202,6 +1460,30 @@ def run_cross_referencing_checks(form, documents, analyses=None):
         "summary": income_summary or "Income check pending — review payslips against stated salary"
     }
     checks.append(income_check)
+
+    # ── 2b. Payslip-to-bank-statement matching ──
+    if top_payslip and statements:
+        # Look for a credit roughly matching the payslip net pay in any bank statement
+        bank_amounts = []
+        for d in statements:
+            bank_amounts += (analyses.get(d["id"], {}).get("extracted", {}).get("amounts_gbp") or [])
+        matching_deposits = [a for a in bank_amounts if abs(a - top_payslip) / top_payslip < 0.15] if top_payslip else []
+        deposit_match_check = {
+            "type": "deposit_match_check",
+            "status": "passed" if matching_deposits else ("flagged" if bank_amounts else "pending"),
+            "confidence": 0.85 if matching_deposits else (0.3 if bank_amounts else 0.5),
+            "details": {
+                "payslip_net_amount": top_payslip,
+                "matching_deposits_found": len(matching_deposits),
+                "matching_deposit_amounts": [round(m, 2) for m in matching_deposits],
+            },
+            "summary": (
+                f"Payslip net pay (~£{top_payslip:,.0f}) matches deposits on bank statements."
+                if matching_deposits else
+                "⚠ Payslip amount not clearly matched to bank statement deposits — manual review recommended."
+            )
+        }
+        checks.append(deposit_match_check)
 
     # 3. Right to rent check
     rtr_check = {
@@ -1748,6 +2030,118 @@ def api_download_merged_pdf(req_id):
 # ────────────────────────────────────────────
 # SECTION 4: TENANT PORTAL AUTH
 # ────────────────────────────────────────────
+
+@referencing_bp.route("/portal/applicant-signup", methods=["POST"])
+def api_applicant_signup():
+    """Create a portal user AND a referencing form in one step.
+
+    This is the public-facing signup form used by applicants who've paid
+    their holding deposit. No form token is needed — we generate everything
+    on the fly. The applicant is auto-logged-in and redirected to the portal.
+    """
+    data = request.get_json() or {}
+    first_name = (data.get("first_name") or "").strip()
+    last_name = (data.get("last_name") or "").strip()
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password", "")
+
+    if not first_name or not last_name or not email:
+        return json_error("First name, last name, and email are required")
+    if not password or len(password) < 8:
+        return json_error("Password must be at least 8 characters")
+
+    import secrets
+    db = get_dict_db()
+    try:
+        # Check if portal user already exists
+        existing = db.execute(
+            "SELECT * FROM portal_users WHERE lower(email) = ?", [email]
+        ).fetchone()
+        if existing and existing["password_hash"]:
+            return json_error("An account already exists for this email — please log in", 409)
+
+        now = datetime.now(timezone.utc).isoformat()
+        form_token = secrets.token_urlsafe(32)
+
+        # Create the referencing form
+        cur = db.execute(
+            "INSERT INTO referencing_forms (form_token, status, first_name, last_name, "
+            "email, created, modified) "
+            "VALUES (?, 'draft', ?, ?, ?, ?, ?)",
+            [form_token, first_name, last_name, email, now, now]
+        )
+        form_id = cur.lastrowid
+
+        # Create applicants record (visible in the Applicants module)
+        cur = db.execute(
+            "INSERT INTO applicants (first_name, last_name, email, status, created, modified) "
+            "VALUES (?, ?, ?, 'New', ?, ?)",
+            [first_name, last_name, email, now, now]
+        )
+        applicant_id = cur.lastrowid
+
+        # Link the referencing form to the applicant
+        db.execute(
+            "UPDATE referencing_forms SET applicant_id = ? WHERE id = ?",
+            [applicant_id, form_id]
+        )
+
+        # Create or update portal user
+        pw_hash = hash_password(password)
+        form_ref = db.execute("SELECT * FROM referencing_forms WHERE id = ?", [form_id]).fetchone()
+
+        if existing:
+            db.execute(
+                "UPDATE portal_users SET password_hash = ?, "
+                "portal_type = 'applicant', is_active = 1, modified = datetime('now') WHERE id = ?",
+                [pw_hash, existing["id"]],
+            )
+            user_id = existing["id"]
+        else:
+            db.execute(
+                "INSERT INTO portal_users (email, password_hash, first_name, last_name, "
+                "portal_type, is_active, email_verified, created, modified) "
+                "VALUES (?, ?, ?, ?, 'applicant', 1, 1, datetime('now'), datetime('now'))",
+                [email, pw_hash, first_name, last_name],
+            )
+            user_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
+
+        # Link referencing form to the portal user — store user_id on the form
+        db.execute(
+            "UPDATE referencing_forms SET portal_user_id = ? WHERE id = ?",
+            [user_id, form_id]
+        )
+
+        # Auto-login
+        token = generate_token()
+        expires_at = (datetime.now(timezone.utc) + PORTAL_SESSION_TTL).isoformat()
+        db.execute(
+            "INSERT INTO portal_sessions (user_id, session_token, ip_address, user_agent, expires_at) VALUES (?, ?, ?, ?, ?)",
+            [user_id, token, request.remote_addr or '', request.headers.get("User-Agent", ""), expires_at],
+        )
+        db.execute(
+            "UPDATE portal_users SET last_login_at = datetime('now'), last_login_ip = ? WHERE id = ?",
+            [request.remote_addr or '', user_id],
+        )
+        db.commit()
+
+        return json_success({
+            "token": token,
+            "user": {
+                "id": user_id, "email": email,
+                "first_name": first_name, "last_name": last_name,
+                "portal_type": "applicant",
+            },
+            "expires_at": expires_at,
+            "form_id": form_id,
+            "form_token": form_token,
+        }), 201
+    except Exception as e:
+        db.rollback()
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
 
 @referencing_bp.route("/portal/register", methods=["POST"])
 def api_portal_register():
@@ -2772,6 +3166,17 @@ def api_create_tenancy_from_form():
                  f"Auto-created from referencing form #{form_id}", now, now],
             )
 
+        # ── Link the portal user to the tenancy ──
+        try:
+            form_email = (form.get("email") or "").lower().strip()
+            if form_email:
+                db.execute(
+                    "UPDATE portal_users SET tenancy_id = ?, portal_type = 'tenant', modified = ? WHERE lower(email) = ? AND tenancy_id IS NULL",
+                    [tenancy_id, now, form_email]
+                )
+        except Exception:
+            pass  # Non-blocking — portal user may not exist yet
+
         db.commit()
         tenancy = db.execute("SELECT * FROM tenancies WHERE id = ?", [tenancy_id]).fetchone()
         return json_success(
@@ -2970,6 +3375,25 @@ def _call_create_tenancy(app_id, db):
         if not property_id or not unit_id:
             return {"success": False, "error": "Applicant must have property_id and unit_id"}
 
+        # Fall back to referencing form data if applicant has NULL values
+        rent_amount = app.get("proposed_rent")
+        deposit_amount = app.get("proposed_deposit")
+        start_date = app.get("desired_move_in")
+
+        if not rent_amount or not deposit_amount or not start_date:
+            # Try to pull from linked referencing form
+            ref = db.execute(
+                "SELECT annual_salary, preferred_move_in_date FROM referencing_forms WHERE applicant_id = ? ORDER BY id DESC LIMIT 1",
+                [app_id]
+            ).fetchone()
+            if ref:
+                if not rent_amount:
+                    rent_amount = ref.get("annual_salary")
+                if not start_date:
+                    start_date = ref.get("preferred_move_in_date")
+            if not deposit_amount:
+                deposit_amount = rent_amount * 1.1667 if rent_amount else 0  # ~1 month + 1 week
+
         now = datetime.now(timezone.utc)
         now_iso = now.isoformat()
         first_name = app.get("first_name", "")
@@ -2977,7 +3401,9 @@ def _call_create_tenancy(app_id, db):
         email = app.get("email", "")
         phone = app.get("phone", "") or app.get("mobile", "")
         main_tenant_name = f"{first_name} {last_name}".strip()
-        start_date = app.get("desired_move_in") or now_iso[:10]
+
+        if not start_date:
+            start_date = now_iso[:10]
 
         from dateutil.relativedelta import relativedelta
         try:
@@ -2986,8 +3412,6 @@ def _call_create_tenancy(app_id, db):
             start_dt = now
         end_dt = start_dt + relativedelta(months=6)
         end_date = end_dt.strftime("%Y-%m-%d")
-        rent_amount = app.get("proposed_rent")
-        deposit_amount = app.get("proposed_deposit")
 
         tenancy_cur = db.execute(
             "INSERT INTO tenancies (property_id, unit_id, main_tenant_name, status, "

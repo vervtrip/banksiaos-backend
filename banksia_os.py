@@ -1601,8 +1601,10 @@ def _ensure_landlord_link(db, data):
 def api_properties():
     if request.method == "POST":
         return api_create_property()
-    page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
+    all_mode = request.args.get("all", "").strip().lower() in ("1", "true", "yes")
+
+    page = int_param(request.args.get("page")) if not all_mode else 1
+    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE) if not all_mode else 9999
     search = request.args.get("search", "").strip()
     occ_filter = request.args.get("occupancy", "").strip().lower()
     rent_min = float_param(request.args.get("rent_min"))
@@ -3010,7 +3012,30 @@ ALLOWED_UNIT_FIELDS = {
 }
 
 
-@banksia_os_bp.route("/properties/<int:prop_id>/units", methods=["POST"])
+@banksia_os_bp.route("/properties/<int:prop_id>/units", methods=["GET", "POST"])
+def api_units_for_property(prop_id):
+    if request.method == "GET":
+        return api_list_units_for_property(prop_id)
+    return api_create_unit_for_property(prop_id)
+
+
+def api_list_units_for_property(prop_id):
+    """GET /api/banksia-os/properties/{prop_id}/units — list units for a property."""
+    db = get_dict_db()
+    try:
+        units = db.execute(
+            "SELECT id, unit_ref AS ref, unit_type, unit_status, market_rent, floor, bedrooms, "
+            "capacity, max_occupancy, furnished, status, notes, created, modified "
+            "FROM units WHERE property_id = ? ORDER BY unit_ref",
+            (prop_id,)
+        ).fetchall()
+        return json_success(units)
+    except Exception as e:
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
 def api_create_unit_for_property(prop_id):
     """POST /api/banksia-os/properties/{prop_id}/units — create a unit."""
     data = request.get_json(silent=True)
@@ -8943,6 +8968,55 @@ def api_transition_applicant_status(app_id):
 # ═══════════════════════════════════════════════════════════════
 # 9B. REFERENCING ENDPOINTS
 # ═══════════════════════════════════════════════════════════════
+
+@banksia_os_bp.route("/referencing/create", methods=["POST"])
+def api_create_referencing_standalone():
+    """Create a new referencing form standalone (no applicant required)."""
+    data = request.get_json(silent=True) or {}
+    first_name = (data.get("first_name") or "").strip()
+    last_name = (data.get("last_name") or "").strip()
+    email = (data.get("email") or "").strip()
+
+    if not first_name or not last_name or not email:
+        return json_error("first_name, last_name, and email are required", 400)
+
+    import secrets
+    db = get_dict_db()
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        form_token = secrets.token_urlsafe(32)
+
+        cur = db.execute(
+            "INSERT INTO referencing_forms (form_token, status, first_name, last_name, "
+            "email, phone, created, modified) "
+            "VALUES (?, 'new', ?, ?, ?, ?, ?, ?)",
+            [form_token, first_name, last_name, email,
+             data.get("phone", ""), now, now]
+        )
+        form_id = cur.lastrowid
+
+        # If property_id provided, link via applicants table or direct link
+        property_id = data.get("property_id")
+        unit_ref = data.get("unit_ref")
+        if property_id:
+            db.execute(
+                "UPDATE referencing_forms SET property_name = (SELECT address_line_1 FROM properties WHERE id = ?), "
+                "unit_ref = ? WHERE id = ?",
+                [property_id, unit_ref or "", form_id]
+            )
+
+        _log_activity("referencing_form", form_id, "created",
+                       notes=f"Standalone referencing created for {first_name} {last_name}", db=db)
+
+        form = db.execute("SELECT * FROM referencing_forms WHERE id = ?", (form_id,)).fetchone()
+        db.commit()
+        return json_success(form), 201
+    except Exception as e:
+        db.rollback()
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
 
 @banksia_os_bp.route("/applicants/<int:app_id>/referencing", methods=["POST"])
 def api_create_referencing(app_id):

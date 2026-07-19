@@ -39,7 +39,7 @@ def _load_secret_key() -> str:
 app.secret_key = _load_secret_key()
 app.config.update(
     # Browser<->Traefik is HTTPS; ProxyFix trusts X-Forwarded-Proto so Flask sees it as secure.
-    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_SECURE=False,  # Development; Traefik adds HTTPS in production
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
     SESSION_COOKIE_NAME='banksia_os_sid',
@@ -2889,10 +2889,19 @@ def api_update_profile():
 
 # ── Referencing Form Page ──
 @app.route("/apply")
+def referencing_apply_page():
+    """If no ?token= param is passed, show the applicant sign-up form.
+       The sign-up flow creates both a portal user AND a referencing form."""
+    token = request.args.get("token", "")
+    if token:
+        return render_template("referencing_form.html", url_token=token)
+    return render_template("applicant_signup.html")
+
+
 @app.route("/apply/<token>")
-def referencing_form_page(token=None):
-    # Support both /apply?token=x (query) and /apply/x (path) link styles.
-    return render_template("referencing_form.html", url_token=token or "")
+def referencing_form_page(token):
+    # Support both /apply/x (path) and /apply?token=x (query) link styles.
+    return render_template("referencing_form.html", url_token=token)
 
 
 # ── Referencing Admin Panel (team) ──

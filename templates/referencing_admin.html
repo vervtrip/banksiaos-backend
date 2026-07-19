@@ -358,7 +358,7 @@ function renderDetail(d){
   else{html+=docs.map(dc=>`<div class="doc-row">
     <div><div class="dl">${esc(dc.original_filename||dc.filename)} ${dc.ai_flagged?`<span class="flag">FLAGGED</span>`:''}</div>
     <div class="dm">${esc((dc.category||'').replace('_',' '))} · ${Math.round((dc.file_size||0)/1024)} KB · ${dc.ai_verified?'✓ verified':(dc.ai_analysis?'reviewed':'not reviewed')}${dc.ai_flag_reason?' · '+esc(dc.ai_flag_reason):''}</div></div>
-    <a class="btn btn-ghost btn-sm" href="${API}/documents/${dc.id}?download=1" target="_blank">View</a></div>`).join('');}
+    <div style="display:flex;gap:4px"><a class="btn btn-ghost btn-sm" href="${API}/documents/${dc.id}/preview" target="_blank">View</a><a class="btn btn-ghost btn-sm" href="${API}/documents/${dc.id}?download=1" target="_blank">⬇</a></div></div>`).join('');}
   html+=`</div>`;
   // AI checks
   if(checks.length){

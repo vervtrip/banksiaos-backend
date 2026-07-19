@@ -116,7 +116,28 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#f8fafc;color:#0f17
     <h1>Banksia 🌿</h1>
     <span class="tag">Tenant Referencing</span>
   </div>
-  <div class="status-badge draft" id="statusBadge">Draft</div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span style="font-size:11px;color:#94a3b8" id="saveIndicator">All changes saved ✓</span>
+    <div class="status-badge draft" id="statusBadge">Draft</div>
+    <div style="position:relative" id="userMenuContainer">
+      <button onclick="toggleUserMenu()" id="userMenuBtn" style="display:none;background:#f1f5f9;border:none;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;color:#475569;align-items:center;gap:6px">
+        <span id="userMenuName">Sam</span>
+        <span style="font-size:8px">▼</span>
+      </button>
+      <div id="userMenuDropdown" style="display:none;position:absolute;right:0;top:100%;margin-top:6px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.1);z-index:100;min-width:200px;padding:6px">
+        <div style="padding:8px 12px;border-bottom:1px solid #f1f5f9;margin-bottom:4px">
+          <p style="font-size:12px;font-weight:600;color:#0f172a" id="userMenuFullName">Applicant</p>
+          <p style="font-size:10px;color:#94a3b8" id="userMenuEmail">user@email.com</p>
+        </div>
+        <button onclick="location.href='/portal'" style="display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;border:none;background:none;font-size:12px;font-family:inherit;cursor:pointer;color:#475569;border-radius:6px;text-align:left">
+          📋 Go to Portal Dashboard
+        </button>
+        <button onclick="doLogout()" style="display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;border:none;background:none;font-size:12px;font-family:inherit;cursor:pointer;color:#dc2626;border-radius:6px;text-align:left">
+          🚪 Sign Out
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Status Bar -->
@@ -172,6 +193,65 @@ let formData = {};
 let uploadedDocs = [];
 let currentSection = 0;
 let isLoading = false;
+
+// ── User Menu & Logout ──
+function toggleUserMenu() {
+  const dd = document.getElementById('userMenuDropdown');
+  const isOpen = dd.style.display === 'block';
+  dd.style.display = isOpen ? 'none' : 'block';
+}
+// Close menu on click outside
+document.addEventListener('click', function(e) {
+  const container = document.getElementById('userMenuContainer');
+  if (container && !container.contains(e.target)) {
+    const dd = document.getElementById('userMenuDropdown');
+    if (dd) dd.style.display = 'none';
+  }
+});
+
+function showUserMenu(firstName, email) {
+  const btn = document.getElementById('userMenuBtn');
+  const nameEl = document.getElementById('userMenuName');
+  const fullNameEl = document.getElementById('userMenuFullName');
+  const emailEl = document.getElementById('userMenuEmail');
+  if (btn) { btn.style.display = 'flex'; }
+  if (nameEl) nameEl.textContent = firstName || 'Applicant';
+  if (fullNameEl) fullNameEl.textContent = (firstName || '') + ' ' + (formData.last_name || '');
+  if (emailEl) emailEl.textContent = email || '';
+}
+
+function showSaved() {
+  const el = document.getElementById('saveIndicator');
+  if (el) {
+    el.textContent = 'All changes saved ✓';
+    el.style.color = '#16a34a';
+  }
+}
+
+async function doLogout() {
+  try {
+    const token = localStorage.getItem('portal_token');
+    if (token) {
+      await fetch('/api/referencing/portal/logout', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+    }
+  } catch(e) {}
+  localStorage.removeItem('portal_token');
+  // Show a message and keep them on the form (data is saved in DB)
+  // They can resume anytime with the same link
+  const btn = document.getElementById('userMenuBtn');
+  if (btn) btn.style.display = 'none';
+  const dd = document.getElementById('userMenuDropdown');
+  if (dd) dd.style.display = 'none';
+  // Show logged out state
+  const si = document.getElementById('saveIndicator');
+  if (si) {
+    si.textContent = '✓ Saved — you can safely close this page. Resume anytime with the same link.';
+    si.style.color = '#2563eb';
+  }
+}
 
 // ── Section Definitions ──
 const SECTIONS = [
@@ -378,6 +458,9 @@ async function init() {
     formData = data.data.form || {};
     FORM_ID = formData.id;
     uploadedDocs = data.data.documents || [];
+    // Show user menu with applicant details
+    showUserMenu(formData.first_name, formData.email);
+    showSaved();
     renderForm();
     updateProgress();
   } catch (e) {
@@ -580,16 +663,38 @@ async function saveSection(idx) {
     const data = await res.json();
     if (data.success) {
       formData = data.data;
-      // Re-render to show updated section states
-      renderForm();
+      // Update section status and progress without full re-render
+      // Mark current section as complete
+      const currentHeader = document.querySelector(`#section-${idx} .section-header`);
+      if (currentHeader) {
+        currentHeader.classList.add('complete');
+        const stepNum = currentHeader.querySelector('.step-num');
+        if (stepNum) stepNum.textContent = '✓';
+        const statusIcon = currentHeader.querySelector('.status-icon');
+        if (statusIcon) statusIcon.textContent = '✅';
+      }
+      // Update the section footer status
+      const currentFooter = document.querySelector(`#section-${idx} .section-footer span`);
+      if (currentFooter) currentFooter.textContent = '✅ Completed';
+      
       updateProgress();
-      // Move to next section
+      showSaved();
+
+      // Move to next section: close current, open next
+      const currentBody = document.getElementById(`body-${idx}`);
+      if (currentBody) currentBody.classList.remove('open');
+      
       if (idx < SECTIONS.length - 1) {
-        toggleSection(idx + 1);
+        const nextBody = document.getElementById(`body-${idx + 1}`);
+        if (nextBody) nextBody.classList.add('open');
+        
+        // Update section header styling for next section
+        const nextHeader = document.querySelector(`#section-${idx + 1} .section-header`);
+        if (nextHeader) nextHeader.classList.add('active');
       }
     }
   } catch (e) {
-    console.error('Save failed:', e);
+    alert('Save failed: ' + e.message);
   }
 }
 
