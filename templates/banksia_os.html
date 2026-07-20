@@ -556,6 +556,9 @@ code{background:#f1f5f9;padding:2px 6px;border-radius:3px;font-size:12px;color:#
 .ref-wrap .check-row{padding:12px 14px;border:1px solid #eef2f7;border-radius:10px;margin-bottom:8px}
 .ref-wrap .check-row .ct{font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
 .ref-wrap .check-row .cs{font-size:12px;color:#64748b;margin-top:4px}
+.ref-progress{display:flex;align-items:center;gap:6px;min-width:80px}
+.ref-progress-bar{flex:1;height:6px;background:#f1f5f9;border-radius:3px;overflow:hidden}
+.ref-progress-fill{height:100%;border-radius:3px;transition:width .3s ease}
 @media(max-width:640px){.ref-wrap .det-grid,.ref-wrap .grid2{grid-template-columns:1fr}}
 </style>
 </head>
@@ -3553,8 +3556,8 @@ function renderReferencingAdmin(resourceId) {
         <button class="btn btn-primary btn-sm" onclick="openRefCreate()">+ New Applicant</button>\
       </div>\
       <div class="card"><div class="tbl-wrap"><table>\
-        <thead><tr><th>Applicant</th><th>Email</th><th>Status</th><th>Docs</th><th>Created</th><th></th></tr></thead>\
-        <tbody id="ref-formsBody"><tr><td colspan="6" class="muted" style="padding:30px;text-align:center">Loading...</td></tr></tbody>\
+        <thead><tr><th>Applicant</th><th>Email</th><th>Progress</th><th>Status</th><th>Docs</th><th>Created</th><th></th></tr></thead>\
+        <tbody id="ref-formsBody"><tr><td colspan="7" class="muted" style="padding:30px;text-align:center">Loading...</td></tr></tbody>\
       </table></div></div>\
     </div>\
     <div id="ref-tenancies" style="display:none">\
@@ -3668,9 +3671,11 @@ async function loadRefForms(){
         '<div class="card stat"><div class="n" style="color:'+(flagged?'#b91c1c':'#1e293b')+'">'+flagged+'</div><div class="l">Flagged documents</div></div>';
     }
     const tb=document.getElementById('ref-formsBody');
-    if(!refForms.length){tb.innerHTML='<tr><td colspan="6"><div class="empty"><div class="big">📋</div>No applications yet. Add your first applicant to begin.</div></td></tr>';return;}
+    if(!refForms.length){tb.innerHTML='<tr><td colspan="7"><div class="empty"><div class="big">📋</div></div></td></tr>';return;}
     tb.innerHTML=refForms.map(r=>'<tr onclick="openRefDetail('+r.id+')"><td><b>'+esc(r.first_name)+' '+esc(r.last_name)+'</b></td>'+
-      '<td class="muted">'+esc(r.email)+'</td><td><span class="pill '+r.status+'">'+esc((r.status||'').replace('_',' '))+'</span></td>'+
+      '<td class="muted">'+esc(r.email)+'</td><td>'+
+      (r.progress_pct!=null?'<div class="ref-progress"><div class="ref-progress-bar"><div class="ref-progress-fill" style="width:'+r.progress_pct+'%;background:'+(r.progress_pct>=80?'#16a34a':r.progress_pct>=40?'#d97706':'#dc2626')+'"></div></div><span style="font-size:10px;font-weight:600;color:#64748b">'+r.progress_pct+'%</span></div>':'<span class="muted">&mdash;</span>')+
+      '</td><td><span class="pill '+r.status+'">'+esc((r.status||'').replace('_',' '))+'</span></td>'+
       '<td>'+(r.doc_count||0)+(r.flagged_count?' <span class="flag">'+r.flagged_count+' flag</span>':'')+'</td>'+
       '<td class="muted">'+refFmtDate(r.created)+'</td><td style="text-align:right"><span class="muted">\u203a</span></td></tr>').join('');
   }catch(e){document.getElementById('ref-formsBody').innerHTML='<tr><td colspan="6" class="muted" style="padding:30px;text-align:center">'+esc(e.message)+'</td></tr>';}
@@ -3692,8 +3697,10 @@ function refDi(k,v){return'<div class="det-item"><div class="k">'+k+'</div><div 
 function renderRefDetail(d){
   const f=d.form,docs=d.documents||[],checks=d.checks||[];
   const link=location.origin+'/apply/'+f.form_token;
-  document.getElementById('ref-d_title').innerHTML=esc(f.first_name)+' '+esc(f.last_name)+' <span class="pill '+f.status+'" style="margin-left:8px">'+esc((f.status||'').replace('_',' '))+'</span>';
-  let h='<div class="det-section"><h4>Referencing Link</h4><div class="linkbox">'+esc(link)+'</div><div style="margin-top:8px;display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="refCopyLink(\''+esc(link)+'\')">Copy link</button></div></div>';
+  document.getElementById('ref-d_title').innerHTML=esc(f.first_name)+' '+esc(f.last_name)+' <span class="pill '+f.status+'" style="margin-left:8px">'+esc((f.status||'').replace('_',' '))+'</span>'+
+    (f.progress_pct!=null?' <span style="margin-left:8px;font-size:11px;color:#64748b;font-weight:500">'+f.progress_pct+'% complete</span>':'');
+  let h='<div class="det-section"><h4>Progress</h4><div class="ref-progress" style="max-width:300px"><div class="ref-progress-bar"><div class="ref-progress-fill" style="width:'+(f.progress_pct||0)+'%;background:'+(f.progress_pct>=80?'#16a34a':f.progress_pct>=40?'#d97706':'#dc2626')+'"></div></div><span style="font-size:12px;font-weight:700;color:#1e293b">'+(f.progress_pct||0)+'%</span></div></div>';
+  h+='<div class="det-section"><h4>Referencing Link</h4><div class="linkbox">'+esc(link)+'</div><div style="margin-top:8px;display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="refCopyLink(\''+esc(link)+'\')">Copy link</button></div></div>';
   h+='<div class="det-section"><h4>Personal & Contact</h4><div class="det-grid">'+
     refDi('Full name',(f.title||'')+' '+f.first_name+' '+f.last_name)+
     refDi('Date of birth',f.date_of_birth==='1900-01-01'?'\u2014':f.date_of_birth)+

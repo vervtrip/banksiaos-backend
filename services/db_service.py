@@ -84,7 +84,7 @@ def build_order_by(sortable_map, default_clause):
     if sort_by and sort_by in sortable_map:
         col = sortable_map[sort_by]
         d = "DESC" if sort_dir.lower() == "desc" else "ASC"
-        return f"ORDER BY {col} {d}"
+        return f"{col} {d}"
     return default_clause
 
 

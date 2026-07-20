@@ -492,6 +492,157 @@ def api_create_form():
         db.close()
 
 
+# ── Referencing Form Progress Calculator ──
+# Mirrors the frontend logic in referencing_form.html's updateProgress()
+# Weights: fields 60%, documents 20%, declaration 10%, sections 10%
+# Required fields worth 2, optional 1. Hidden conditional fields excluded.
+def _compute_form_progress(form, valid_docs):
+    """Compute progress percentage from form data fields and valid doc count."""
+    # Section definitions mirroring the frontend SECTIONS array
+    sections = [
+        {"fields": [{"key":"title","required":True},{"key":"first_name","required":True},
+                    {"key":"last_name","required":True},{"key":"date_of_birth","required":True},
+                    {"key":"gender","required":False}]},
+        {"fields": [{"key":"email","required":True},{"key":"mobile_phone","required":True},
+                    {"key":"current_address_line1","required":True},
+                    {"key":"current_address_line2","required":False},
+                    {"key":"current_city","required":True},
+                    {"key":"current_postcode","required":True},
+                    {"key":"current_country","required":True},
+                    {"key":"current_address_length","required":True}]},
+        {"fields": [{"key":"id_type","required":True},{"key":"id_number","required":True},
+                    {"key":"nationality","required":True},{"key":"country_of_origin","required":False},
+                    {"key":"ni_number","required":False},{"key":"share_code","required":False},
+                    {"key":"visa_number","required":False},{"key":"visa_type","required":False},
+                    {"key":"visa_expiry","required":False}]},
+        {"fields": [{"key":"employment_status","required":True},
+                    {"key":"employer_name","required":False,"showIf":{"key":"employment_status","values":["Employed"]}},
+                    {"key":"employer_address","required":False,"showIf":{"key":"employment_status","values":["Employed"]}},
+                    {"key":"employer_email","required":False,"showIf":{"key":"employment_status","values":["Employed"]}},
+                    {"key":"employer_phone","required":False,"showIf":{"key":"employment_status","values":["Employed"]}},
+                    {"key":"job_title","required":False,"showIf":{"key":"employment_status","values":["Employed","Self-Employed"]}},
+                    {"key":"annual_salary","required":True,"showIf":{"key":"employment_status","values":["Employed","Self-Employed"]}},
+                    {"key":"employment_length","required":False,"showIf":{"key":"employment_status","values":["Employed","Self-Employed"]}},
+                    {"key":"employment_contract_type","required":False,"showIf":{"key":"employment_status","values":["Employed"]}}]},
+        {"fields": [{"key":"self_employed_company","required":False},
+                    {"key":"self_employed_utr","required":False},
+                    {"key":"self_employed_address","required":False},
+                    {"key":"self_employed_annual_profit","required":False},
+                    {"key":"self_employed_length","required":False},
+                    {"key":"accountant_name","required":False},
+                    {"key":"accountant_email","required":False},
+                    {"key":"accountant_phone","required":False}]},
+        {"fields": [{"key":"student_university","required":False},
+                    {"key":"student_course_id","required":False},
+                    {"key":"student_course_name","required":False},
+                    {"key":"student_expected_graduation","required":False},
+                    {"key":"student_loan_amount","required":False},
+                    {"key":"student_maintenance_loan","required":False}]},
+        {"fields": [{"key":"has_guarantor","required":False},
+                    {"key":"guarantor_title","required":False,"showIf":{"key":"has_guarantor"}},
+                    {"key":"guarantor_first_name","required":False,"showIf":{"key":"has_guarantor"}},
+                    {"key":"guarantor_last_name","required":False,"showIf":{"key":"has_guarantor"}},
+                    {"key":"guarantor_date_of_birth","required":False,"showIf":{"key":"has_guarantor"}},
+                    {"key":"guarantor_relation","required":False,"showIf":{"key":"has_guarantor"}},
+                    {"key":"guarantor_email","required":False,"showIf":{"key":"has_guarantor"}},
+                    {"key":"guarantor_phone","required":False,"showIf":{"key":"has_guarantor"}},
+                    {"key":"guarantor_mobile","required":False,"showIf":{"key":"has_guarantor"}},
+                    {"key":"guarantor_address_line1","required":False,"showIf":{"key":"has_guarantor"}},
+                    {"key":"guarantor_city","required":False,"showIf":{"key":"has_guarantor"}},
+                    {"key":"guarantor_postcode","required":False,"showIf":{"key":"has_guarantor"}},
+                    {"key":"guarantor_profession","required":False,"showIf":{"key":"has_guarantor"}},
+                    {"key":"guarantor_annual_income","required":False,"showIf":{"key":"has_guarantor"}},
+                    {"key":"guarantor_homeowner","required":False,"showIf":{"key":"has_guarantor"}}]},
+        {"fields": [{"key":"housing_benefit","required":False},
+                    {"key":"housing_benefit_council","required":False,"showIf":{"key":"housing_benefit"}},
+                    {"key":"housing_benefit_number","required":False,"showIf":{"key":"housing_benefit"}}]},
+        {"fields": [{"key":"kin_first_name","required":True},{"key":"kin_last_name","required":True},
+                    {"key":"kin_relation","required":True},{"key":"kin_email","required":False},
+                    {"key":"kin_phone","required":True},{"key":"kin_mobile","required":False},
+                    {"key":"kin_address","required":False}]},
+        {"fields": [{"key":"bank_name","required":True},{"key":"bank_account_name","required":True},
+                    {"key":"bank_sort_code","required":True},
+                    {"key":"bank_account_number","required":True}]},
+        {"fields": [{"key":"previous_landlord_name","required":False},
+                    {"key":"previous_landlord_email","required":False},
+                    {"key":"previous_landlord_phone","required":False},
+                    {"key":"previous_landlord_address","required":False},
+                    {"key":"previous_landlord_reason_for_leaving","required":False}]},
+        {"fields": [{"key":"has_pet","required":False},{"key":"pet_details","required":False,"showIf":{"key":"has_pet"}},
+                    {"key":"has_ccj","required":False},{"key":"ccj_details","required":False,"showIf":{"key":"has_ccj"}},
+                    {"key":"has_iva","required":False},{"key":"iva_details","required":False,"showIf":{"key":"has_iva"}},
+                    {"key":"has_bankruptcy","required":False},
+                    {"key":"bankruptcy_details","required":False,"showIf":{"key":"has_bankruptcy"}},
+                    {"key":"has_eviction","required":False},
+                    {"key":"eviction_details","required":False,"showIf":{"key":"has_eviction"}},
+                    {"key":"smoking_preference","required":False},
+                    {"key":"preferred_move_in_date","required":False},
+                    {"key":"special_requirements","required":False}]},
+    ]
+
+    emp_status = form.get("employment_status", "")
+    has_guar = bool(form.get("has_guarantor"))
+    decl_ok = bool(form.get("declaration_confirmed")) and bool(form.get("terms_confirmed"))
+
+    # 1. Fields (60%)
+    filled_weight = 0
+    total_weight = 0
+    for section in sections:
+        for field in section["fields"]:
+            showIf = field.get("showIf")
+            if showIf:
+                show_val = form.get(showIf["key"])
+                if showIf.get("values"):
+                    if show_val not in showIf["values"]:
+                        continue
+                elif not show_val:
+                    continue
+            total_weight += 2 if field["required"] else 1
+            val = form.get(field["key"])
+            if val and str(val).strip():
+                filled_weight += 2 if field["required"] else 1
+    fields_pct = (filled_weight / total_weight * 60) if total_weight > 0 else 0
+
+    # 2. Documents (20%)
+    expected = ["passport", "driving_licence"]
+    if emp_status in ("Employed", "Self-Employed"):
+        expected += ["payslip", "bank_statement", "employment_contract"]
+    if emp_status == "Student":
+        expected += ["student_letter", "student_id"]
+    if has_guar:
+        expected.append("guarantor_id")
+    docs_pct = min(valid_docs / len(expected), 1) * 20 if expected else 10
+
+    # 3. Declaration (10%)
+    decl_pct = 10 if decl_ok else 0
+
+    # 4. Section completion (10%) — count sections where all required visible fields are filled
+    sec_ok = 0
+    for i, section in enumerate(sections):
+        all_done = True
+        for field in section["fields"]:
+            if not field["required"]:
+                continue
+            showIf = field.get("showIf")
+            if showIf:
+                show_val = form.get(showIf["key"])
+                if showIf.get("values"):
+                    if show_val not in showIf["values"]:
+                        continue
+                elif not show_val:
+                    continue
+            val = form.get(field["key"])
+            if not val or not str(val).strip():
+                all_done = False
+                break
+        if all_done:
+            sec_ok += 1
+    sec_pct = (sec_ok / len(sections)) * 10
+
+    total_pct = round(fields_pct + docs_pct + decl_pct + sec_pct)
+    return max(0, min(total_pct, 100))
+
+
 def _send_form_link(db, form_id, form_token, first_name, last_name, email, actual_send=True):
     """Email the applicant their referencing form link and log it on the form."""
     form_url = f"{PUBLIC_BASE_URL}/apply/{form_token}"
@@ -582,7 +733,15 @@ def api_list_forms():
             params + [per_page, offset]
         ).fetchall()
 
-        return json_success(rows, total=total, page=page, per_page=per_page)
+        # Compute progress for each form
+        rows_list = [dict(r) for r in rows]
+        for r in rows_list:
+            doc_count = r.get("doc_count", 0)
+            flagged_docs = r.get("flagged_count", 0)
+            uploaded_valid = doc_count - flagged_docs
+            r["progress_pct"] = _compute_form_progress(r, uploaded_valid)
+
+        return json_success(rows_list, total=total, page=page, per_page=per_page)
     finally:
         db.close()
 

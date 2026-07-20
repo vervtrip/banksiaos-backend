@@ -771,28 +771,79 @@ async function submitForm() {
 }
 
 // ── Progress Tracking ──
+// Progress is calculated from four weighted categories:
+//   Fields completed  (60%) — all visible fields count (required weighted higher)
+//   Documents        (20%) — documents uploaded per expected categories
+//   Declaration      (10%) — declaration & terms confirmed
+//   Sections bar     (10%) — visual: sections badge still shown
+function isFieldFilled(field) {
+  if (field.showIf) {
+    const showIfVal = formData[field.showIf.key];
+    const shouldShow = field.showIf.values ? field.showIf.values.includes(showIfVal) : showIfVal;
+    if (!shouldShow) return null; // hidden field, don't count
+  }
+  const val = formData[field.key];
+  return val && val.trim() !== '';
+}
 function isSectionComplete(idx) {
   const section = SECTIONS[idx];
   if (idx === SECTIONS.length - 1) return formData.declaration_confirmed && formData.terms_confirmed;
-  
   return section.fields.every(f => {
     if (!f.required) return true;
-    const val = formData[f.key];
-    return val && val.trim() !== '';
+    const result = isFieldFilled(f);
+    return result === true || result === null; // hidden required fields = fine
   });
 }
-
 function updateProgress() {
-  const complete = SECTIONS.filter((_, i) => isSectionComplete(i)).length;
-  const total = SECTIONS.length;
-  const pct = Math.round((complete / total) * 100);
-  
-  document.getElementById('progressValue').textContent = `${pct}%`;
-  document.getElementById('sectionsComplete').textContent = `${complete}/${total}`;
-  document.getElementById('docCount').textContent = uploadedDocs.filter(d => !d.ai_flagged).length;
+  // 1. Fields-based progress (60% of total)
+  let filledWeight = 0;
+  let totalWeight = 0;
+  SECTIONS.forEach((section, idx) => {
+    if (idx === SECTIONS.length - 1) return; // declaration handled separately
+    section.fields.forEach(f => {
+      const result = isFieldFilled(f);
+      if (result === null) return; // hidden field
+      totalWeight += f.required ? 2 : 1; // required fields worth double
+      if (result === true) filledWeight += f.required ? 2 : 1;
+    });
+  });
+  const fieldsPct = totalWeight > 0 ? (filledWeight / totalWeight) * 60 : 0;
+
+  // 2. Documents progress (20% of total)
+  // Expected document categories based on employment/student/guarantor status
+  const expectedDocs = [];
+  expectedDocs.push('passport','driving_licence');
+  if (formData.employment_status === 'Employed' || formData.employment_status === 'Self-Employed') {
+    expectedDocs.push('payslip','bank_statement','employment_contract');
+  }
+  if (formData.employment_status === 'Student') {
+    expectedDocs.push('student_letter','student_id');
+  }
+  if (formData.has_guarantor) {
+    expectedDocs.push('guarantor_id');
+  }
+  const docsSubmitted = uploadedDocs.filter(d => !d.ai_flagged).length;
+  const docsExpected = expectedDocs.length;
+  const docsPct = docsExpected > 0 ? Math.min(docsSubmitted / docsExpected, 1) * 20 : 10; // if no docs expected, half credit
+
+  // 3. Declaration (10% of total)
+  const declComplete = formData.declaration_confirmed && formData.terms_confirmed ? 1 : 0;
+  const declPct = declComplete * 10;
+
+  // 4. Section completion (10% bonus — shows structural completeness)
+  const sectionsComplete = SECTIONS.filter((_, i) => isSectionComplete(i)).length;
+  const totalSections = SECTIONS.length;
+  const sectionsPct = (sectionsComplete / totalSections) * 10;
+
+  const pct = Math.round(fieldsPct + docsPct + declPct + sectionsPct);
+  const clampedPct = Math.min(Math.max(pct, 0), 100);
+
+  document.getElementById('progressValue').textContent = `${clampedPct}%`;
+  document.getElementById('sectionsComplete').textContent = `${sectionsComplete}/${totalSections}`;
+  document.getElementById('docCount').textContent = docsSubmitted;
 
   // Update submit button
-  const allComplete = complete === total;
+  const allComplete = sectionsComplete === totalSections;
   document.getElementById('submitBtn').disabled = !allComplete;
   if (allComplete) {
     const name = `${formData.first_name || ''} ${formData.last_name || ''}`.trim();

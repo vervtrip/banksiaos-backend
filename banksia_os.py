@@ -1640,6 +1640,12 @@ def api_properties():
         if rent_max is not None and rent_max < float('inf'):
             rent_where = f"AND monthly_rent >= {rent_min} AND monthly_rent <= {rent_max}"
 
+    # Rent type filter
+    mgmt_filter = request.args.get("management_type", "").strip()
+    mgmt_where = ""
+    if mgmt_filter:
+        mgmt_where = f"AND management_type = '{mgmt_filter}'"
+
     inner_query = f"SELECT *, " \
         f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id) AS actual_units, " \
         f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id AND u.unit_vacant = 0) AS occupied_units, " \
@@ -1651,8 +1657,8 @@ def api_properties():
         f"FROM properties WHERE {base_where}"
 
     combined_filter = ""
-    if occ_where or rent_where:
-        combined_filter = " WHERE 1=1 " + occ_where + rent_where
+    if occ_where or rent_where or mgmt_where:
+        combined_filter = " WHERE 1=1 " + occ_where + rent_where + mgmt_where
 
     # Build ORDER BY
     safe_sort_fields = {
@@ -1666,6 +1672,7 @@ def api_properties():
         "vacant": "(total_units - occupied_units)",
         "rent": "monthly_rent",
         "owner": "owner_display_name",
+        "management_type": "management_type",
     }
     order_col = safe_sort_fields.get(sort_field, "ref")
     order_dir = "DESC" if sort_direction == "desc" else "ASC"
