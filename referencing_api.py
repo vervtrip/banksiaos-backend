@@ -7,7 +7,7 @@ tenant portal authentication, and financial tracking.
 Mounts at /api/referencing/
 """
 
-import json, os, sys, uuid, hashlib, hmac, secrets, re
+import json, os, sys, uuid, hashlib, hmac, secrets, re, time
 from datetime import datetime, timezone, timedelta
 import fitz  # PyMuPDF — used for PDF signing (module-level so all functions can access it)
 
@@ -29,6 +29,47 @@ os.makedirs(TEMPLATE_DIR, exist_ok=True)
 
 PORTAL_SESSION_TTL = timedelta(hours=24)
 FORM_EXPIRY_DAYS = 14
+
+# ── Rate limiter (DB-backed — shared across all workers) ──
+_RATE_LIMIT_WINDOW = 60  # seconds
+
+def _check_rate_limit(key: str, max_attempts: int = 10, window: int = _RATE_LIMIT_WINDOW) -> bool:
+    """Rate limit by key (IP-based). Uses the shared SQLite DB so it works
+    across all gunicorn workers. Cleans old entries on each check."""
+    try:
+        db = get_dict_db()
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=window)).isoformat()
+        # Clean stale entries
+        db.execute("DELETE FROM rate_limits WHERE expires_at < datetime('now')")
+        # Count recent attempts
+        row = db.execute(
+            "SELECT COUNT(*) AS cnt FROM rate_limits WHERE rate_key = ? AND expires_at > datetime('now')",
+            [key]
+        ).fetchone()
+        count = row["cnt"] if row else 0
+        if count >= max_attempts:
+            return False
+        # Record this attempt
+        db.execute(
+            "INSERT INTO rate_limits (rate_key, expires_at) VALUES (?, datetime('now', ? || ' seconds'))",
+            [key, str(window)]
+        )
+        db.commit()
+        return True
+    except Exception:
+        # If rate_limits table doesn't exist yet, create it and allow through
+        try:
+            db = get_dict_db()
+            db.execute("CREATE TABLE IF NOT EXISTS rate_limits (id INTEGER PRIMARY KEY AUTOINCREMENT, rate_key TEXT, expires_at TEXT)")
+            db.commit()
+        except Exception:
+            pass
+        return True
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
 
 # ── Helpers ──
 
@@ -61,7 +102,7 @@ def hash_password(password, salt=None):
     """Simple password hashing (for portal auth)."""
     if salt is None:
         salt = secrets.token_hex(16)
-    h = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
+    h = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 600000)
     return f"{salt}${h.hex()}"
 
 def check_password(password, stored):
@@ -1006,12 +1047,19 @@ def api_upload_document():
     if not form_id:
         return json_error("form_id is required")
 
+    MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20MB
+    ALLOWED_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx', '.txt', '.rtf', '.csv', '.xls', '.xlsx'}
+    if request.content_length and request.content_length > MAX_UPLOAD_SIZE:
+        return json_error("File too large. Maximum size is 20MB.", 413)
     if "file" not in request.files:
         return json_error("No file uploaded")
 
     file = request.files["file"]
     if file.filename == "":
         return json_error("No file selected")
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return json_error(f"File type '{ext}' is not allowed", 400)
 
     db = get_dict_db()
     try:
@@ -1695,6 +1743,9 @@ def api_esignature_view(token):
 @referencing_bp.route("/esignature/sign/<token>", methods=["POST"])
 def api_esignature_sign(token):
     """Signer completes the signature."""
+    ip = request.remote_addr or "unknown"
+    if not _check_rate_limit(f"esign_sign:{ip}", max_attempts=10, window=60):
+        return json_error("Too many requests. Please try again later.", 429)
     data = request.get_json() or {}
     consent = data.get("consent", False)
     signature_data = data.get("signature", "")  # Could be base64 drawn sig or typed name
@@ -2033,12 +2084,10 @@ def api_download_merged_pdf(req_id):
 
 @referencing_bp.route("/portal/applicant-signup", methods=["POST"])
 def api_applicant_signup():
-    """Create a portal user AND a referencing form in one step.
-
-    This is the public-facing signup form used by applicants who've paid
-    their holding deposit. No form token is needed — we generate everything
-    on the fly. The applicant is auto-logged-in and redirected to the portal.
-    """
+    """Create a portal user AND a referencing form in one step."""
+    ip = request.remote_addr or "unknown"
+    if not _check_rate_limit(f"portal_signup:{ip}", max_attempts=5, window=300):
+        return json_error("Too many signup attempts from this IP. Please try again later.", 429)
     data = request.get_json() or {}
     first_name = (data.get("first_name") or "").strip()
     last_name = (data.get("last_name") or "").strip()
@@ -2047,8 +2096,14 @@ def api_applicant_signup():
 
     if not first_name or not last_name or not email:
         return json_error("First name, last name, and email are required")
-    if not password or len(password) < 8:
-        return json_error("Password must be at least 8 characters")
+    if not password or len(password) < 10:
+        return json_error("Password must be at least 10 characters")
+    if not re.search(r'[A-Z]', password):
+        return json_error("Password must contain an uppercase letter")
+    if not re.search(r'[a-z]', password):
+        return json_error("Password must contain a lowercase letter")
+    if not re.search(r'[0-9]', password):
+        return json_error("Password must contain a digit")
 
     import secrets
     db = get_dict_db()
@@ -2151,6 +2206,9 @@ def api_portal_register():
     token can create the account, and the email must match the form on file.
     Auto-logs the applicant in on success.
     """
+    ip = request.remote_addr or "unknown"
+    if not _check_rate_limit(f"portal_register:{ip}", max_attempts=5, window=300):
+        return json_error("Too many registration attempts from this IP. Please try again later.", 429)
     data = request.get_json() or {}
     email = data.get("email", "").strip().lower()
     password = data.get("password", "")
@@ -2158,8 +2216,14 @@ def api_portal_register():
 
     if not form_token:
         return json_error("A valid form link is required to register")
-    if not password or len(password) < 8:
-        return json_error("Password must be at least 8 characters")
+    if not password or len(password) < 10:
+        return json_error("Password must be at least 10 characters")
+    if not re.search(r'[A-Z]', password):
+        return json_error("Password must contain an uppercase letter")
+    if not re.search(r'[a-z]', password):
+        return json_error("Password must contain a lowercase letter")
+    if not re.search(r'[0-9]', password):
+        return json_error("Password must contain a digit")
 
     db = get_dict_db()
     try:
@@ -2229,6 +2293,9 @@ def api_portal_register():
 @referencing_bp.route("/portal/login", methods=["POST"])
 def api_portal_login():
     """Portal user login."""
+    ip = request.remote_addr or "unknown"
+    if not _check_rate_limit(f"portal_login:{ip}", max_attempts=5, window=60):
+        return json_error("Too many login attempts. Please try again later.", 429)
     data = request.get_json() or {}
     email = data.get("email", "").strip().lower()
     password = data.get("password", "")
@@ -2554,8 +2621,14 @@ def api_portal_change_password():
     new_pw = data.get("new_password", "")
     if not current or not new_pw:
         return json_error("Current password and new password are required")
-    if len(new_pw) < 8:
-        return json_error("New password must be at least 8 characters")
+    if len(new_pw) < 10:
+        return json_error("New password must be at least 10 characters")
+    if not re.search(r'[A-Z]', new_pw):
+        return json_error("New password must contain an uppercase letter")
+    if not re.search(r'[a-z]', new_pw):
+        return json_error("New password must contain a lowercase letter")
+    if not re.search(r'[0-9]', new_pw):
+        return json_error("New password must contain a digit")
     db = get_dict_db()
     try:
         user = db.execute("SELECT * FROM portal_users WHERE id = ?", [pu["pu_id"]]).fetchone()
@@ -2567,7 +2640,10 @@ def api_portal_change_password():
             [new_hash, pu["pu_id"]]
         )
         db.commit()
-        return json_success({"message": "Password updated successfully"})
+        # Invalidate all existing sessions to force re-login
+        db.execute("DELETE FROM portal_sessions WHERE user_id = ?", [pu["pu_id"]])
+        db.commit()
+        return json_success({"message": "Password updated successfully. Please log in again."})
     finally:
         db.close()
 
@@ -2579,11 +2655,18 @@ def api_portal_change_password():
 def api_portal_upload_document():
     """Upload a supporting document from the tenant portal."""
     pu = request.portal_user
+    MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20MB
+    ALLOWED_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx', '.txt', '.rtf', '.csv', '.xls', '.xlsx'}
+    if request.content_length and request.content_length > MAX_UPLOAD_SIZE:
+        return json_error("File too large. Maximum size is 20MB.", 413)
     if "file" not in request.files:
         return json_error("No file provided")
     f = request.files["file"]
     if not f.filename:
         return json_error("Empty filename")
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return json_error(f"File type '{ext}' is not allowed", 400)
     db = get_dict_db()
     try:
         # Find the referencing form for this user

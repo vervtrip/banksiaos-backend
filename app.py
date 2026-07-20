@@ -39,9 +39,9 @@ def _load_secret_key() -> str:
 app.secret_key = _load_secret_key()
 app.config.update(
     # Browser<->Traefik is HTTPS; ProxyFix trusts X-Forwarded-Proto so Flask sees it as secure.
-    SESSION_COOKIE_SECURE=False,  # Development; Traefik adds HTTPS in production
+    SESSION_COOKIE_SECURE=os.environ.get("FLASK_ENV") == "production",
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SAMESITE='Strict',
     SESSION_COOKIE_NAME='banksia_os_sid',
     PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
     SESSION_PERMANENT=True,
