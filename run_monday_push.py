@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Cron entry point: push pending maintenance changes to Monday.com."""
 import sys
-sys.path.insert(0, '/root/verv-dashboard')
+sys.path.insert(0, '/root/banksia-backend')
 
-from verv_os_db import get_db
+import banksia_os_db as verv_os_db
 from monday_push import push_all_pending
 
-db = get_db()
-count = push_all_pending(db)
-print(f"Pushed {count} pending maintenance item(s) to Monday.com board 18401159622.")
+db = verv_os_db.get_db()
+result = push_all_pending(db)
+pushed = result.get("pushed", 0)
+failed = result.get("failed", 0)
+msg = result.get("message", "Unknown")
+print(f"Monday push sync: {msg}")
+if failed:
+    print(f"Errors: {result.get('errors', [])}")
