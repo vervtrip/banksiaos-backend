@@ -826,6 +826,10 @@ def api_get_form(form_id):
         form["property_id"] = property_id
         form["unit_id"] = unit_id
 
+        # Compute progress percentage for display on admin side
+        valid_docs = len([d for d in documents if not d.get("ai_flagged")])
+        form["progress_pct"] = _compute_form_progress(form, valid_docs)
+
         return json_success({
             "form": form,
             "documents": documents,
@@ -2461,6 +2465,107 @@ def api_applicant_signup():
             "form_id": form_id,
             "form_token": form_token,
         }), 201
+    except Exception as e:
+        db.rollback()
+        return json_error(str(e), 500)
+    finally:
+        db.close()
+
+
+@referencing_bp.route("/portal/self-register", methods=["POST"])
+def api_portal_self_register():
+    """Register a portal account with just name, email, and password.
+    
+    No form token required — this is for direct portal sign-ups.
+    Sends a confirmation email on success.
+    """
+    ip = request.remote_addr or "unknown"
+    if not _check_rate_limit(f"portal_self_register:{ip}", max_attempts=5, window=300):
+        return json_error("Too many registration attempts from this IP. Please try again later.", 429)
+
+    data = request.get_json() or {}
+    first_name = (data.get("first_name") or "").strip()
+    last_name = (data.get("last_name") or "").strip()
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password", "")
+
+    if not first_name or not last_name:
+        return json_error("First and last name are required")
+    if not email or "@" not in email:
+        return json_error("A valid email address is required")
+    if not password or len(password) < 10:
+        return json_error("Password must be at least 10 characters")
+    if not re.search(r'[A-Z]', password):
+        return json_error("Password must contain an uppercase letter")
+    if not re.search(r'[a-z]', password):
+        return json_error("Password must contain a lowercase letter")
+    if not re.search(r'[0-9]', password):
+        return json_error("Password must contain a digit")
+
+    db = get_dict_db()
+    try:
+        existing = db.execute(
+            "SELECT * FROM portal_users WHERE lower(email) = ?", [email]
+        ).fetchone()
+        if existing:
+            return json_error("An account with this email already exists — please log in", 409)
+
+        pw_hash = hash_password(password)
+        db.execute(
+            "INSERT INTO portal_users (email, password_hash, first_name, last_name, "
+            "portal_type, is_active, email_verified, created, modified) "
+            "VALUES (?, ?, ?, ?, 'applicant', 1, 1, datetime('now'), datetime('now'))",
+            [email, pw_hash, first_name, last_name],
+        )
+        user_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
+
+        # Auto-login
+        token = generate_token()
+        expires_at = (datetime.now(timezone.utc) + PORTAL_SESSION_TTL).isoformat()
+        db.execute(
+            "INSERT INTO portal_sessions (user_id, session_token, ip_address, user_agent, expires_at, last_activity) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+            [user_id, token, request.remote_addr or '', request.headers.get("User-Agent", ""), expires_at],
+        )
+        db.execute(
+            "UPDATE portal_users SET last_login_at = datetime('now'), last_login_ip = ? WHERE id = ?",
+            [request.remote_addr or '', user_id],
+        )
+        db.commit()
+
+        _audit_log(user_id, email, "self_register", "Portal account registered via self-signup")
+
+        # Send confirmation email
+        try:
+            confirm_url = f"{PUBLIC_BASE_URL}/portal"
+            body = _email_shell(
+                title="Welcome to your portal",
+                intro=(
+                    f"Hi {first_name},<br><br>"
+                    "Your portal account has been created successfully. "
+                    "From your portal you can track referencing applications, "
+                    "sign documents, view your tenancy, report maintenance, "
+                    "and message your lettings team."
+                ),
+                button_label="Go to my portal",
+                button_url=confirm_url,
+                footer="If you didn't create this account, please contact us immediately.",
+            )
+            send_email(email, f"{first_name} {last_name}",
+                       "Welcome to Banksia — your portal is ready", body, send=True)
+        except Exception:
+            pass  # Never block registration on an email hiccup
+
+        return json_success({
+            "token": token,
+            "user": {
+                "id": user_id,
+                "email": email,
+                "first_name": first_name,
+                "last_name": last_name,
+                "portal_type": "applicant",
+            },
+            "expires_at": expires_at,
+        })
     except Exception as e:
         db.rollback()
         return json_error(str(e), 500)

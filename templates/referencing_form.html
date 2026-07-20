@@ -458,11 +458,33 @@ async function init() {
     formData = data.data.form || {};
     FORM_ID = formData.id;
     uploadedDocs = data.data.documents || [];
-    // Show user menu with applicant details
-    showUserMenu(formData.first_name, formData.email);
-    showSaved();
-    renderForm();
-    updateProgress();
+    // Check if applicant has linked their portal account (signed up)
+    const hasPortalUser = formData.portal_user_id ? true : false;
+    // Additional check: has the applicant already submitted or started filling?
+    const hasStartedForm = formData.submitted_at || 
+      (formData.first_name && formData.first_name.trim()) ||
+      (formData.email && formData.email.length > 5);
+    
+    // Only show the full form + progress if applicant has actually started
+    if (hasPortalUser || hasStartedForm) {
+      showUserMenu(formData.first_name, formData.email);
+      showSaved();
+      renderForm();
+      updateProgress();
+    } else {
+      // First visit — no account yet, show a clean landing state
+      const statusBar = document.getElementById('statusBar');
+      if (statusBar) statusBar.style.display = 'none';
+      const badge = document.getElementById('statusBadge');
+      if (badge) badge.style.display = 'none';
+      document.getElementById('formContainer').innerHTML = `
+        <div style="padding:80px 24px;text-align:center;max-width:520px;margin:0 auto">
+          <div style="font-size:48px;margin-bottom:16px">📋</div>
+          <h2 style="margin:0 0 12px">Your Application is Ready</h2>
+          <p style="color:#667085;line-height:1.5;margin-bottom:24px">Please create an account to start your referencing application. You can save your progress and return anytime.</p>
+          <a href="/portal?form=${FORM_TOKEN}" class="btn btn-primary" style="display:inline-block;padding:12px 32px;background:#0f172a;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px">Create Account & Start</a>
+        </div>`;
+    }
   } catch (e) {
     showFatalError('Application Not Found', 'This link may have expired or already been completed. Please contact the Banksia team for assistance.');
   }

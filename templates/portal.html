@@ -120,27 +120,37 @@ function renderLogin(msg){
     <div class="fg"><label>Password</label><input id="pw" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <button class="btn" onclick="doLogin()">Sign In</button>
     <p style="font-size:12px;color:#94a3b8;margin-top:16px;text-align:center;line-height:1.5">
-      First time here? Use the <strong>Set up your account</strong> link in your Banksia email.</p>
+      First time here? <a href="#" onclick="event.preventDefault();showRegister()" style="color:var(--accent);font-weight:600;text-decoration:underline">Set up your account</a></p>
   </div></div>`;
 }
-function renderRegister(formToken,msg){
+function showRegister(){
   document.getElementById('app').innerHTML=`
   <div class="center"><div class="login">
-    <div class="brand"><div class="logo">B</div><h1>Banksia OS</h1><p>Set up your portal account</p></div>
-    <div class="err" id="err" style="${msg?'display:block':''}">${esc(msg||'')}</div>
-    <div class="fg"><label>Choose a password</label><input id="pw" type="password" autocomplete="new-password" placeholder="At least 8 characters"></div>
-    <div class="fg"><label>Confirm password</label><input id="pw2" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')doRegister('${esc(formToken)}')"></div>
-    <button class="btn" onclick="doRegister('${esc(formToken)}')">Create account</button>
+    <div class="brand"><div class="logo">B</div><h1>Banksia OS</h1><p>Create your portal account</p></div>
+    <div class="err" id="err" style="display:none"></div>
+    <div class="fg"><label>First name</label><input id="reg_fn" type="text" autocomplete="given-name"></div>
+    <div class="fg"><label>Last name</label><input id="reg_ln" type="text" autocomplete="family-name"></div>
+    <div class="fg"><label>Email</label><input id="reg_email" type="email" autocomplete="email"></div>
+    <div class="fg"><label>Password</label><input id="reg_pw" type="password" autocomplete="new-password" placeholder="At least 10 chars, with upper, lower &amp; digit"></div>
+    <div class="fg"><label>Confirm password</label><input id="reg_pw2" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')doSelfRegister()"></div>
+    <button class="btn" onclick="doSelfRegister()">Create account</button>
     <p style="font-size:12px;color:#94a3b8;margin-top:16px;text-align:center">Already have an account? <a href="/portal" style="color:var(--accent);font-weight:600">Sign in</a></p>
   </div></div>`;
 }
-async function doRegister(formToken){
-  const pw=document.getElementById('pw').value, pw2=document.getElementById('pw2').value;
-  if(!pw||pw.length<8){showErr('Password must be at least 8 characters');return;}
+async function doSelfRegister(){
+  const fn=document.getElementById('reg_fn').value.trim();
+  const ln=document.getElementById('reg_ln').value.trim();
+  const email=document.getElementById('reg_email').value.trim();
+  const pw=document.getElementById('reg_pw').value;
+  const pw2=document.getElementById('reg_pw2').value;
+  if(!fn||!ln){showErr('Please enter your name');return;}
+  if(!email||!email.includes('@')){showErr('Please enter a valid email');return;}
   if(pw!==pw2){showErr('Passwords do not match');return;}
+  if(pw.length<10){showErr('Password must be at least 10 characters');return;}
   try{
-    const r=await fetch(API+'/portal/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({form_token:formToken,password:pw})});
-    const j=await r.json();if(!r.ok||!j.success)throw new Error(j.error||'Could not create your account');
+    const r=await fetch(API+'/portal/self-register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({first_name:fn,last_name:ln,email,password:pw})});
+    const j=await r.json();
+    if(!r.ok||!j.success)throw new Error(j.error||'Could not create your account');
     TOKEN=j.data.token;localStorage.setItem('portal_token',TOKEN);history.replaceState({},'','/portal');loadDash();
   }catch(e){showErr(e.message);}
 }
@@ -396,8 +406,10 @@ async function submitChangePassword(){
 }
 
 const SETUP=getParam('setup')||getParam('form_token');
-if(SETUP)renderRegister(SETUP);
-else if(TOKEN)loadDash();
+if(SETUP){
+  // If arriving via setup link from email, show the register screen
+  showRegister();
+}else if(TOKEN)loadDash();
 else renderLogin();
 </script>
 </body>
