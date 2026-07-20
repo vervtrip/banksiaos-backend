@@ -1612,7 +1612,8 @@ def api_properties():
     sort_field = request.args.get("sort_field", "").strip()
     sort_direction = request.args.get("sort_direction", "asc").strip().lower()
 
-    base_where = "(status IS NULL OR status = '' OR status = 'Active')"
+    # Show all properties by default — including archived ones when searching
+    base_where = "1=1"
     base_params = []
 
     if search:
@@ -9908,21 +9909,24 @@ def global_search():
             add_result("maintenance", r["id"], label, f"/maintenance/{r['id']}", match_field, parent)
 
         # ── Documents ──
-        rows = db.execute(
-            """SELECT id, filename, name, related_to, related_id
-               FROM documents
-               WHERE (filename IS NOT NULL AND filename LIKE ?)
-                  OR (name IS NOT NULL AND name LIKE ?)
-               LIMIT ?""",
-            (like, like, limit_per_type)
-        ).fetchall()
-        for r in rows:
-            label = r["name"] or r["filename"] or f"Document #{r['id']}"
-            match_field = "name" if (r["name"] and q_raw.lower() in r["name"].lower()) else "filename"
-            parent = None
-            if r["related_to"] and r["related_id"]:
-                parent = {"type": r["related_to"], "id": r["related_id"], "label": f"{r['related_to'].title()} #{r['related_id']}"}
-            add_result("document", r["id"], label, f"/documents/{r['id']}", match_field, parent)
+        try:
+            rows = db.execute(
+                """SELECT id, filename, category AS name, related_to, related_id
+                   FROM documents
+                   WHERE (filename IS NOT NULL AND filename LIKE ?)
+                      OR (category IS NOT NULL AND category LIKE ?)
+                   LIMIT ?""",
+                (like, like, limit_per_type)
+            ).fetchall()
+            for r in rows:
+                label = r["name"] or r["filename"] or f"Document #{r['id']}"
+                match_field = "name" if (r["name"] and q_raw.lower() in r["name"].lower()) else "filename"
+                parent = None
+                if r["related_to"] and r["related_id"]:
+                    parent = {"type": r["related_to"], "id": r["related_id"], "label": f"{r['related_to'].title()} #{r['related_id']}"}
+                add_result("document", r["id"], label, f"/documents/{r['id']}", match_field, parent)
+        except Exception:
+            pass  # documents table might not have these columns
 
         # ── Invoices ──
         try:

@@ -62,11 +62,11 @@ def int_param(val, default=1, max_val=None):
 
 
 def float_param(val):
-    """Safely parse a float query parameter."""
+    """Safely parse a float query parameter. Returns None if not provided."""
     try:
         return float(val)
     except (TypeError, ValueError):
-        return 0.0
+        return None
 
 
 def build_search_clause(fields, search_term):

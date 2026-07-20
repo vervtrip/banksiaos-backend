@@ -369,6 +369,7 @@ tbody tr:last-child td{border-bottom:none}
   .topbar .page-title{font-size:14px}
   table{font-size:12px}
   thead th,tbody td{padding:6px 8px;font-size:11px}
+  .table-wrap{overflow-x:auto;max-width:100%}
   .invoice-kpis{grid-template-columns:1fr 1fr!important;gap:6px}
   .invoice-kpi{padding:10px}
   .invoice-kpi .inv-value{font-size:17px}
@@ -726,6 +727,7 @@ function parseCurrentUrl() {
 
 // ── INIT ──
 document.addEventListener('DOMContentLoaded', () => {
+  refreshCSRFToken();  // Seed CSRF cookie on page load
   document.getElementById('date-display').textContent = new Date().toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short', year:'numeric' });
   const role = user.role === 'super_admin' ? 'Super Admin' : (user.role === 'admin' ? 'Admin' : user.role);
   document.getElementById('sidebar-user-role').textContent = role;
@@ -855,13 +857,28 @@ function showToast(msg, type='success') {
 
 // ── API ──
 async function api(path, opts={}) {
+  const csrf = getCSRFToken();
   const res = await fetch(API + path, {
-    headers: {'Content-Type':'application/json','Accept':'application/json'},
+    headers: {
+      'Content-Type':'application/json',
+      'Accept':'application/json',
+      ...(csrf && path.startsWith('/api/referencing/') ? {'X-CSRF-Token': csrf} : {}),
+    },
     ...opts
   });
   const data = await res.json();
   if (!data.success) throw new Error(data.error || 'API error');
   return data;
+}
+
+// ── CSRF helpers ──
+function getCSRFToken() {
+  const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+function refreshCSRFToken() {
+  fetch('/api/referencing/portal/csrf-token', {headers:{'Accept':'application/json'}})
+    .then(r => r.json()).catch(() => {});  // Sets cookie, best-effort
 }
 
 // ── FORMATTERS ──
@@ -1694,6 +1711,33 @@ async function showProperty(id) {
       });
       html += '</tbody></table></div>';
     }
+    // Tenancies for this property
+    if (p.tenancies && p.tenancies.length > 0) {
+      html += `<div class="detail-section"><h3>Active Tenancies (${p.tenancies.length})</h3>`;
+      p.tenancies.forEach(tn => {
+        html += `<div style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:4px;font-size:13px;cursor:pointer" onclick="event.preventDefault();closeDetail();navigate('tenancies');setTimeout(()=>showTenancy(${tn.id}),100)">
+          <div style="font-weight:500;color:#2563eb">${escHtml(tn.main_tenant_name||tn.ref||'Tenancy #'+tn.id)}</div>
+          <div style="color:#64748b;margin-top:2px">${fmtDate(tn.start_date)} → ${fmtDate(tn.end_date)} | ${fmtMoney(tn.rent_amount)}/${tn.rent_frequency||'pcm'}</div>
+        </div>`;
+      });
+      html += '</div>';
+    }
+    // Maintenance for this property
+    if (p.maintenance && p.maintenance.length > 0) {
+      html += `<div class="detail-section"><h3>Maintenance Jobs (${p.maintenance.length})</h3>`;
+      const sortedMJ = [...p.maintenance].sort((a,b) => new Date(b.created||0) - new Date(a.created||0)).slice(0,5);
+      sortedMJ.forEach(mj => {
+        const statusColor = mj.status === 'completed' || mj.status === 'resolved' ? '#16a34a' : (mj.status === 'in_progress' ? '#d97706' : '#64748b');
+        html += `<div style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:4px;font-size:13px;cursor:pointer" onclick="event.preventDefault();closeDetail();navigate('maintenance');setTimeout(()=>showMaintenance(${mj.id}),100)">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-weight:500;color:#2563eb">${escHtml(mj.title||mj.description||'Job #'+mj.id)}</span>
+            <span class="badge" style="background:${statusColor}20;color:${statusColor}">${escHtml(mj.status||'open')}</span>
+          </div>
+          <div style="color:#64748b;margin-top:2px">${mj.address ? escHtml(mj.address) : ''}${mj.created ? ' · '+fmtDate(mj.created) : ''}</div>
+        </div>`;
+      });
+      html += '</div>';
+    }
     html += `<div class="detail-section"><button class="btn btn-ghost btn-sm" onclick="uploadPropertyImage(${id})">+ Upload Image</button></div>`;
     openDetail(detailTitle, html, 'properties', id);
     setTimeout(async () => {
@@ -1875,6 +1919,15 @@ async function showTenancy(id) {
     const t = tenRes.data;
     const schedule = rentRes ? rentRes.data : null;
     let html = `<div class="detail-section"><h3>Tenancy Details</h3><div class="detail-grid">`;
+    // Property + Unit as clickable links
+    if (t.property_id) {
+      html += `<div class="detail-field"><div class="label">Property</div>
+        <div class="val"><a href="#" onclick="event.preventDefault();closeDetail();navigate('properties');setTimeout(()=>showProperty(${t.property_id}),100)" style="color:#2563eb;text-decoration:none;font-weight:500">${escHtml(t.property_name || t.property_address || 'Property #'+t.property_id)}</a></div></div>`;
+    }
+    if (t.unit_id) {
+      html += `<div class="detail-field"><div class="label">Unit</div>
+        <div class="val"><a href="#" onclick="event.preventDefault();closeDetail();navigate('units');setTimeout(()=>showUnit(${t.unit_id}),100)" style="color:#2563eb;text-decoration:none;font-weight:500">${escHtml(t.unit_ref || 'Unit #'+t.unit_id)}</a></div></div>`;
+    }
     const fields = [['Ref','ref','text'],['Status','status','text'],['Full Address','full_address','text'],
       ['Tenancy Type','tenancy_type','text'],['Start Date','start_date','text'],['End Date','end_date','text'],
       ['Renewal Start','renewal_start','text'],['Renewal End','renewal_end','text'],
@@ -1888,15 +1941,30 @@ async function showTenancy(id) {
       const v = t[f]; if (v!=null && v!=='') html += makeEditable('tenancies',id,f,l,v,t);
     });
     html += '</div></div>';
-    // Tenants
+    // Tenants as clickable links
     if (t.tenants && t.tenants.length > 0) {
       html += `<div class="detail-section"><h3>Tenants (${t.tenants.length})</h3>`;
       const tnts = typeof t.tenants === 'string' ? JSON.parse(t.tenants) : t.tenants;
       if (Array.isArray(tnts)) tnts.forEach(tn => {
-        const name = typeof tn === 'string' ? tn : (tn.name||tn.first_name+' '+tn.last_name||'—');
-        html += `<div style="padding:8px 12px;background:#000;border-radius:6px;margin-bottom:4px;font-size:13px;color:#ccc">${escHtml(name)}</div>`;
+        const tid = typeof tn === 'object' ? (tn.id || tn.tenant_id) : null;
+        const name = typeof tn === 'string' ? tn : (tn.name||(tn.first_name||'')+' '+(tn.last_name||'')||'—');
+        if (tid) {
+          html += `<div style="padding:8px 12px;background:#f8fafc;border-radius:6px;margin-bottom:4px;font-size:13px">
+            <a href="#" onclick="event.preventDefault();closeDetail();navigate('tenants');setTimeout(()=>showTenant(${tid}),100)" style="color:#2563eb;text-decoration:none;font-weight:500">${escHtml(name)}</a></div>`;
+        } else {
+          html += `<div style="padding:8px 12px;background:#f8fafc;border-radius:6px;margin-bottom:4px;font-size:13px;color:#475569">${escHtml(name)}</div>`;
+        }
       });
       html += '</div>';
+    }
+    // Deposits summary if available
+    if (t.deposit_amount > 0 || t.deposit_registered_amount > 0) {
+      const depAmt = t.deposit_amount || t.deposit_registered_amount || 0;
+      html += `<div class="detail-section"><h3>Deposit</h3><div class="detail-grid">
+        <div class="detail-field"><div class="label">Amount</div><div class="val" style="font-weight:600">${fmtMoney(depAmt)}</div></div>
+        <div class="detail-field"><div class="label">Scheme</div><div class="val">${escHtml(t.deposit_scheme||'—')}</div></div>
+        <div class="detail-field"><div class="label">Held By</div><div class="val">${escHtml(t.deposit_held_by||'—')}</div></div>
+      </div></div>`;
     }
     // Rent Schedule
     if (schedule && schedule.payments && schedule.payments.length > 0) {
@@ -2079,6 +2147,16 @@ async function showTenant(id) {
     const res = await api(`/tenants/${id}`);
     const t = res.data;
     let html = `<div class="detail-section"><h3>Personal Details</h3><div class="detail-grid">`;
+    // Property link
+    if (t.property_id) {
+      html += `<div class="detail-field"><div class="label">Property</div>
+        <div class="val"><a href="#" onclick="event.preventDefault();closeDetail();navigate('properties');setTimeout(()=>showProperty(${t.property_id}),100)" style="color:#2563eb;text-decoration:none;font-weight:500">${escHtml(t.property_name || 'Property #'+t.property_id)}</a></div></div>`;
+    }
+    // Tenancy link
+    if (t.tenancy_id) {
+      html += `<div class="detail-field"><div class="label">Tenancy</div>
+        <div class="val"><a href="#" onclick="event.preventDefault();closeDetail();navigate('tenancies');setTimeout(()=>showTenancy(${t.tenancy_id}),100)" style="color:#2563eb;text-decoration:none;font-weight:500">${escHtml(t.ref||'Tenancy #'+t.tenancy_id)}</a></div></div>`;
+    }
     const fields = [['First Name','first_name','text'],['Last Name','last_name','text'],['Email','email','text'],
       ['Phone','phone','text'],['Mobile','mobile','text'],['Date of Birth','date_of_birth','text'],
       ['Gender','gender','text'],['Nationality','nationality','text'],['Status','status','text'],
@@ -2095,6 +2173,13 @@ async function showTenant(id) {
     html += '</div></div>';
     // Notes
     html += '<div class="detail-section"><h3>Notes</h3>'+makeEditable('tenants',id,'notes','Notes',t.notes,'text')+'</div>';
+    // Rent & Deposit summary
+    if (t.rent_amount > 0) {
+      html += `<div class="detail-section"><h3>Rent & Deposit</h3><div class="detail-grid">
+        <div class="detail-field"><div class="label">Rent</div><div class="val" style="font-weight:600">${fmtMoney(t.rent_amount)}</div></div>
+        <div class="detail-field"><div class="label">Arrears</div><div class="val" style="color:${(t.arrears||0) > 0 ? '#dc2626' : '#16a34a'};font-weight:600">${fmtMoney(t.arrears||0)}</div></div>
+      </div></div>`;
+    }
     if (t.tenancies && t.tenancies.length > 0) {
       html += `<div class="detail-section"><h3>Tenancy History (${t.tenancies.length})</h3>`;
       t.tenancies.forEach(tn => {

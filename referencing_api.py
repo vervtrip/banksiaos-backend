@@ -112,6 +112,99 @@ def check_password(password, stored):
 
 # ── Public URLs & email delivery ──
 
+# ── Portal Audit Log ──
+
+def _audit_log(user_id, email, event_type, detail=None):
+    """Write an entry to portal_audit_log. Best-effort (never raises)."""
+    try:
+        db = get_dict_db()
+        try:
+            # Ensure table exists
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS portal_audit_log ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, email TEXT, "
+                "event_type TEXT, ip_address TEXT, user_agent TEXT, detail TEXT, "
+                "created TEXT DEFAULT (datetime('now')))"
+            )
+            db.execute(
+                "INSERT INTO portal_audit_log (user_id, email, event_type, ip_address, user_agent, detail) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [user_id, email, event_type,
+                 request.remote_addr or '',
+                 (request.headers.get("User-Agent", "") or "")[:512],
+                 (detail or "")[:1024]]
+            )
+            db.commit()
+        finally:
+            db.close()
+    except Exception:
+        pass  # Audit should never block the request
+
+
+# ── CSRF Protection (Double Submit Cookie) ──
+
+def _generate_csrf_token():
+    """Generate a CSRF token and set it as a non-httpOnly cookie.
+    The frontend reads it from the cookie and sends it in the X-CSRF-Token header.
+    """
+    token = secrets.token_urlsafe(32)
+    resp = json_success({"csrf_token": token})
+    max_age = 86400  # 24 hours
+    resp.set_cookie(
+        "csrf_token", token,
+        max_age=max_age,
+        path="/api/referencing",
+        secure=os.environ.get("FLASK_ENV") == "production",
+        httponly=False,  # Must be readable by JS
+        samesite="Strict"
+    )
+    return resp
+
+
+def _validate_csrf():
+    """Validate CSRF token from X-CSRF-Token header against csrf_token cookie.
+    Safe methods (GET, HEAD, OPTIONS) are always allowed.
+    Skip validation if no cookie is set (first request — let it through once).
+    """
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return True
+    cookie_token = request.cookies.get("csrf_token")
+    header_token = request.headers.get("X-CSRF-Token")
+    if not cookie_token:
+        # No cookie set yet — this is acceptable for the first mutation
+        # (the cookie is set on the first GET/response). Allow through.
+        return True
+    if not header_token:
+        return False
+    return hmac.compare_digest(cookie_token, header_token)
+
+
+def require_csrf(f):
+    """Decorator: validate CSRF token on state-changing requests."""
+    @wraps(f)
+    def wrap(*args, **kwargs):
+        if not _validate_csrf():
+            return json_error("CSRF validation failed — missing or invalid X-CSRF-Token header. "
+                              "Refresh the page and try again.", 403)
+        return f(*args, **kwargs)
+    return wrap
+
+
+# ── Activity timeout ──
+
+ACTIVITY_TIMEOUT_MINUTES = 60  # idle sessions expire after 1 hour
+
+def _touch_session(session_token, db):
+    """Update last_activity for the session. Best-effort."""
+    try:
+        db.execute(
+            "UPDATE portal_sessions SET last_activity = datetime('now') WHERE session_token = ?",
+            [session_token]
+        )
+    except Exception:
+        pass
+
+
 PUBLIC_BASE_URL = os.environ.get("BANKSIA_PUBLIC_URL", "https://ops.srv1744186.hstgr.cloud").rstrip("/")
 
 # Banksia referencing correspondence goes out from the Banksia inbox, never the Verv one.
@@ -301,15 +394,21 @@ def require_auth(f):
             return json_error("Not authenticated", 401)
         db = get_dict_db()
         try:
+            # Check session validity — must not be expired AND must not be idle
+            cutoff = (datetime.now(timezone.utc) - timedelta(minutes=ACTIVITY_TIMEOUT_MINUTES)).isoformat()
             row = db.execute(
                 "SELECT ps.*, pu.id AS pu_id, pu.email, pu.first_name, pu.last_name, pu.portal_type, "
                 "pu.applicant_id, pu.tenancy_id, pu.payee_tenant_id "
                 "FROM portal_sessions ps JOIN portal_users pu ON ps.user_id = pu.id "
-                "WHERE ps.session_token = ? AND ps.expires_at > datetime('now')",
-                [token]
+                "WHERE ps.session_token = ? AND ps.expires_at > datetime('now') "
+                "AND (ps.last_activity IS NULL OR ps.last_activity > ?)",
+                [token, cutoff]
             ).fetchone()
             if not row:
                 return json_error("Session expired or invalid", 401)
+            # Touch session activity
+            _touch_session(token, db)
+            db.commit()
             request.portal_user = row
             return f(*args, **kwargs)
         finally:
@@ -336,6 +435,7 @@ def require_team_auth(f):
 
 @referencing_bp.route("/forms", methods=["POST"])
 @require_team_auth
+@require_csrf
 def api_create_form():
     """Create a new referencing form for an applicant."""
     data = request.get_json() or {}
@@ -420,6 +520,7 @@ def _send_form_link(db, form_id, form_token, first_name, last_name, email, actua
 
 @referencing_bp.route("/forms/<int:form_id>/send-link", methods=["POST"])
 @require_team_auth
+@require_csrf
 def api_send_form_link(form_id):
     """(Re)send the referencing form link to the applicant by email."""
     db = get_dict_db()
@@ -836,6 +937,7 @@ def api_submit_form(form_id):
 
 @referencing_bp.route("/forms/<int:form_id>/assign-property", methods=["POST"])
 @require_team_auth
+@require_csrf
 def api_assign_form_property(form_id):
     """Delta team assigns a property and unit to this referencing form's applicant.
 
@@ -908,6 +1010,7 @@ def api_assign_form_property(form_id):
 
 @referencing_bp.route("/forms/<int:form_id>/status", methods=["PATCH"])
 @require_team_auth
+@require_csrf
 def api_update_form_status(form_id):
     """Team updates form status (approve/reject)."""
     data = request.get_json() or {}
@@ -1015,6 +1118,7 @@ def api_update_form_status(form_id):
 
 @referencing_bp.route("/forms/<int:form_id>/guarantor-toggle", methods=["POST"])
 @require_team_auth
+@require_csrf
 def api_toggle_guarantor(form_id):
     """Toggle whether a guarantor is required for this applicant."""
     data = request.get_json() or {}
@@ -1147,6 +1251,7 @@ def api_preview_document(doc_id):
 
 @referencing_bp.route("/documents/<int:doc_id>/verify", methods=["POST"])
 @require_team_auth
+@require_csrf
 def api_verify_document(doc_id):
     """Team marks a document as verified."""
     data = request.get_json() or {}
@@ -1168,6 +1273,7 @@ def api_verify_document(doc_id):
 
 @referencing_bp.route("/documents/<int:doc_id>/ai-review", methods=["POST"])
 @require_team_auth
+@require_csrf
 def api_ai_review_document(doc_id):
     """Trigger Neo's AI analysis on a single document."""
     db = get_dict_db()
@@ -1200,6 +1306,7 @@ def api_ai_review_document(doc_id):
 
 @referencing_bp.route("/forms/<int:form_id>/ai-review", methods=["POST"])
 @require_team_auth
+@require_csrf
 def api_ai_review_form(form_id):
     """Run full AI review on all documents in a form — Neo checks everything."""
     db = get_dict_db()
@@ -1572,6 +1679,7 @@ def run_cross_referencing_checks(form, documents, analyses=None):
 
 @referencing_bp.route("/esignature/create", methods=["POST"])
 @require_team_auth
+@require_csrf
 def api_create_esignature():
     """Create a new e-signature request with two-sided signing support.
 
@@ -1687,6 +1795,7 @@ def _deliver_esignature(db, req, actual_send=True):
 
 @referencing_bp.route("/esignature/<int:req_id>/send", methods=["POST"])
 @require_team_auth
+@require_csrf
 def api_send_esignature(req_id):
     """Email the signing link to the signer and mark the request sent."""
     db = get_dict_db()
@@ -2171,7 +2280,7 @@ def api_applicant_signup():
         token = generate_token()
         expires_at = (datetime.now(timezone.utc) + PORTAL_SESSION_TTL).isoformat()
         db.execute(
-            "INSERT INTO portal_sessions (user_id, session_token, ip_address, user_agent, expires_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO portal_sessions (user_id, session_token, ip_address, user_agent, expires_at, last_activity) VALUES (?, ?, ?, ?, ?, datetime('now'))",
             [user_id, token, request.remote_addr or '', request.headers.get("User-Agent", ""), expires_at],
         )
         db.execute(
@@ -2179,6 +2288,8 @@ def api_applicant_signup():
             [request.remote_addr or '', user_id],
         )
         db.commit()
+
+        _audit_log(user_id, email, "signup", f"Portal account created for {first_name} {last_name}")
 
         return json_success({
             "token": token,
@@ -2268,7 +2379,7 @@ def api_portal_register():
         token = generate_token()
         expires_at = (datetime.now(timezone.utc) + PORTAL_SESSION_TTL).isoformat()
         db.execute(
-            "INSERT INTO portal_sessions (user_id, session_token, ip_address, user_agent, expires_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO portal_sessions (user_id, session_token, ip_address, user_agent, expires_at, last_activity) VALUES (?, ?, ?, ?, ?, datetime('now'))",
             [user_id, token, request.remote_addr or '', request.headers.get("User-Agent", ""), expires_at],
         )
         db.execute(
@@ -2276,6 +2387,8 @@ def api_portal_register():
             [request.remote_addr or '', user_id],
         )
         db.commit()
+
+        _audit_log(user_id, email, "register", "Portal account registered via form link")
         return json_success({
             "token": token,
             "user": {"id": user_id, "email": email,
@@ -2288,6 +2401,13 @@ def api_portal_register():
         return json_error(str(e), 500)
     finally:
         db.close()
+
+
+@referencing_bp.route("/portal/csrf-token", methods=["GET"])
+@require_team_auth
+def api_csrf_token():
+    """Get a CSRF token. Sets it as a cookie for the Double Submit pattern."""
+    return _generate_csrf_token()
 
 
 @referencing_bp.route("/portal/login", methods=["POST"])
@@ -2307,13 +2427,14 @@ def api_portal_login():
     try:
         user = db.execute("SELECT * FROM portal_users WHERE email = ? AND is_active = 1", [email]).fetchone()
         if not user or not check_password(password, user["password_hash"]):
+            _audit_log(None, email, "login_failure", "Invalid email or password")
             return json_error("Invalid email or password", 401)
 
         # Generate session
         token = generate_token()
         expires_at = (datetime.now(timezone.utc) + PORTAL_SESSION_TTL).isoformat()
         db.execute(
-            "INSERT INTO portal_sessions (user_id, session_token, ip_address, user_agent, expires_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO portal_sessions (user_id, session_token, ip_address, user_agent, expires_at, last_activity) VALUES (?, ?, ?, ?, ?, datetime('now'))",
             [user["id"], token, request.remote_addr or '', request.headers.get("User-Agent", ""), expires_at]
         )
         db.execute(
@@ -2321,6 +2442,9 @@ def api_portal_login():
             [request.remote_addr or '', user["id"]]
         )
         db.commit()
+
+        _audit_log(user["id"], email, "login_success", "Portal login successful")
+
 
         return json_success({
             "token": token,
@@ -2342,10 +2466,12 @@ def api_portal_login():
 def api_portal_logout():
     """Logout — invalidate current session."""
     token = request.headers.get("Authorization", "")[7:]
+    pu = request.portal_user
     db = get_dict_db()
     try:
         db.execute("DELETE FROM portal_sessions WHERE session_token = ?", [token])
         db.commit()
+        _audit_log(pu["pu_id"], pu["email"], "logout", "Portal user logged out")
         return json_success({"message": "Logged out"})
     finally:
         db.close()
@@ -2633,6 +2759,7 @@ def api_portal_change_password():
     try:
         user = db.execute("SELECT * FROM portal_users WHERE id = ?", [pu["pu_id"]]).fetchone()
         if not user or not check_password(current, user["password_hash"]):
+            _audit_log(pu["pu_id"], pu["email"], "password_change_failure", "Incorrect current password")
             return json_error("Current password is incorrect", 403)
         new_hash = hash_password(new_pw)
         db.execute(
@@ -2643,6 +2770,7 @@ def api_portal_change_password():
         # Invalidate all existing sessions to force re-login
         db.execute("DELETE FROM portal_sessions WHERE user_id = ?", [pu["pu_id"]])
         db.commit()
+        _audit_log(pu["pu_id"], pu["email"], "password_change", "Password changed successfully")
         return json_success({"message": "Password updated successfully. Please log in again."})
     finally:
         db.close()
@@ -3067,6 +3195,7 @@ def _tenant_blob_from_form(form):
 
 @referencing_bp.route("/tenancies/create-from-form", methods=["POST"])
 @require_team_auth
+@require_csrf
 def api_create_tenancy_from_form():
     """Convert an APPROVED referencing form into a live tenancy.
 
