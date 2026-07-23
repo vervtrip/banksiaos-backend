@@ -1000,6 +1000,10 @@ def api_add_user():
     new_role = data.get("role", "viewer").strip()
     if not username or not password:
         return jsonify({"error": "username and password required"}), 400
+    import re as _email_re
+    email_val = data.get("email", "").strip()
+    if email_val and not _email_re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', email_val):
+        return jsonify({"error": "Invalid email format — enter a valid email address"}), 400
     ok, msg = _validate_password_strength(password)
     if not ok:
         return jsonify({"error": msg}), 400
