@@ -38,3 +38,14 @@ users.json.bak.*
 
 # API keys — never commit
 api_keys.json
+
+# Runtime data & tenant PII — never commit
+banksia_os.db
+banksia_os.db-*
+arthur_docs_export.csv
+arthur_migration_log.jsonl
+arthur_unplaced_build.out
+arthur_migration_run.out
+media/
+*.pre-*
+*.bak-*

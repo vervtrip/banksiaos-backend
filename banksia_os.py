@@ -6449,6 +6449,290 @@ def api_document_stats():
         db.close()
 
 
+
+
+# ═══════════════════════════════════════════════
+# UNPLACED DOCUMENTS  (Arthur migration manual-placement queue)
+# Parked files that could not be auto-matched to a Banksia entity.
+# Team reviews each one and allocates it to a Property / Tenancy / Tenant / Applicant.
+# ═══════════════════════════════════════════════
+
+UNPLACED_UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "media", "unplaced")
+os.makedirs(UNPLACED_UPLOAD_DIR, exist_ok=True)
+
+# Placement targets offered in the UI (subset of VALID_ENTITY_TYPES).
+UNPLACED_PLACE_TYPES = {"property", "unit", "tenancy", "tenant", "applicant", "guarantor"}
+
+
+def _ensure_unplaced_table():
+    db = get_dict_db()
+    try:
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS unplaced_documents (
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                arthur_asset_uuid  TEXT UNIQUE,
+                source_url         TEXT,
+                original_filename  TEXT,
+                doc_name           TEXT,
+                document_type      TEXT,
+                relationship       TEXT,
+                created_date       TEXT,
+                raw_property_id    TEXT,
+                raw_unit_id        TEXT,
+                raw_tenancy_id     TEXT,
+                reason             TEXT,          -- 'no_id' | 'id_not_in_banksia'
+                stored_filename    TEXT,
+                file_path          TEXT,
+                file_type          TEXT,
+                file_size          INTEGER,
+                mime_type          TEXT,
+                status             TEXT DEFAULT 'pending',   -- pending | placed | skipped
+                placed_entity_type TEXT,
+                placed_entity_id   INTEGER,
+                placed_document_id INTEGER,
+                placed_by          TEXT,
+                placed_at          TEXT,
+                created            TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        db.execute("CREATE INDEX IF NOT EXISTS idx_unplaced_status ON unplaced_documents(status)")
+        db.commit()
+    except Exception as e:
+        try:
+            app.logger.warning(f"unplaced table init: {e}")
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+_ensure_unplaced_table()
+
+
+def _unplaced_category(document_type, relationship):
+    rel = (relationship or "").strip()
+    dt = (document_type or "").strip()
+    if rel == "Unit":
+        return "photo"
+    if dt == "Certificate":
+        return "certificate"
+    if dt == "Contract":
+        return "contract"
+    if dt == "Reference":
+        return "id"
+    return "general"
+
+
+@banksia_os_bp.route("/unplaced-documents", methods=["GET"])
+def api_list_unplaced_documents():
+    status = (request.args.get("status", "pending") or "").strip().lower()
+    reason = (request.args.get("reason", "") or "").strip()
+    search = (request.args.get("search", "") or "").strip()
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 30, type=int)
+    if per_page > 200:
+        per_page = 200
+    db = get_dict_db()
+    try:
+        where = "WHERE 1=1"
+        params = []
+        if status and status != "all":
+            where += " AND status = ?"
+            params.append(status)
+        if reason:
+            where += " AND reason = ?"
+            params.append(reason)
+        if search:
+            where += " AND (doc_name LIKE ? OR original_filename LIKE ? OR document_type LIKE ? OR relationship LIKE ?)"
+            like = f"%{search}%"
+            params.extend([like, like, like, like])
+        total = db.execute(f"SELECT COUNT(*) AS c FROM unplaced_documents {where}", params).fetchone()["c"]
+        offset = (page - 1) * per_page
+        rows = db.execute(
+            f"""SELECT id, arthur_asset_uuid, doc_name, original_filename, document_type,
+                       relationship, created_date, reason, file_type, file_size, mime_type,
+                       status, placed_entity_type, placed_entity_id, placed_document_id,
+                       placed_by, placed_at, raw_property_id, raw_unit_id, raw_tenancy_id
+                FROM unplaced_documents {where}
+                ORDER BY (file_path IS NULL) ASC, id ASC
+                LIMIT ? OFFSET ?""",
+            params + [per_page, offset]).fetchall()
+        results = []
+        for row in rows:
+            d = dict(row)
+            if d.get("placed_entity_type") and d.get("placed_entity_id"):
+                _, label = _validate_entity_exists(d["placed_entity_type"], d["placed_entity_id"])
+                d["placed_entity_label"] = label
+            results.append(d)
+        return jsonify({
+            "success": True, "data": results,
+            "total": total, "page": page, "per_page": per_page,
+            "total_pages": max(1, (total + per_page - 1) // per_page),
+        })
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/unplaced-documents/stats", methods=["GET"])
+def api_unplaced_stats():
+    db = get_dict_db()
+    try:
+        rows = db.execute("SELECT status, COUNT(*) AS c FROM unplaced_documents GROUP BY status").fetchall()
+        by_status = {r["status"]: r["c"] for r in rows}
+        total = sum(by_status.values())
+        downloaded = db.execute("SELECT COUNT(*) AS c FROM unplaced_documents WHERE file_path IS NOT NULL").fetchone()["c"]
+        return json_success({
+            "total": total,
+            "pending": by_status.get("pending", 0),
+            "placed": by_status.get("placed", 0),
+            "skipped": by_status.get("skipped", 0),
+            "downloaded": downloaded,
+        })
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/unplaced-documents/<int:doc_id>/preview")
+def api_preview_unplaced_document(doc_id):
+    db = get_dict_db()
+    try:
+        doc = db.execute("SELECT id, doc_name, file_path, mime_type FROM unplaced_documents WHERE id = ?", (doc_id,)).fetchone()
+        if not doc:
+            return json_error("Document not found", 404)
+        if not doc["file_path"] or not os.path.exists(doc["file_path"]):
+            return json_error("File not yet downloaded", 404)
+        from flask import send_file
+        return send_file(doc["file_path"], mimetype=doc["mime_type"] or "application/octet-stream", as_attachment=False)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/unplaced-documents/<int:doc_id>/download")
+def api_download_unplaced_document(doc_id):
+    db = get_dict_db()
+    try:
+        doc = db.execute("SELECT id, doc_name, original_filename, file_path FROM unplaced_documents WHERE id = ?", (doc_id,)).fetchone()
+        if not doc:
+            return json_error("Document not found", 404)
+        if not doc["file_path"] or not os.path.exists(doc["file_path"]):
+            return json_error("File not yet downloaded", 404)
+        from flask import send_file
+        name = doc["original_filename"] or doc["doc_name"] or f"document_{doc_id}"
+        return send_file(doc["file_path"], as_attachment=True, download_name=name)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/unplaced-documents/<int:doc_id>/place", methods=["POST"])
+def api_place_unplaced_document(doc_id):
+    """Allocate a parked file to a Banksia entity — attaches it into that entity's Documents tab."""
+    data = request.get_json(silent=True) or {}
+    entity_type_raw = (data.get("entity_type", "") or "").strip().lower()
+    entity_id_str = str(data.get("entity_id", "")).strip()
+    placed_by = (data.get("placed_by", "") or "team").strip() or "team"
+    if not entity_type_raw or not entity_id_str:
+        return json_error("entity_type and entity_id are required")
+    et = _normalise_entity_type(entity_type_raw)
+    if et not in UNPLACED_PLACE_TYPES:
+        return json_error(f"Cannot place to '{et}'. Allowed: {', '.join(sorted(UNPLACED_PLACE_TYPES))}")
+    try:
+        entity_id = int(entity_id_str)
+    except ValueError:
+        return json_error("entity_id must be an integer")
+    exists, label = _validate_entity_exists(et, entity_id)
+    if not exists:
+        return json_error(f"Entity not found: {label}", 404)
+
+    db = get_dict_db()
+    try:
+        doc = db.execute("SELECT * FROM unplaced_documents WHERE id = ?", (doc_id,)).fetchone()
+        if not doc:
+            return json_error("Document not found", 404)
+        doc = dict(doc)
+        if doc.get("status") == "placed":
+            return json_error("This document has already been placed")
+        if not doc.get("file_path") or not os.path.exists(doc["file_path"]):
+            return json_error("File not yet downloaded — cannot place")
+
+        ext = "." + (doc.get("file_type") or "bin").lstrip(".")
+        orig_name = doc.get("original_filename") or doc.get("doc_name") or f"document_{doc_id}"
+        if os.path.splitext(orig_name)[1].lower() not in ("", None) and not os.path.splitext(orig_name)[1]:
+            orig_name = orig_name + ext
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        import hashlib as _hl, shutil as _sh
+        hash_part = _hl.md5((orig_name + str(doc_id)).encode()).hexdigest()[:8]
+        stored = f"{et}_{entity_id}_{ts}_{hash_part}{ext}"
+        edir = os.path.join(DOCUMENTS_UPLOAD_DIR, et, str(entity_id))
+        os.makedirs(edir, exist_ok=True)
+        dest = os.path.join(edir, stored)
+        _sh.copy2(doc["file_path"], dest)
+        size = os.path.getsize(dest)
+        cat = _unplaced_category(doc.get("document_type"), doc.get("relationship"))
+        notes = (f"Manually placed from Arthur parked queue | arthur-asset:{doc.get('arthur_asset_uuid')} | "
+                 f"type:{doc.get('document_type') or '-'} rel:{doc.get('relationship') or '-'} | placed_by:{placed_by}")
+        db.execute(
+            "INSERT INTO entity_documents "
+            "(entity_type, entity_id, original_filename, stored_filename, file_path, "
+            "file_type, file_size, mime_type, category, notes, uploaded_by, is_verified) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,0)",
+            (et, entity_id, orig_name, stored, dest, ext.lstrip("."), size,
+             doc.get("mime_type") or "application/octet-stream", cat, notes, placed_by))
+        new_doc_id = db.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        db.execute(
+            "UPDATE unplaced_documents SET status='placed', placed_entity_type=?, placed_entity_id=?, "
+            "placed_document_id=?, placed_by=?, placed_at=datetime('now') WHERE id=?",
+            (et, entity_id, new_doc_id, placed_by, doc_id))
+        db.commit()
+        return json_success({
+            "placed": True, "unplaced_id": doc_id, "document_id": new_doc_id,
+            "entity_type": et, "entity_id": entity_id, "entity_label": label, "category": cat,
+        })
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/unplaced-documents/<int:doc_id>/skip", methods=["POST"])
+def api_skip_unplaced_document(doc_id):
+    db = get_dict_db()
+    try:
+        doc = db.execute("SELECT id, status FROM unplaced_documents WHERE id = ?", (doc_id,)).fetchone()
+        if not doc:
+            return json_error("Document not found", 404)
+        if doc["status"] == "placed":
+            return json_error("Cannot skip a placed document")
+        db.execute("UPDATE unplaced_documents SET status='skipped' WHERE id=?", (doc_id,))
+        db.commit()
+        return json_success({"id": doc_id, "status": "skipped"})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/unplaced-documents/<int:doc_id>/reset", methods=["POST"])
+def api_reset_unplaced_document(doc_id):
+    """Return a skipped item to the pending queue (does not undo a real placement)."""
+    db = get_dict_db()
+    try:
+        doc = db.execute("SELECT id, status FROM unplaced_documents WHERE id = ?", (doc_id,)).fetchone()
+        if not doc:
+            return json_error("Document not found", 404)
+        if doc["status"] == "placed":
+            return json_error("Cannot reset a placed document")
+        db.execute("UPDATE unplaced_documents SET status='pending' WHERE id=?", (doc_id,))
+        db.commit()
+        return json_success({"id": doc_id, "status": "pending"})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
 # ═══════════════════════════════════════════════
 # COMMENTS & NOTIFICATIONS (Monday.com-style updates)
 # ═══════════════════════════════════════════════
