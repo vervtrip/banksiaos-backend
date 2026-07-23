@@ -5365,9 +5365,13 @@ def api_create_tenancy():
     rent_frequency = data.get("rent_frequency", "pcm")
     deposit_amount = data.get("deposit_amount")
     main_tenant_name = data.get("main_tenant_name")
+    tenant_email = (data.get("tenant_email") or "").strip()
+    send_agreement = bool(data.get("send_agreement"))
 
     if not all([property_id, unit_id, start_date, rent_amount]):
         return json_error("Missing required fields: property_id, unit_id, start_date, rent_amount")
+    if send_agreement and not tenant_email:
+        return json_error("A tenant email is required to send the tenancy agreement for signature")
 
     db = get_dict_db()
     try:
@@ -5403,7 +5407,32 @@ def api_create_tenancy():
         db.execute("UPDATE units SET unit_vacant = 0, unit_status = 'Let' WHERE id = ?", (int(unit_id),))
         db.commit()
 
-        return json_success({"id": new_id, "ref": ref})
+        esign = None
+        delivery = None
+        if send_agreement:
+            from referencing_api import generate_token, _current_username, _deliver_esignature
+            signer_token = generate_token()
+            expires_at = (now + timedelta(days=14)).isoformat()
+            db.execute(
+                """INSERT INTO esignature_requests
+                   (tenancy_id, document_type, document_title, status,
+                    created_for, created_for_email, signer_token, expires_at, created_by)
+                   VALUES (?, 'tenancy_agreement', ?, 'draft', ?, ?, ?, ?, ?)""",
+                (new_id, f"Tenancy Agreement — {ref}", main_tenant_name or tenant_email,
+                 tenant_email, signer_token, expires_at, _current_username()),
+            )
+            eid = db.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+            db.execute(
+                "INSERT INTO esignature_audit_log (request_id, event_type, event_detail, ip_address, user_agent) "
+                "VALUES (?, 'created', ?, ?, ?)",
+                (eid, f"Auto-created with tenancy {ref}", request.remote_addr or "", request.headers.get("User-Agent", "")),
+            )
+            ereq = db.execute("SELECT * FROM esignature_requests WHERE id = ?", (eid,)).fetchone()
+            ok, delivery = _deliver_esignature(db, ereq, actual_send=True)
+            esign = db.execute("SELECT * FROM esignature_requests WHERE id = ?", (eid,)).fetchone()
+            db.commit()
+
+        return json_success({"id": new_id, "ref": ref, "esignature": esign, "delivery": delivery})
     except Exception as e:
         db.rollback()
         return json_error(safe_error(e), 500)
