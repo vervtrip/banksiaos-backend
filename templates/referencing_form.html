@@ -43,9 +43,11 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#f8fafc;color:#0f17
 .form-group label .required{color:#ef4444;margin-left:2px}
 .form-group input,.form-group select,.form-group textarea{padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;font-family:inherit;color:#0f172a;background:#fff;transition:border-color .15s;outline:none}
 .form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:#1e293b;box-shadow:0 0 0 3px rgba(30,41,59,.08)}
-.form-group input.error{border-color:#ef4444}
+.form-group input.error,.form-group select.error,.form-group textarea.error{border-color:#ef4444}
+.val-toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;padding:14px 22px;border-radius:12px;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.14);z-index:9999;max-width:90%;display:none;text-align:center;line-height:1.5}
+.val-toast.show{display:block}
 .form-group .error-text{font-size:11px;color:#ef4444;display:none}
-.form-group input.error + .error-text{display:block}
+.form-group input.error + .error-text,.form-group select.error + .error-text,.form-group textarea.error + .error-text{display:block}
 .form-group textarea{resize:vertical;min-height:80px}
 .form-group .hint{font-size:11px;color:#94a3b8;margin-top:2px}
 .form-group .checkbox-row{display:flex;align-items:center;gap:10px;padding:8px 0}
@@ -652,8 +654,78 @@ function toggleSection(idx) {
   if (!isOpen) body.classList.add('open');
 }
 
+// -- Mandatory field validation --
+function liveValue(field){
+  const el = document.getElementById('field-'+field.key);
+  if(!el) return formData[field.key];
+  return field.type === 'checkbox' ? (el.checked ? 1 : 0) : el.value;
+}
+function fieldVisible(field){
+  if(!field.showIf) return true;
+  const el = document.getElementById('field-'+field.showIf.key);
+  let v;
+  if(el){ v = (el.type === 'checkbox') ? el.checked : el.value; }
+  else { v = formData[field.showIf.key]; }
+  return field.showIf.values ? field.showIf.values.includes(v) : !!v;
+}
+function clearFieldError(key){
+  const inp = document.getElementById('field-'+key);
+  if(inp) inp.classList.remove('error');
+  const err = document.getElementById('error-'+key);
+  if(err){ err.textContent=''; err.style.display='none'; }
+}
+function setFieldError(key,msg){
+  const inp = document.getElementById('field-'+key);
+  if(inp) inp.classList.add('error');
+  const err = document.getElementById('error-'+key);
+  if(err){ err.textContent=msg; err.style.display='block'; }
+}
+function validateSection(idx){
+  const section = SECTIONS[idx];
+  const missing = [];
+  if(idx === SECTIONS.length - 1){
+    const declEl = document.getElementById('field-declaration_confirmed');
+    const termsEl = document.getElementById('field-terms_confirmed');
+    if(declEl && !declEl.checked) missing.push('Declaration confirmation');
+    if(termsEl && !termsEl.checked) missing.push('Terms & Conditions agreement');
+    return missing;
+  }
+  for(const field of section.fields){
+    if(!field.required) continue;
+    if(!fieldVisible(field)){ clearFieldError(field.key); continue; }
+    const val = liveValue(field);
+    const filled = field.type === 'checkbox' ? !!val : !!(val && String(val).trim() !== '');
+    if(filled){ clearFieldError(field.key); }
+    else { setFieldError(field.key, 'This field is required'); missing.push(field.label); }
+  }
+  return missing;
+}
+function showValidationToast(missing){
+  let toast = document.getElementById('valToast');
+  if(!toast){
+    toast = document.createElement('div');
+    toast.id = 'valToast';
+    toast.className = 'val-toast';
+    document.body.appendChild(toast);
+  }
+  const list = missing.slice(0,6).join(', ') + (missing.length > 6 ? (' and ' + (missing.length-6) + ' more') : '');
+  toast.innerHTML = '⚠️ Please fill in all required fields before you can save & continue.<br><span style="font-weight:400">Missing: ' + escapeHtml(list) + '</span>';
+  toast.classList.add('show');
+  clearTimeout(window.__valToastT);
+  window.__valToastT = setTimeout(function(){ toast.classList.remove('show'); }, 6000);
+}
+
 async function saveSection(idx) {
   const section = SECTIONS[idx];
+
+  // Block save & continue until every mandatory field in this section is filled
+  const missingRequired = validateSection(idx);
+  if (missingRequired.length) {
+    showValidationToast(missingRequired);
+    const firstErr = document.querySelector('#section-' + idx + ' .error');
+    if (firstErr) { firstErr.scrollIntoView({behavior:'smooth', block:'center'}); try { firstErr.focus(); } catch(e){} }
+    return;
+  }
   
   // Collect values
   const updates = {};
