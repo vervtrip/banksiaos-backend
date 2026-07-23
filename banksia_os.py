@@ -1701,7 +1701,7 @@ def api_properties():
     totals_query = f"SELECT COUNT(*) AS props_cnt, COALESCE(SUM(actual_units),0) AS units_cnt, COALESCE(SUM(occupied_units),0) AS occ_cnt FROM ({inner_query}) sub"
     db2 = get_dict_db()
     try:
-        totals_row = db2.execute(totals_query).fetchone()
+        totals_row = db2.execute(totals_query, base_params).fetchone()
         real_props_count = totals_row["props_cnt"]
         real_units = totals_row["units_cnt"]
         real_occupied = totals_row["occ_cnt"]
