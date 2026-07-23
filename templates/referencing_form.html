@@ -369,10 +369,10 @@ const SECTIONS = [
     ]
   },
   {
-    key: 'landlord', title: 'Previous Landlord', desc: 'Your most recent landlord',
+    key: 'landlord', title: 'Previous Landlord/Agency', desc: 'Your most recent landlord or letting agency',
     fields: [
-      {key:'previous_landlord_name',label:'Landlord/Agency Name',type:'text'},
-      {key:'previous_landlord_email',label:'Email',type:'email'},
+      {key:'previous_landlord_name',label:'Landlord/Agency Name',type:'text',required:true},
+      {key:'previous_landlord_email',label:'Email',type:'email',required:true},
       {key:'previous_landlord_phone',label:'Phone',type:'tel'},
       {key:'previous_landlord_address',label:'Address',type:'text'},
       {key:'previous_landlord_reason_for_leaving',label:'Reason for leaving',type:'textarea'},
