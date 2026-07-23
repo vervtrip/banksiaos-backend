@@ -5335,11 +5335,11 @@ def api_search():
 
         # Documents
         documents = db.execute(
-            "SELECT id, filename, name, related_to AS entity_type, "
+            "SELECT id, filename, filename AS name, file_type, category, related_to AS entity_type, "
             "'document' AS result_type FROM documents "
-            "WHERE (filename IS NOT NULL AND filename LIKE ?) OR (name IS NOT NULL AND name LIKE ?) "
+            "WHERE (filename IS NOT NULL AND filename LIKE ?) OR (category IS NOT NULL AND category LIKE ?) OR (notes IS NOT NULL AND notes LIKE ?) "
             "LIMIT 10",
-            [like_val] * 2
+            [like_val] * 3
         ).fetchall()
 
         results = {
