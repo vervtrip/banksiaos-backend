@@ -357,10 +357,13 @@ const SECTIONS = [
   {
     key: 'bank', title: 'Bank Details', desc: 'For setting up rent payments',
     fields: [
-      {key:'bank_name',label:'Bank Name',type:'text',required:true},
-      {key:'bank_account_name',label:'Account Name',type:'text',required:true},
-      {key:'bank_sort_code',label:'Sort Code',type:'text',placeholder:'00-00-00',required:true,inputAttrs:'oninput="formatSortCode(this)" maxlength="8"'},
-      {key:'bank_account_number',label:'Account Number',type:'text',required:true},
+      {key:'bank_location',label:'Is this a UK or International bank account?',type:'select',options:['UK','International'],required:true,inputAttrs:'onchange="refreshForm()"'},
+      {key:'bank_name',label:'Bank Name',type:'text',required:true,showIf:{key:'bank_location',values:['UK','International']}},
+      {key:'bank_account_name',label:'Account Name',type:'text',required:true,showIf:{key:'bank_location',values:['UK','International']}},
+      {key:'bank_sort_code',label:'Sort Code',type:'text',placeholder:'00-00-00',required:true,inputAttrs:'oninput="formatSortCode(this)" maxlength="8"',showIf:{key:'bank_location',values:['UK']}},
+      {key:'bank_account_number',label:'Account Number',type:'text',placeholder:'8 digits',required:true,inputAttrs:'inputmode="numeric" maxlength="8"',showIf:{key:'bank_location',values:['UK']}},
+      {key:'bank_iban',label:'IBAN',type:'text',placeholder:'International Bank Account Number',required:true,showIf:{key:'bank_location',values:['International']}},
+      {key:'bank_swift',label:'SWIFT / BIC',type:'text',placeholder:'e.g. NWBKGB2L',required:true,showIf:{key:'bank_location',values:['International']}},
     ]
   },
   {
@@ -549,7 +552,7 @@ function renderField(field, sectionIdx) {
       const blankOpt = `<option value="" ${val === '' ? 'selected' : ''}>Select...</option>`;
       let opts = blankOpt + field.options.map(o => `<option value="${escapeHtml(o)}" ${val === o ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('');
       if (val && !field.options.includes(val)) opts += `<option value="${escapeHtml(val)}" selected>${escapeHtml(val)}</option>`;
-      input = `<select id="field-${field.key}" ${field.required ? 'required' : ''}>${opts}</select>`;
+      input = `<select id="field-${field.key}" ${field.required ? 'required' : ''}${field.inputAttrs ? ' ' + field.inputAttrs : ''}>${opts}</select>`;
       break;
     case 'textarea':
       input = `<textarea id="field-${field.key}">${escapeHtml(val)}</textarea>`;
@@ -628,6 +631,21 @@ function renderDocumentUpload(category) {
 }
 
 // ── Section Management ──
+function syncLiveInputs(){
+  document.querySelectorAll('[id^="field-"]').forEach(function(el){
+    var key = el.id.slice(6);
+    if(el.type === 'checkbox') formData[key] = el.checked ? 1 : 0;
+    else formData[key] = el.value;
+  });
+}
+function refreshForm(){
+  var open = document.querySelector('.section-body.open');
+  var openId = open ? open.id : null;
+  syncLiveInputs();
+  renderForm();
+  if(openId){ var b = document.getElementById(openId); if(b) b.classList.add('open'); }
+}
+
 function toggleSection(idx) {
   const body = document.getElementById(`body-${idx}`);
   const isOpen = body.classList.contains('open');
