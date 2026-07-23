@@ -28,7 +28,7 @@ bind = '127.0.0.1:5050'
 accesslog = '-'
 errorlog = '-'
 loglevel = 'info'
-access_log_format = '%({X-Forwarded-For}i)s %l %u %t "%r" %s %b "%{Referer}i" "%{User-Agent}i" %D'
+access_log_format = '%({x-forwarded-for}i)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s'
 
 # ── Process management ──
 daemon = False
