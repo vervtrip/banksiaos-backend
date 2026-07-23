@@ -335,26 +335,6 @@ const SECTIONS = [
     ]
   },
   {
-    key: 'guarantor', title: 'Guarantor', desc: 'Someone who can guarantee your rent if needed',
-    fields: [
-      {key:'has_guarantor',label:'Do you have a guarantor?',type:'checkbox'},
-      {key:'guarantor_title',label:'Title',type:'select',options:['Mr','Mrs','Ms','Miss','Dr'],showIf:{key:'has_guarantor'}},
-      {key:'guarantor_first_name',label:'First Name',type:'text',showIf:{key:'has_guarantor'}},
-      {key:'guarantor_last_name',label:'Last Name',type:'text',showIf:{key:'has_guarantor'}},
-      {key:'guarantor_date_of_birth',label:'Date of Birth',type:'date',showIf:{key:'has_guarantor'}},
-      {key:'guarantor_relation',label:'Relationship to you',type:'select',options:['Parent','Sibling','Employer','Friend','Other'],showIf:{key:'has_guarantor'}},
-      {key:'guarantor_email',label:'Email',type:'email',showIf:{key:'has_guarantor'}},
-      {key:'guarantor_phone',label:'Phone',type:'tel',showIf:{key:'has_guarantor'}},
-      {key:'guarantor_mobile',label:'Mobile',type:'tel',showIf:{key:'has_guarantor'}},
-      {key:'guarantor_address_line1',label:'Address Line 1',type:'text',showIf:{key:'has_guarantor'}},
-      {key:'guarantor_city',label:'City',type:'text',showIf:{key:'has_guarantor'}},
-      {key:'guarantor_postcode',label:'Postcode',type:'text',showIf:{key:'has_guarantor'}},
-      {key:'guarantor_profession',label:'Profession',type:'text',showIf:{key:'has_guarantor'}},
-      {key:'guarantor_annual_income',label:'Annual Income (£)',type:'number',showIf:{key:'has_guarantor'}},
-      {key:'guarantor_homeowner',label:'Homeowner?',type:'checkbox',showIf:{key:'has_guarantor'}},
-    ]
-  },
-  {
     key: 'housing_benefit', title: 'Housing Benefit', desc: 'If you receive housing benefit',
     fields: [
       {key:'housing_benefit',label:'Do you receive Housing Benefit?',type:'checkbox'},
@@ -523,7 +503,6 @@ function renderForm() {
           ${idx === 1 ? '<div style=\"grid-column:1/-1;font-size:12px;color:#64748b;margin-bottom:-8px\">Please provide at least one of the following \u2014 Passport/ID <strong>or</strong> Driving Licence.</div>' + renderDocumentUpload('passport') + renderDocumentUpload('driving_licence') : ''}
           ${idx === 3 ? renderDocumentUpload('payslip') + renderDocumentUpload('bank_statement') + renderDocumentUpload('employment_contract') : ''}
           ${idx === 5 ? renderDocumentUpload('student_letter') + renderDocumentUpload('student_id') : ''}
-          ${idx === 6 ? renderDocumentUpload('guarantor_id') : ''}
         </div>
         <div class="section-footer">
           <span style="font-size:12px;color:#94a3b8">${isComplete ? '✅ Completed' : '○ Not completed'}</span>
@@ -929,9 +908,6 @@ function updateProgress() {
   }
   if (formData.employment_status === 'Student') {
     expectedDocs.push('student_letter','student_id');
-  }
-  if (formData.has_guarantor) {
-    expectedDocs.push('guarantor_id');
   }
   const docsSubmitted = uploadedDocs.filter(d => !d.ai_flagged).length;
   const docsExpected = expectedDocs.length;
