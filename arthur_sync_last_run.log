@@ -1,33 +1,13 @@
-[SYNC] Starting Arthur live sync at 2026-07-11T19:04:30.032857+00:00
+=== Arthur Sync Run: 2026-07-22 18:06 UTC ===
+Duration: 393.3s (6m33s)
 
-[SYNC] Syncing properties...
-  Total items: 46, Total pages: 3
-  Properties synced: 46 (inserted: 0, updated: 46)
+Properties:   47 records (46 from API — inserted 0, updated 46)
+Units:        159 records (158 from API — inserted 0, updated 158)
+Tenancies:    467 records (466 from API — inserted 1, updated 465)
+Tenants:      533 records (532 from API — inserted 1, updated 531)
+Applicants:   711 records (681 from API — inserted 0, updated 681)
+Transactions: 7334 records (7292 from API — inserted 3, updated 7289)
 
-[SYNC] Syncing units...
-  Total items: 158, Total pages: 8
-  Units synced: 158 (inserted: 0, updated: 158)
-
-[SYNC] Syncing tenancies...
-  Total items: 461, Total pages: 24
-  Tenancies synced: 461 (inserted: 1, updated: 460)
-
-[SYNC] Syncing tenants...
-  Total items: 527, Total pages: 27
-  Tenants synced: 527 (inserted: 1, updated: 526)
-
-[SYNC] Syncing applicants...
-  Total items: 675, Total pages: 34
-  Applicants synced: 675 (inserted: 0, updated: 675)
-
-[SYNC] Syncing transactions...
-  Total items: 7255, Total pages: 363
-  Transactions synced: 7255 (inserted: 3, updated: 7252)
-
-[SYNC] Sync complete in 386.7s
-  Properties:   50
-  Units:        162
-  Tenancies:    464
-  Tenants:      530
-  Applicants:   675
-  Transactions: 7292
+All 7292 transactions fetched across 365 pages (overdue, outstanding, paid, cancelled, refunded, void — no max_pages limit).
+1 new tenancy, 1 new tenant, 3 new transactions synced.
+Token healthy — all endpoints responded successfully.

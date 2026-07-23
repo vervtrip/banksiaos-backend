@@ -115,7 +115,7 @@ print(f"Commit: {commit_hash}")
 
 # 4. PRODUCTION SERVICE CONFIG
 print("\n--- 4. Production Service Config ---")
-svc = subprocess.run(["systemctl", "cat", "verv-dashboard.service"], capture_output=True, text=True)
+svc = subprocess.run(["systemctl", "cat", "banksia-backend.service"], capture_output=True, text=True)
 svc_config = svc.stdout
 
 proc = subprocess.run(["ps", "aux", "--forest"], capture_output=True, text=True)

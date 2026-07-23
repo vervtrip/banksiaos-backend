@@ -724,7 +724,7 @@ r2 = subprocess.run(["git", "tag", "-l", "BANKSIA_OS_STABLE*"],
 has_tag = "BANKSIA_OS_STABLE_BASELINE_V1" in r2.stdout
 ok(f"Tag: {r2.stdout.strip()}", has_tag, detail=f"tags found: {r2.stdout.strip()}")
 
-r3 = subprocess.run(["systemctl", "is-active", "verv-dashboard.service"],
+r3 = subprocess.run(["systemctl", "is-active", "banksia-backend.service"],
                     capture_output=True, text=True)
 ok(f"Service: {r3.stdout.strip()}", r3.returncode == 0, detail=r3.stderr + r3.stdout)
 

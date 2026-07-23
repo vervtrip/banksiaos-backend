@@ -4,7 +4,7 @@ Arthur Landlord Email Syncer
 Syncs landlord/owner emails from Arthur API into Banksia OS property_owners table.
 
 Usage:
-    python3 /root/verv-dashboard/scripts/sync_arthur_owner_emails.py
+    python3 /root/banksia-backend/scripts/sync_arthur_owner_emails.py
 
 Requires:
     - Valid Arthur OAuth credentials in hmobanksia profile

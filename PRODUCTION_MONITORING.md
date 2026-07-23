@@ -11,7 +11,7 @@
 | **Schedule** | Every 3 minutes |
 | **Script** | `~/.hermes/scripts/dashboard_health_check.sh` |
 | **Threshold** | 3 consecutive failures before restart |
-| **Restart action** | `systemctl restart verv-dashboard.service` |
+| **Restart action** | `systemctl restart banksia-backend.service` |
 | **Log output** | Cron job delivery: `local` (saved to `~/.hermes/cron/output/`) |
 | **Fail counter** | `/tmp/verv_dash_failures` (auto-cleared on success or restart) |
 | **No-agent mode** | Yes (script-only, no LLM overhead) |
@@ -57,12 +57,12 @@ cronjob(action='remove', job_id='3610cbffa75d')
 curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5050/health
 # Expected: 200
 
-systemctl status verv-dashboard.service --no-pager -l
+systemctl status banksia-backend.service --no-pager -l
 ```
 
 ### Dashboard Restart
 ```bash
-systemctl restart verv-dashboard.service
+systemctl restart banksia-backend.service
 ```
 Allow 2 seconds for startup, then verify:
 ```bash

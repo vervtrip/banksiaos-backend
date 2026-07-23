@@ -70,7 +70,7 @@ print(f"✅ Esign auto-created — #{esign['id']}, status={esign['status']}")
 
 # Get token from DB
 import sqlite3
-db = sqlite3.connect("/root/verv-dashboard/banksia_os.db")
+db = sqlite3.connect("/root/banksia-backend/banksia_os.db")
 cur = db.execute("SELECT signer_token, team_token FROM esignature_requests WHERE id = ?", [esign["id"]])
 row = cur.fetchone()
 db.close()
@@ -111,7 +111,7 @@ tenancy_created = resp.get("tenancy_created", False)
 print(f"✅ Auto-tenancy created: {tenancy_created}")
 
 # ── Phase 7: Verify tenancy is in DB ──
-db = sqlite3.connect("/root/verv-dashboard/banksia_os.db")
+db = sqlite3.connect("/root/banksia-backend/banksia_os.db")
 db.row_factory = sqlite3.Row
 
 # Check tenancy
