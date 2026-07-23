@@ -359,7 +359,6 @@ const SECTIONS = [
     fields: [
       {key:'bank_location',label:'Is this a UK or International bank account?',type:'select',options:['UK','International'],required:true,inputAttrs:'onchange="refreshForm()"'},
       {key:'bank_name',label:'Bank Name',type:'text',required:true,showIf:{key:'bank_location',values:['UK','International']}},
-      {key:'bank_account_name',label:'Account Name',type:'text',required:true,showIf:{key:'bank_location',values:['UK','International']}},
       {key:'bank_sort_code',label:'Sort Code',type:'text',placeholder:'00-00-00',required:true,inputAttrs:'oninput="formatSortCode(this)" maxlength="8"',showIf:{key:'bank_location',values:['UK']}},
       {key:'bank_account_number',label:'Account Number',type:'text',placeholder:'8 digits',required:true,inputAttrs:'inputmode="numeric" maxlength="8"',showIf:{key:'bank_location',values:['UK']}},
       {key:'bank_iban',label:'IBAN',type:'text',placeholder:'International Bank Account Number',required:true,showIf:{key:'bank_location',values:['International']}},

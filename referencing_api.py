@@ -586,7 +586,6 @@ def _compute_form_progress(form, valid_docs):
                     {"key":"kin_address","required":False}]},
         {"fields": [{"key":"bank_location","required":True},
                     {"key":"bank_name","required":True,"showIf":{"key":"bank_location","values":["UK","International"]}},
-                    {"key":"bank_account_name","required":True,"showIf":{"key":"bank_location","values":["UK","International"]}},
                     {"key":"bank_sort_code","required":True,"showIf":{"key":"bank_location","values":["UK"]}},
                     {"key":"bank_account_number","required":True,"showIf":{"key":"bank_location","values":["UK"]}},
                     {"key":"bank_iban","required":True,"showIf":{"key":"bank_location","values":["International"]}},
