@@ -7157,8 +7157,8 @@ def api_add_user():
     email_val = data.get("email", "").strip()
     if email_val and not _email_re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', email_val):
         return json_error("Invalid email format — enter a valid email address", 400)
-    ok, msg = _validate_password_strength(password)
-    if not ok:
+    msg = _validate_password_strength(password)
+    if msg:
         return json_error(msg, 400)
     if username in _load_users():
         return json_error("A user with that username already exists", 409)
@@ -7209,8 +7209,8 @@ def api_update_user(username):
     if "password" in data and data["password"]:
         if not is_self and not is_super:
             return json_error("Only a super admin can reset another user's password", 403)
-        ok, msg = _validate_password_strength(data["password"])
-        if not ok:
+        msg = _validate_password_strength(data["password"])
+        if msg:
             return json_error(msg, 400)
         users[username]["password"] = _hash_password(data["password"])
     _save_users(users)

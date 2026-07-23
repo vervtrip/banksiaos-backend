@@ -1004,8 +1004,8 @@ def api_add_user():
     email_val = data.get("email", "").strip()
     if email_val and not _email_re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', email_val):
         return jsonify({"error": "Invalid email format — enter a valid email address"}), 400
-    ok, msg = _validate_password_strength(password)
-    if not ok:
+    msg = _validate_password_strength(password)
+    if msg:
         return jsonify({"error": msg}), 400
     if new_role not in VALID_ROLES:
         new_role = "viewer"
