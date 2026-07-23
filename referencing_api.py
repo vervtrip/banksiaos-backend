@@ -394,15 +394,17 @@ def require_auth(f):
             return json_error("Not authenticated", 401)
         db = get_dict_db()
         try:
-            # Check session validity — must not be expired AND must not be idle
-            cutoff = (datetime.now(timezone.utc) - timedelta(minutes=ACTIVITY_TIMEOUT_MINUTES)).isoformat()
+            # Check session validity — must not be expired AND must not be idle.
+            # expires_at/cutoff must be compared in the same string format SQLite's
+            # datetime('now') produces ('YYYY-MM-DD HH:MM:SS'), or lexicographic
+            # comparison against ISO-with-'T' timestamps silently breaks.
             row = db.execute(
                 "SELECT ps.*, pu.id AS pu_id, pu.email, pu.first_name, pu.last_name, pu.portal_type, "
                 "pu.applicant_id, pu.tenancy_id, pu.payee_tenant_id "
                 "FROM portal_sessions ps JOIN portal_users pu ON ps.user_id = pu.id "
-                "WHERE ps.session_token = ? AND ps.expires_at > datetime('now') "
-                "AND (ps.last_activity IS NULL OR ps.last_activity > ?)",
-                [token, cutoff]
+                "WHERE ps.session_token = ? AND datetime(ps.expires_at) > datetime('now') "
+                "AND (ps.last_activity IS NULL OR ps.last_activity > datetime('now', ?))",
+                [token, f"-{ACTIVITY_TIMEOUT_MINUTES} minutes"]
             ).fetchone()
             if not row:
                 return json_error("Session expired or invalid", 401)
@@ -2320,7 +2322,7 @@ def api_download_signed_pdf(req_id):
         if is_portal:
             token = auth_header[7:]
             pu = db.execute(
-                "SELECT pu.email FROM portal_sessions ps JOIN portal_users pu ON ps.user_id = pu.id WHERE ps.session_token = ? AND ps.expires_at > datetime('now')",
+                "SELECT pu.email FROM portal_sessions ps JOIN portal_users pu ON ps.user_id = pu.id WHERE ps.session_token = ? AND datetime(ps.expires_at) > datetime('now')",
                 [token]
             ).fetchone()
             if not pu or (pu.get("email") or "").lower() != (req.get("created_for_email") or "").lower():
