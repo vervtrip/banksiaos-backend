@@ -603,7 +603,6 @@ def _compute_form_progress(form, valid_docs):
                     {"key":"has_eviction","required":False},
                     {"key":"eviction_details","required":False,"showIf":{"key":"has_eviction"}},
                     {"key":"smoking_preference","required":False},
-                    {"key":"preferred_move_in_date","required":False},
                     {"key":"special_requirements","required":False}]},
     ]
 

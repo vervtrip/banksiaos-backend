@@ -108,6 +108,9 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#f8fafc;color:#0f17
 .submit-bar{flex-direction:column;gap:16px;text-align:center}
 .stat-item .value{font-size:20px}
 }
+.info-ic{position:relative;display:inline-flex;align-items:center;justify-content:center;margin-left:6px;width:16px;height:16px;font-size:13px;color:#64748b;cursor:help;outline:none}
+.info-ic .info-tip{position:absolute;bottom:135%;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:9px 11px;border-radius:8px;font-size:12px;line-height:1.45;width:250px;max-width:72vw;opacity:0;visibility:hidden;transition:opacity .15s;z-index:60;box-shadow:0 6px 18px rgba(0,0,0,.18);font-weight:400;text-align:left;white-space:normal}
+.info-ic:hover .info-tip,.info-ic:focus .info-tip{opacity:1;visibility:visible}
 </style>
 </head>
 <body>
@@ -378,18 +381,17 @@ const SECTIONS = [
   {
     key: 'additional', title: 'Additional Information', desc: 'Pets, declarations and preferences',
     fields: [
-      {key:'has_pet',label:'Do you have any pets?',type:'checkbox'},
+      {key:'has_pet',label:'Do you have any pets?',type:'checkbox',info:'Tell us if you keep any animals at the property. Some properties have restrictions, so ticking yes lets us check the pet policy. If yes, add the type and breed below.'},
       {key:'pet_details',label:'Pet Details (type, breed)',type:'text',showIf:{key:'has_pet'}},
-      {key:'has_ccj',label:'Do you have any CCJs?',type:'checkbox'},
+      {key:'has_ccj',label:'Do you have any CCJs?',type:'checkbox',info:'A CCJ (County Court Judgment) is a court order in England & Wales confirming you owe money you did not repay. It stays on your credit record for six years and can affect referencing.'},
       {key:'ccj_details',label:'CCJ Details',type:'textarea',showIf:{key:'has_ccj'}},
-      {key:'has_iva',label:'Are you in an IVA?',type:'checkbox'},
+      {key:'has_iva',label:'Are you in an IVA?',type:'checkbox',info:'An IVA (Individual Voluntary Arrangement) is a formal, legally binding agreement to pay off debts over a set period, managed by an insolvency practitioner.'},
       {key:'iva_details',label:'IVA Details',type:'textarea',showIf:{key:'has_iva'}},
-      {key:'has_bankruptcy',label:'Have you ever been bankrupt?',type:'checkbox'},
+      {key:'has_bankruptcy',label:'Have you ever been bankrupt?',type:'checkbox',info:'Bankruptcy is a legal status for someone who cannot repay their debts. Tick yes if you have ever been declared bankrupt, even if it has since been discharged.'},
       {key:'bankruptcy_details',label:'Bankruptcy Details',type:'textarea',showIf:{key:'has_bankruptcy'}},
-      {key:'has_eviction',label:'Have you ever been evicted?',type:'checkbox'},
+      {key:'has_eviction',label:'Have you ever been evicted?',type:'checkbox',info:'Eviction is when a landlord legally requires a tenant to leave a property, usually through a court order. Tick yes if this has ever happened to you.'},
       {key:'eviction_details',label:'Eviction Details',type:'textarea',showIf:{key:'has_eviction'}},
       {key:'smoking_preference',label:'Do you smoke?',type:'select',options:['No','Yes - inside','Yes - outside only','Occasionally']},
-      {key:'preferred_move_in_date',label:'Preferred Move-In Date',type:'date'},
       {key:'special_requirements',label:'Special Requirements',type:'textarea',hint:'Any accessibility needs or other requirements'},
     ]
   },
@@ -557,7 +559,7 @@ function renderField(field, sectionIdx) {
       input = `<textarea id="field-${field.key}">${escapeHtml(val)}</textarea>`;
       break;
     case 'checkbox':
-      input = `<div class="checkbox-row"><input type="checkbox" id="field-${field.key}" ${val ? 'checked' : ''}><label for="field-${field.key}">${field.label}</label></div>`;
+      input = `<div class="checkbox-row"><input type="checkbox" id="field-${field.key}" ${val ? 'checked' : ''}><label for="field-${field.key}">${field.label}</label>${field.info ? `<span class="info-ic" tabindex="0" aria-label="More information">&#9432;<span class="info-tip">${escapeHtml(field.info)}</span></span>` : ''}</div>`;
       break;
     default:
       input = `<input type="text" id="field-${field.key}" value="${escapeHtml(val)}">`;
