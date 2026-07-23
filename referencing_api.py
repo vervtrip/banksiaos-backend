@@ -81,6 +81,15 @@ def json_success(data, **extra):
 def json_error(msg, status=400):
     return jsonify({"success": False, "error": msg}), status
 
+def safe_error(exc, context=""):
+    """Log the real exception server-side, return a generic message for the client."""
+    try:
+        from services.logging_service import log_error
+        log_error(f"Unhandled exception{f' in {context}' if context else ''}: {exc}")
+    except Exception:
+        pass
+    return "Something went wrong on our end — please try again, or contact support if it persists."
+
 def generate_token(length=48):
     return secrets.token_urlsafe(length)
 
@@ -489,7 +498,7 @@ def api_create_form():
         return json_success(form, delivery=delivery)
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -986,7 +995,7 @@ def api_update_form(form_id):
         return json_success(updated)
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -1095,7 +1104,7 @@ def api_submit_form(form_id):
         return json_success(updated)
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -1168,7 +1177,7 @@ def api_assign_form_property(form_id):
         })
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -1367,7 +1376,7 @@ def api_upload_document():
         return json_success(doc)
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -1464,7 +1473,7 @@ def api_ai_review_document(doc_id):
         return json_success(doc)
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -1515,7 +1524,7 @@ def api_ai_review_form(form_id):
         })
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -1920,7 +1929,7 @@ def api_create_esignature():
         return json_success(request_data, delivery=delivery)
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2093,7 +2102,7 @@ def api_esignature_sign(token):
         return json_success(resp)
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2245,7 +2254,7 @@ def api_esignature_team_sign(token):
         return json_error("Applicant signed PDF not found", 500)
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2469,7 +2478,42 @@ def api_applicant_signup():
         }), 201
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@referencing_bp.route("/portal/self-create-form", methods=["POST"])
+@require_auth
+def api_portal_self_create_form():
+    """Create a blank referencing form linked to the logged-in portal user."""
+    pu = request.portal_user
+    db = get_dict_db()
+    try:
+        form_token = generate_form_token()
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=FORM_EXPIRY_DAYS)).isoformat()
+
+        db.execute(
+            """INSERT INTO referencing_forms (applicant_id, form_token, status, first_name, last_name, email, date_of_birth, portal_user_id)
+            VALUES (NULL, ?, 'draft', ?, ?, ?, NULL, ?)""",
+            [form_token, pu["first_name"], pu["last_name"], pu["email"], pu["id"]]
+        )
+        form_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
+
+        sections = [
+            'personal', 'contact', 'residential', 'employment', 'self_employed',
+            'student', 'guarantor', 'housing_benefit', 'kin', 'bank', 'landlord', 'additional', 'declaration'
+        ]
+        for section in sections:
+            db.execute(
+                "INSERT INTO form_sections (form_id, section_key) VALUES (?, ?)",
+                [form_id, section]
+            )
+        db.commit()
+        return json_success({"form_id": form_id, "form_token": form_token})
+    except Exception as e:
+        db.rollback()
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2570,7 +2614,7 @@ def api_portal_self_register():
         })
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2664,7 +2708,7 @@ def api_portal_register():
         })
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2758,7 +2802,7 @@ def api_portal_me():
 
         # Any referencing forms tied to this email
         forms = db.execute(
-            "SELECT id, status, first_name, last_name, submitted_at, created FROM referencing_forms WHERE lower(email) = ? ORDER BY created DESC",
+            "SELECT id, form_token, status, first_name, last_name, submitted_at, created FROM referencing_forms WHERE lower(email) = ? ORDER BY created DESC",
             [pu["email"].lower()]
         ).fetchall()
 
@@ -3102,7 +3146,7 @@ def api_portal_upload_document():
         return json_success(doc, message="Document uploaded")
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3663,7 +3707,7 @@ def api_create_tenancy_from_form():
         )
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3775,7 +3819,7 @@ def api_update_tenancy(tid):
         return json_success(updated)
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 

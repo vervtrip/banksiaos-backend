@@ -41,6 +41,18 @@ def json_error(msg, status=400):
     return jsonify({"success": False, "error": msg}), status
 
 
+def safe_error(exc, context=""):
+    """Log the real exception server-side, return a generic message for the client.
+    Use this instead of str(e) in any json_error(str(e), 500) call — raw exception
+    text (SQL, file paths, internals) must never reach the browser."""
+    try:
+        from services.logging_service import log_error
+        log_error(f"Unhandled exception{f' in {context}' if context else ''}: {exc}")
+    except Exception:
+        pass
+    return "Something went wrong on our end — please try again, or contact support if it persists."
+
+
 def clean_none(row):
     """Replace all None values with empty string, recursing into nested dicts/lists."""
     if row is None:

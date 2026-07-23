@@ -18,7 +18,8 @@ from banksia_os_db import get_db, get_dict_db, count, dict_from_row, raw_query
 # ── Service-layer imports ──
 from services.db_service import (
     bool_fields, paginate, json_success, json_error, clean_none,
-    int_param, float_param, build_search_clause, build_order_by, record_change
+    int_param, float_param, build_search_clause, build_order_by, record_change,
+    safe_error
 )
 from services.activity_service import (
     create_activity_log, log_activity, _format_value, _redact_if_sensitive,
@@ -248,7 +249,7 @@ def api_update_resource(table, item_id):
         updated_fields = [k for k in data.keys() if k in real_cols and k not in protected_keys]
         return json_success({"updated": True, "id": item_id, "fields": updated_fields, "ignored": ignored})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -305,7 +306,7 @@ def api_sync_unit_vacancy():
         result = sync_unit_vacancy()
         return json_success(result)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
 
 # ═══════════════════════════════════════════════
 # 1. DASHBOARD SUMMARY
@@ -574,7 +575,7 @@ def api_dashboard():
             ).fetchone()["cnt"],
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -690,7 +691,7 @@ def api_dashboard_activity():
 
         return json_success(activity, total=len(activity), page=1, per_page=limit)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -835,7 +836,7 @@ def api_submissions():
         items = items[:limit]
         return json_success({"items": items, "counts": counts}, total=len(items))
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -940,7 +941,7 @@ def api_maintenance_jobs():
 
         return json_success(rows, total=total, page=page, per_page=per_page)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -995,7 +996,7 @@ def api_create_maintenance_job():
         return json_success(dict(job)), 201
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -1082,7 +1083,7 @@ def api_maintenance_job(job_id):
         return json_success(dict(job))
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -1145,7 +1146,7 @@ def api_promote_portal_request():
         return json_success(dict(job)), 201
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -1194,7 +1195,7 @@ def api_maintenance_orders():
             ).fetchall()
         return json_success([dict(o) for o in orders])
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -1228,7 +1229,7 @@ def api_maintenance_order(order_id):
         order = db.execute("SELECT * FROM maintenance_orders WHERE id = ?", [order_id]).fetchone()
         return json_success(dict(order))
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -1270,7 +1271,7 @@ def api_ll_comms():
         ).fetchall()
         return json_success([dict(c) for c in comms])
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -1537,7 +1538,7 @@ def api_sync_from_monday():
             }
         )
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -1736,7 +1737,7 @@ def api_create_property():
         record_change(user_name, 'created', 'property', str(new_id), data.get("name", ""))
         return json_success({"id": new_id, "message": "Property created"}), 201
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2029,7 +2030,7 @@ def api_property(prop_id):
 
         return json_success(prop)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2173,7 +2174,7 @@ def _api_patch_property(prop_id):
         })
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2244,7 +2245,7 @@ def api_property_dependencies(prop_id):
             ]),
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2394,7 +2395,7 @@ def api_create_property_full():
 
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2606,7 +2607,7 @@ def api_archive_properties_bulk():
         })
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2706,7 +2707,7 @@ def api_archive_property(prop_id):
 
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2757,7 +2758,7 @@ def api_restore_property(prop_id):
 
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2893,7 +2894,7 @@ def api_delete_property(prop_id):
 
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2931,7 +2932,7 @@ def api_property_activity(prop_id):
 
         return json_success(rows, total=total, page=page, per_page=limit)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -2971,7 +2972,7 @@ def api_get_activity():
 
         return json_success(rows, total=total, page=page, per_page=limit)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3038,7 +3039,7 @@ def api_list_units_for_property(prop_id):
         ).fetchall()
         return json_success(units)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3086,7 +3087,7 @@ def api_create_unit_for_property(prop_id):
         created = db.execute("SELECT * FROM units WHERE id = ?", (new_id,)).fetchone()
         return json_success(clean_none(dict(created))), 201
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3129,7 +3130,7 @@ def api_update_unit(unit_id):
         updated = db.execute("SELECT * FROM units WHERE id = ?", (unit_id,)).fetchone()
         return json_success(clean_none(dict(updated)))
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3165,7 +3166,7 @@ def api_archive_unit(unit_id):
 
         return json_success({"id": unit_id, "message": "Unit archived successfully", "status": "archived"})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3199,7 +3200,7 @@ def api_delete_unit(unit_id):
 
         return json_success({"id": unit_id, "message": "Unit permanently deleted"})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3260,7 +3261,7 @@ def api_bulk_create_units(prop_id):
             "errors": errors if errors else None,
         }), 201
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3299,7 +3300,7 @@ def api_property_images(prop_id):
 
         return json_success(result)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3434,7 +3435,7 @@ def api_create_unit():
         record_change(user_name, 'created', 'unit', str(new_id), data.get("unit_ref", ""))
         return json_success({"id": new_id, "message": "Unit created"}), 201
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3471,7 +3472,7 @@ def api_unit(unit_id):
 
         return json_success(unit)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3625,7 +3626,7 @@ def api_tenancy(ten_id):
 
         return json_success(ten)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3651,7 +3652,7 @@ def api_tenancies_ending_soon():
 
         return json_success(rows, total=len(rows), page=1, per_page=len(rows))
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3685,7 +3686,7 @@ def api_tenancies_moving_in():
 
         return json_success(rows, total=len(rows), page=1, per_page=len(rows))
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3719,7 +3720,7 @@ def api_tenancies_moving_out():
 
         return json_success(rows, total=len(rows), page=1, per_page=len(rows))
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3806,7 +3807,7 @@ def api_tenancies_by_property(property_id):
             }
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3865,7 +3866,7 @@ def api_financials():
             }
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3889,7 +3890,7 @@ def api_arrears():
         )
         return json_success(rows, total, page, per_page)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3967,7 +3968,7 @@ def api_maintenance_list():
 
         return json_success(rows, total=total, page=page, per_page=per_page)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -4001,7 +4002,7 @@ def api_maintenance_detail(job_id):
         result["ll_informed"] = bool(result["ll_informed"])
         return json_success(result)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -4069,7 +4070,7 @@ def api_maintenance_job_emails(job_id):
                 "total_matched": 0
             })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -4146,7 +4147,7 @@ def api_maintenance_job_conversations(job_id):
             "count": len(conversations),
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -4190,7 +4191,7 @@ def api_activity():
         total = db.execute("SELECT COUNT(*) as cnt FROM (SELECT modified FROM tenants WHERE modified IS NOT NULL UNION ALL SELECT modified FROM tenancies WHERE modified IS NOT NULL UNION ALL SELECT modified FROM applicants WHERE modified IS NOT NULL)").fetchone()["cnt"]
         return json_success(rows, total, page, per_page)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -4331,7 +4332,7 @@ def api_tenant(tenant_id):
 
         return json_success(tenant)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -4482,7 +4483,7 @@ def api_referencing():
 
         return json_success({"items": rows, "stats": stats}, total=total, page=page, per_page=per_page)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -4564,7 +4565,7 @@ def api_finance_overview():
             },
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -4652,7 +4653,7 @@ def api_transaction(txn_id):
 
         return json_success(txn)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -4694,7 +4695,7 @@ def api_deposits():
             })
         return json_success(all_deposits)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -4788,7 +4789,7 @@ def api_banksia_deposits():
             }
         }, total, page, per_page)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -4873,7 +4874,7 @@ def api_deposits_reconciliation():
             "corrected_total": round(total_all_time["total"], 2),
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -5017,7 +5018,7 @@ def api_deposits_migrate():
         except Exception as _e:
             current_app.logger.error(f"Error in line ~4955: {_e}")
             pass
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -5051,7 +5052,7 @@ def api_deposits_detail(deposit_id):
 
         return json_success(deposit)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -5094,7 +5095,7 @@ def api_update_deposit(deposit_id):
         updated = db.execute("SELECT * FROM deposits WHERE id = ?", (deposit_id,)).fetchone()
         return json_success(updated)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -5115,7 +5116,7 @@ def api_get_rent_charges(tenancy_id):
         ).fetchall()
         return json_success(charges)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -5173,7 +5174,7 @@ def api_generate_rent_charges(tenancy_id):
                                    (tenancy_id,)).fetchone()["c"]
         return json_success({"generated": count, "total_charges": total_charges, "tenancy_id": tenancy_id})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -5215,7 +5216,7 @@ def api_update_rent_charge(charge_id):
             "balance": round(totals["total_expected"] - totals["total_paid"], 2)
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -5243,7 +5244,7 @@ def api_recalculate_finances():
             "overdue_estimated": round(overdue, 2)
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -5341,7 +5342,7 @@ def api_search():
 
         return json_success(results)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -5405,7 +5406,7 @@ def api_create_tenancy():
         return json_success({"id": new_id, "ref": ref})
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -5444,7 +5445,7 @@ def api_end_tenancy(ten_id):
         return json_success({"id": ten_id, "status": "Ended"})
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -5496,7 +5497,7 @@ def api_create_tenant():
         return json_success({"id": new_id})
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6002,7 +6003,7 @@ def api_upload_document():
             result["matched_to"] = matched_to
         return json_success(result)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6017,7 +6018,7 @@ def api_list_uploaded():
         ).fetchall()
         return json_success(docs)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6050,7 +6051,7 @@ def api_delete_uploaded(doc_id):
         db.commit()
         return json_success({"deleted": True})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6215,7 +6216,7 @@ def api_entity_document_upload():
             "FROM entity_documents WHERE id = ?", (doc_id,)).fetchone()
         return json_success(dict(doc))
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6237,7 +6238,7 @@ def api_list_entity_documents(entity_type, entity_id):
         docs = db.execute(sql, params).fetchall()
         return json_success(docs)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6285,7 +6286,7 @@ def api_delete_entity_document(doc_id):
         db.commit()
         return json_success({"deleted": True})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6303,7 +6304,7 @@ def api_verify_entity_document(doc_id):
         db.commit()
         return json_success({"id": doc_id, "is_verified": bool(is_verified)})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6333,7 +6334,7 @@ def api_update_entity_document(doc_id):
         db.commit()
         return json_success({"id": doc_id, "updated": True})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6381,7 +6382,7 @@ def api_list_all_documents():
             "total": total, "page": page, "per_page": per_page,
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6400,7 +6401,7 @@ def api_document_stats():
             by_type[r["entity_type"]] = {"count": r["count"], "total_bytes": r["total_bytes"] or 0}
         return json_success({"total_count": total, "total_bytes": total_bytes, "by_type": by_type})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6553,7 +6554,7 @@ def api_get_comments(entity_type, entity_id):
             })
         return json_success(results)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6613,7 +6614,7 @@ def api_add_comment(entity_type, entity_id):
             "modified": None,
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6683,7 +6684,7 @@ def api_edit_comment(comment_id):
             "modified": None,
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6710,7 +6711,7 @@ def api_delete_comment(comment_id):
         db.commit()
         return json_success({"deleted": True, "id": comment_id})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6768,7 +6769,7 @@ def api_recent_comments():
             })
         return json_success(results)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6796,7 +6797,7 @@ def api_properties_compliance():
                                "status": "pending"})
         return json_success(issues)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -6848,7 +6849,7 @@ def api_get_notifications():
         
         return json_success({"items": items, "unread_count": uc})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7023,7 +7024,7 @@ def api_my_updates():
             "total": total,
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7042,7 +7043,7 @@ def api_mark_notification_read(notification_id):
         db.commit()
         return json_success({"ok": True})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7061,7 +7062,7 @@ def api_mark_all_read():
         db.commit()
         return json_success({"ok": True})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7082,7 +7083,7 @@ def api_mark_read():
         db.commit()
         return json_success({"ok": True})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7328,7 +7329,7 @@ def api_rent_schedule(tenancy_id):
             "schedule": schedule,
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7453,7 +7454,7 @@ def api_tenancy_summary(tenancy_id):
             "arrears": float(arrears) if arrears else 0.0,
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7503,7 +7504,7 @@ def api_access_get(access_id):
             return json_error("Access record not found", 404)
         return json_success(record)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7545,7 +7546,7 @@ def api_access_create():
         record = db.execute("SELECT * FROM access_records WHERE id = ?", (new_id,)).fetchone()
         return json_success(record)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7597,7 +7598,7 @@ def api_access_update(access_id):
         ).fetchone()
         return json_success(updated)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7623,7 +7624,7 @@ def api_access_available():
         ).fetchall()
         return json_success(records)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7688,7 +7689,7 @@ def api_property_image_upload(prop_id):
 
         return json_success(dict(img))
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7760,7 +7761,7 @@ def api_property_image_patch(img_id):
 
         return json_success(d)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7794,7 +7795,7 @@ def api_property_image_delete(img_id):
 
         return json_success({"deleted": img_id})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7834,7 +7835,7 @@ def api_renew_tenancy(ten_id):
         return json_success({"renewed": True, "new_end_date": new_end})
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7857,7 +7858,7 @@ def api_rent_review(ten_id):
         return json_success({"rent_reviewed": True, "new_rent": new_rent, "review_date": review_date})
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7877,7 +7878,7 @@ def api_section_21(ten_id):
         return json_success({"section_21_served": True, "served_date": served_date})
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7893,7 +7894,7 @@ def api_tags():
         tags = db.execute("SELECT * FROM tags ORDER BY name").fetchall()
         return json_success(tags)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7909,7 +7910,7 @@ def api_create_tag():
         db.commit()
         return json_success({"message":"Tag created"}), 201
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -7922,7 +7923,7 @@ def api_tag(tag_id):
             db.commit()
             return json_success({"deleted":True})
         except Exception as e:
-            return json_error(str(e), 500)
+            return json_error(safe_error(e), 500)
         finally:
             db.close()
     return api_update_resource("tags", tag_id)
@@ -7955,7 +7956,7 @@ def api_property_owners():
                               (per_page,(page-1)*per_page)).fetchall()
         return json_success(rows, total, page, per_page)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8038,7 +8039,7 @@ def api_contractors():
 
         return json_success({"items": result, "totals": totals})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8111,7 +8112,7 @@ def api_create_property_owner():
 
         return json_success({"id": owner_id, "message": "Owner created", "created_property": created_property}), 201
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8123,7 +8124,7 @@ def api_property_owners_all():
         rows = db.execute("SELECT id, name, company_name FROM property_owners ORDER BY name").fetchall()
         return json_success(rows)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8146,7 +8147,7 @@ def api_property_owner(owner_id):
         owner["properties"] = [dict(p) for p in props]
         return json_success(owner)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8165,7 +8166,7 @@ def api_delete_property_owner(owner_id):
         db.commit()
         return json_success({"deleted": True})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8196,7 +8197,7 @@ def api_threads():
             t["message_count"] = msg_count
         return json_success(threads)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8222,7 +8223,7 @@ def api_create_thread():
             db.commit()
         return json_success({"id": tid, "message":"Thread created"}), 201
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8238,7 +8239,7 @@ def api_thread(thread_id):
         thread["messages"] = messages
         return json_success(thread)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8254,7 +8255,7 @@ def api_update_thread_status(thread_id):
         db.commit()
         return json_success({"updated":True})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8287,7 +8288,7 @@ def api_upload_thread_attachment(thread_id):
         db.commit()
         return json_success({"filename": file.filename, "path": save_path, "url": attachment_url, "message_id": db.lastrowid}), 201
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8312,7 +8313,7 @@ def api_post_message():
         db.commit()
         return json_success({"message":"Sent"}), 201
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8325,7 +8326,7 @@ def api_get_message(msg_id):
         if not msg: return json_error("Not found", 404)
         return json_success(msg)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8346,7 +8347,7 @@ def api_edit_message(msg_id):
         db.commit()
         return json_success({"message":"Updated"})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8361,7 +8362,7 @@ def api_delete_message(msg_id):
         db.commit()
         return json_success({"message":"Deleted"})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8381,7 +8382,7 @@ def api_invoices():
         invoices = db.execute(f"SELECT * FROM invoices WHERE {where} ORDER BY due_date DESC", params).fetchall()
         return json_success(invoices)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8398,7 +8399,7 @@ def api_invoice_summary():
             "due_today": round(due_today["total"], 2)
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8416,7 +8417,7 @@ def api_create_invoice():
         db.commit()
         return json_success({"message":"Invoice created"}), 201
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8432,7 +8433,7 @@ def api_company_settings():
         rows = db.execute("SELECT key, value FROM company_settings").fetchall()
         return json_success({r["key"]: r["value"] for r in rows})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8449,7 +8450,7 @@ def api_update_company_settings():
         db.commit()
         return json_success({"message":"Settings saved"})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8549,7 +8550,7 @@ def api_properties_enhanced():
                 p["tags_list"] = []
         return json_success(props, total, page, per_page)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8574,7 +8575,7 @@ def api_invoice_detail(invoice_id):
                     inv["property_name"] = prop.get("name") or prop.get("ref") or prop.get("address_line_1")
         return json_success(inv)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8617,7 +8618,7 @@ def api_update_invoice(invoice_id):
         updated = db.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
         return json_success(updated)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8635,7 +8636,7 @@ def api_pay_invoice(invoice_id):
         db.commit()
         return json_success({"message": "Invoice marked as paid"})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8651,7 +8652,7 @@ def api_cancel_invoice(invoice_id):
         db.commit()
         return json_success({"message": "Invoice cancelled"})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8798,7 +8799,7 @@ def api_applicant_detail(app_id):
 
         return json_success(app)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8867,7 +8868,7 @@ def api_create_applicant():
         bool_fields(app, "has_guarantor")
         return json_success(app), 201
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8920,7 +8921,7 @@ def api_update_applicant(app_id):
         bool_fields(updated, "has_guarantor")
         return json_success(updated)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -8971,7 +8972,7 @@ def api_transition_applicant_status(app_id):
         bool_fields(updated, "has_guarantor")
         return json_success(updated)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -9024,7 +9025,7 @@ def api_create_referencing_standalone():
         return json_success(form), 201
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -9059,7 +9060,7 @@ def api_create_referencing(app_id):
         ref = db.execute("SELECT * FROM referencing_forms WHERE id = ?", (form_id,)).fetchone()
         return json_success(ref), 201
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -9123,7 +9124,7 @@ def api_get_referencing(ref_id):
 
         return json_success(form)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -9167,7 +9168,7 @@ def api_update_referencing(ref_id):
         updated = db.execute("SELECT * FROM referencing_forms WHERE id = ?", (ref_id,)).fetchone()
         return json_success(updated)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -9184,7 +9185,7 @@ def api_delete_referencing(ref_id):
         db.commit()
         return json_success({"deleted": ref_id})
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -9261,7 +9262,7 @@ def api_transition_referencing_status(ref_id):
         updated = db.execute("SELECT * FROM referencing_forms WHERE id = ?", (ref_id,)).fetchone()
         return json_success(updated)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -9321,7 +9322,7 @@ def api_create_guarantor(app_id):
         g = db.execute("SELECT * FROM guarantors WHERE id = ?", (new_id,)).fetchone()
         return json_success(g), 201
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -9343,7 +9344,7 @@ def api_get_guarantor(g_id):
 
         return json_success(g)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -9387,7 +9388,7 @@ def api_update_guarantor(g_id):
         updated = db.execute("SELECT * FROM guarantors WHERE id = ?", (g_id,)).fetchone()
         return json_success(updated)
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -9621,7 +9622,7 @@ def api_create_tenancy_from_applicant(app_id):
         })
     except Exception as e:
         db.execute("ROLLBACK")
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -9686,7 +9687,7 @@ def api_unit_occupancy(unit_id):
             "future_tenancies": future,
         })
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -9970,7 +9971,7 @@ def global_search():
         })
 
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -10227,7 +10228,7 @@ def api_universal_timeline():
         })
 
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -10347,7 +10348,7 @@ def api_import_monday_comments():
         })
 
     except Exception as e:
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -10632,6 +10633,6 @@ def api_monday_sync():
 
     except Exception as e:
         db.rollback()
-        return json_error(str(e), 500)
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
