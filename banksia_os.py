@@ -6255,7 +6255,7 @@ def api_entity_document_upload():
         doc_id = db.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
         doc = db.execute(
             "SELECT id, entity_type, entity_id, original_filename, stored_filename, "
-            "file_type, file_size, mime_type, category, notes, uploaded_by, is_verified, created "
+            "file_type, file_size, mime_type, category, notes, uploaded_by, is_verified, created, original_filename AS filename, created AS uploaded_at, created AS created_at "
             "FROM entity_documents WHERE id = ?", (doc_id,)).fetchone()
         return json_success(dict(doc))
     except Exception as e:
@@ -6271,7 +6271,7 @@ def api_list_entity_documents(entity_type, entity_id):
     db = get_dict_db()
     try:
         sql = "SELECT id, entity_type, entity_id, original_filename, stored_filename, " \
-              "file_type, file_size, mime_type, category, notes, uploaded_by, is_verified, created " \
+              "file_type, file_size, mime_type, category, notes, uploaded_by, is_verified, created, original_filename AS filename, created AS uploaded_at, created AS created_at " \
               "FROM entity_documents WHERE entity_type = ? AND entity_id = ?"
         params = [et, entity_id]
         if category_filter:
@@ -6392,7 +6392,7 @@ def api_list_all_documents():
     db = get_dict_db()
     try:
         sql = "SELECT id, entity_type, entity_id, original_filename, stored_filename, " \
-              "file_type, file_size, mime_type, category, notes, uploaded_by, is_verified, created " \
+              "file_type, file_size, mime_type, category, notes, uploaded_by, is_verified, created, original_filename AS filename, created AS uploaded_at, created AS created_at " \
               "FROM entity_documents WHERE 1=1"
         count_sql = "SELECT COUNT(*) AS cnt FROM entity_documents WHERE 1=1"
         params = []
