@@ -520,7 +520,7 @@ function renderForm() {
         <div class="form-grid">
           ${section.fields.map(f => renderField(f, idx)).join('')}
           ${idx === SECTIONS.length - 1 ? renderDeclaration() : ''}
-          ${idx === 1 ? renderDocumentUpload('passport') + renderDocumentUpload('driving_licence') : ''}
+          ${idx === 1 ? '<div style=\"grid-column:1/-1;font-size:12px;color:#64748b;margin-bottom:-8px\">Please provide at least one of the following \u2014 Passport/ID <strong>or</strong> Driving Licence.</div>' + renderDocumentUpload('passport') + renderDocumentUpload('driving_licence') : ''}
           ${idx === 3 ? renderDocumentUpload('payslip') + renderDocumentUpload('bank_statement') + renderDocumentUpload('employment_contract') : ''}
           ${idx === 5 ? renderDocumentUpload('student_letter') + renderDocumentUpload('student_id') : ''}
           ${idx === 6 ? renderDocumentUpload('guarantor_id') : ''}
@@ -683,6 +683,9 @@ function setFieldError(key,msg){
   const err = document.getElementById('error-'+key);
   if(err){ err.textContent=msg; err.style.display='block'; }
 }
+function hasIdDoc(){
+  return uploadedDocs.some(d => d && (d.category === 'passport' || d.category === 'driving_licence'));
+}
 function validateSection(idx){
   const section = SECTIONS[idx];
   const missing = [];
@@ -700,6 +703,9 @@ function validateSection(idx){
     const filled = field.type === 'checkbox' ? !!val : !!(val && String(val).trim() !== '');
     if(filled){ clearFieldError(field.key); }
     else { setFieldError(field.key, 'This field is required'); missing.push(field.label); }
+  }
+  if(idx === 1 && !hasIdDoc()){
+    missing.push('Passport/ID or Driving Licence (upload at least one)');
   }
   return missing;
 }
@@ -886,6 +892,7 @@ function isFieldFilled(field) {
 function isSectionComplete(idx) {
   const section = SECTIONS[idx];
   if (idx === SECTIONS.length - 1) return !!(formData.declaration_confirmed && formData.terms_confirmed);
+  if (idx === 1 && !hasIdDoc()) return false;
   const requiredFields = section.fields.filter(f => f.required);
   if (requiredFields.length > 0) {
     return requiredFields.every(f => {
