@@ -11,7 +11,7 @@ PRIORITY_INDEX = {"Emergency":0,"Low":7,"Critical":10,"Medium":109,"High":110}
 TYPE_INDEX = {"Heating":0,"Plumbing":1,"Electrical":2,"Utilities":3,"Furniture":4,"NA":5,"Cleaning":6,"Structural":7,"Appliances":8,"Refurbishment":9,"Certificate":10,"Orders":11,"Wall Repairs":12,"Painting":13,"Removal":14,"Appliance":15,"Locksmith":16,"Pest Control":17,"Small Repair":18,"Licenses":19,"Inspection":101,"Gardening":102}
 CONTRACTOR_INDEX = {"Raj":0,"Mirpolat":1,"Jermaine":2,"Osman":3,"Shahid":4,"Javeed":6,"Nisar":7,"Calvin":8,"John":9,"Ben":10,"Nick":11,"David Removal":12,"Fernando":13,"Team Member":14,"Fernanda":15,"LL":16,"Council":17,"David":18,"Alex":19,"Ali":101,"Shah":102,"DevUp":103,"Ali contractor":104,"Ali Plumber":105,"Flash Removal":106,"Noor Elec":107,"HB Appliance":108,"Arslan":109,"Marcel":110,"Yusuf Locksmith":151}
 MAINTENANCE_BOARD_ID = "18401159622"
-TOKEN_PATH="/root/.hermes/secrets/monday_token.txt"
+TOKEN_PATH = "/root/.hermes/secrets/monday_token.txt"
 
 
 def get_token():

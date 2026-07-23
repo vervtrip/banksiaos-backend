@@ -24,6 +24,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:
 .btn:hover{background:#000}.btn:active{transform:scale(.99)}
 .btn.accent{background:var(--accent)}.btn.accent:hover{background:#4338ca}
 .btn.outline{background:transparent;color:var(--accent);border:2px solid var(--accent)}.btn.outline:hover{background:var(--accent);color:#fff}
+.btn.sm{padding:8px 14px;width:auto;font-size:12px;border-radius:8px}
 .err{background:#fee2e2;color:#b91c1c;padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:14px;display:none}
 .ok{background:#dcfce7;color:#15803d;padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:14px}
 .topbar{background:var(--brand);color:#fff;padding:15px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:20}
@@ -97,7 +98,7 @@ const API='/api/referencing';
 let TOKEN=localStorage.getItem('portal_token')||'';
 let ME=null, TAB='overview';
 
-function esc(s){return (s==null?'':String(s)).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));}
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function money(n){return '£'+Number(n||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function money0(n){return '£'+Number(n||0).toLocaleString('en-GB',{maximumFractionDigits:0});}
 function getParam(n){return new URLSearchParams(location.search).get(n)||'';}
@@ -207,13 +208,28 @@ function viewOverview(){
       ${sign.map(s=>`<div class="row"><div><div class="t">${esc(s.document_title)}</div><div class="s">${esc((s.document_type||'').replace(/_/g,' '))}</div></div>
       <button class="signbtn" onclick="location.href='/sign/${esc(s.signer_token)}'">Review &amp; Sign</button></div>`).join('')}</div>`:''}
     <div class="card"><h3>📋 My applications</h3>
-      ${apps.length?apps.map(a=>`<div class="row"><div><div class="t">Referencing application</div><div class="s">${a.submitted_at?'Submitted '+esc(a.submitted_at.slice(0,10)):'Started '+esc((a.created||'').slice(0,10))}</div></div>
-        <span class="pill ${esc(a.status)}">${esc((a.status||'').replace(/_/g,' '))}</span></div>`).join(''):'<div class="empty">No applications on file.</div>'}
+      ${apps.length?apps.map(a=>`<div class="row"><div><div class="t">Referencing application</div><div class="s">${a.submitted_at?'Submitted '+esc(a.submitted_at.slice(0,10)):'Started '+esc((a.created||'').slice(0,10))} · ${esc((a.status||'').replace(/_/g,' '))}</div></div>
+        <div>${a.form_token?`<button class="signbtn" onclick="location.href='/apply/${esc(a.form_token)}'">${a.status==='draft'?'Continue':'View'}</button>`:''}</div></div>`).join(''):'<div class="empty">No applications on file.</div>'}<br>
+      <button class="btn btn-outline" onclick="startNewApp()" style="width:100%;padding:10px;border:2px dashed var(--accent);border-radius:10px;background:none;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer">＋ Start a new application</button>
     </div>
     <div class="card"><h3>🏡 My tenancies</h3>
       ${ten.length?ten.map(t=>`<div class="row"><div><div class="t">${esc(t.full_address||('Property #'+t.property_id))}</div><div class="s">${esc(t.start_date||'')} → ${esc(t.end_date||'ongoing')}</div></div>
         <div style="text-align:right"><div class="t">${money0(t.rent_amount)}</div><div class="s">${esc(t.rent_frequency||'')}</div></div></div>`).join(''):'<div class="empty">No active tenancies linked to your account.</div>'}
+
     </div>`;
+}
+
+async function startNewApp(){
+  // Create a new blank referencing form linked to this user
+  try{
+    const p=ME.profile;
+    const j=await fetch(API+'/portal/self-create-form',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'}});
+    const r=await j.json();
+    if(!r.success)throw new Error(r.error);
+    location.href='/apply/'+r.data.form_token;
+  }catch(e){
+    alert('Could not create application: '+e.message);
+  }
 }
 
 async function viewRent(){
@@ -260,7 +276,7 @@ function openMaint(){
   m.innerHTML=`<div class="sheet"><span class="x" onclick="closeModal('maintModal')">×</span>
     <h2>Report an issue</h2><div class="sub">Give us as much detail as you can so we can fix it quickly.</div>
     <div class="err" id="merr"></div>
-    <div class="fg"><label>What's the problem?</label><input id="m_title" placeholder="e.g. Boiler not heating"></div>
+    <div class="fg"><label>What&apos;s the problem?</label><input id="m_title" placeholder="e.g. Boiler not heating"></div>
     <div class="fg"><label>Category</label><select id="m_cat">
       <option value="heating">Heating / hot water</option><option value="plumbing">Plumbing / leaks</option>
       <option value="electrical">Electrical</option><option value="appliances">Appliances</option>
@@ -270,7 +286,7 @@ function openMaint(){
     <div class="fg"><label>Priority</label><select id="m_pri">
       <option value="low">Low — not urgent</option><option value="normal" selected>Normal</option>
       <option value="high">High — affecting daily life</option><option value="emergency">Emergency — safety risk / flood / no heat</option></select></div>
-    <div class="fg"><label>Description</label><textarea id="m_desc" placeholder="Describe what's happening, when it started…"></textarea></div>
+    <div class="fg"><label>Description</label><textarea id="m_desc" placeholder="Describe what&apos;s happening, when it started…"></textarea></div>
     <button class="btn accent" onclick="submitMaint()">Submit request</button></div>`;
   document.body.appendChild(m);
 }
@@ -298,119 +314,48 @@ function openMessage(id,subject,body,created){
   const m=document.createElement('div');m.className='modal';m.id='msgModal';
   m.innerHTML=`<div class="sheet"><span class="x" onclick="closeModal('msgModal')">×</span>
     <h2>${esc(subject)}</h2><div class="sub">${esc((created||'').slice(0,10))}</div>
-    <div style="font-size:14px;line-height:1.7;white-space:pre-wrap">${esc(body||'(No content)')}</div></div>`;
+    <p style="font-size:14px;line-height:1.6;white-space:pre-wrap">${esc(body)}</p></div>`;
   document.body.appendChild(m);
 }
 
 async function viewDocuments(){
   document.getElementById('view').innerHTML='<div class="empty">Loading your documents…</div>';
   let d;try{d=await api('/portal/documents');}catch(e){document.getElementById('view').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>';return;}
-  const up=d.uploaded||[], sg=d.signed||[];
+  const docs=d.documents||[];
   document.getElementById('view').innerHTML=`
-    <div class="hi">My documents</div><div class="hi-sub">Documents you've provided and signed agreements</div>
-    <div class="card"><h3>✅ Signed agreements</h3>
-      ${sg.length?sg.map(s=>`<div class="row"><div><div class="t">${esc(s.document_title)}</div><div class="s">Signed ${esc((s.completed_at||s.signed_at||'').slice(0,10))}</div></div>
-        <span class="pill completed">completed</span></div>`).join(''):'<div class="empty">No signed agreements yet.</div>'}
-    </div>
-    <div class="card"><h3>📎 Documents you've provided</h3>
-      ${up.length?up.map(u=>`<div class="row"><div><div class="t">${esc((u.category||'document').replace(/_/g,' '))}</div><div class="s">${esc(u.original_filename||'')} · ${esc((u.uploaded_at||'').slice(0,10))}</div></div>
-        <span class="pill ${u.is_verified?'approved':'draft'}">${u.is_verified?'verified':'received'}</span></div>`).join(''):'<div class="empty">No documents uploaded yet.</div>'}
-    </div>
-    <button class="fab" onclick="openDocUpload()">＋ Upload document</button>`;
-}
-function openDocUpload(){
-  const m=document.createElement('div');m.className='modal';m.id='docUploadModal';
-  m.innerHTML=`<div class="sheet"><span class="x" onclick="closeModal('docUploadModal')">×</span>
-    <h2>Upload a document</h2><div class="sub">Share a supporting document with the lettings team.</div>
-    <div class="err" id="duerr"></div>
-    <div class="ok" id="duok" style="display:none"></div>
-    <div class="fg"><label>Choose a file (PDF, image, or document)</label><input id="du_file" type="file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"></div>
-    <button class="btn accent" onclick="submitDocUpload()">Upload</button></div>`;
-  document.body.appendChild(m);
-}
-async function submitDocUpload(){
-  const fileInput=document.getElementById('du_file');
-  if(!fileInput||!fileInput.files||!fileInput.files[0]){document.getElementById('duerr').textContent='Please select a file';document.getElementById('duerr').style.display='block';return;}
-  const fd=new FormData();fd.append('file',fileInput.files[0]);
-  try{const r=await fetch(API+'/portal/upload-document',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN},body:fd});
-    const j=await r.json();if(!r.ok||!j.success)throw new Error(j.error||'Upload failed');
-    document.getElementById('duerr').style.display='none';
-    const ok=document.getElementById('duok');ok.textContent='Document uploaded successfully!';ok.style.display='block';
-    setTimeout(()=>{closeModal('docUploadModal');viewDocuments();},1200);
-  }catch(e){document.getElementById('duerr').textContent=e.message;document.getElementById('duerr').style.display='block';}
+    <div class="hi">Documents</div><div class="hi-sub">Signed tenancy agreements, invoices &amp; notices</div>
+    <div class="card"><h3>📄 My documents</h3>
+      ${docs.length?docs.map(doc=>`<div class="row"><div><div class="t">${esc(doc.name||'Document')}</div>
+        <div class="s">${esc((doc.document_type||'').replace(/_/g,' '))} · ${esc((doc.uploaded_at||doc.created||'').slice(0,10))}</div></div>
+        ${doc.file_path?`<a href="${API+'/portal/documents/download/'+doc.id}" class="signbtn" style="text-decoration:none" download>Download</a>`:'<span class="pill">pending</span>'}</div>`).join(''):'<div class="empty">No documents yet.</div>'}
+    </div>`;
 }
 
 function viewProfile(){
   const p=ME.profile;
   document.getElementById('view').innerHTML=`
-    <div class="hi">Your profile</div><div class="hi-sub">Manage your account details and preferences</div>
-    <div class="card"><h3>👤 Personal details</h3>
-      <div class="row"><div><div class="t">${esc(p.first_name+' '+p.last_name)}</div><div class="s">Name</div></div></div>
-      <div class="row"><div><div class="t">${esc(p.email)}</div><div class="s">Email</div></div></div>
-      <div class="row"><div><div class="t">${esc(p.phone||'Not set')}</div><div class="s">Phone</div></div></div>
-      <div style="margin-top:14px"><button class="btn outline" onclick="openEditProfile()">✏️ Edit details</button></div>
+    <div class="hi">Profile</div><div class="hi-sub">Manage your account settings</div>
+    <div class="card"><h3>👤 Account info</h3>
+      <div class="row"><div><div class="t">${esc(p.first_name||'')} ${esc(p.last_name||'')}</div><div class="s">${esc(p.email)}</div></div></div>
     </div>
-    <div class="card"><h3>🔒 Security</h3>
-      <div class="row"><div><div class="t">Password</div><div class="s">Change your login password</div></div>
-      <button class="signbtn" onclick="openChangePassword()">Change</button></div>
-    </div>
-    <div class="card"><h3>🔔 Notifications</h3>
-      <div class="pref-row"><div><div class="lbl">Email notifications</div><div class="sbl">Receive updates about your tenancy</div></div>
-      <label class="toggle"><input type="checkbox" id="pref_email" ${(p.preferences&&(JSON.parse(p.preferences)||{}).email_notifications!==false)?'checked':''} onchange="savePreferences()"><span class="sl"></span></label></div>
-      <div class="pref-row"><div><div class="lbl">Maintenance updates</div><div class="sbl">Get notified when repairs are updated</div></div>
-      <label class="toggle"><input type="checkbox" id="pref_maint" ${(p.preferences&&(JSON.parse(p.preferences)||{}).maintenance_updates!==false)?'checked':''} onchange="savePreferences()"><span class="sl"></span></label></div>
+    <div class="card"><h3>🔒 Change password</h3>
+      <div class="fg"><label>Current password</label><input id="cp_old" type="password"></div>
+      <div class="fg"><label>New password</label><input id="cp_new" type="password" placeholder="At least 10 chars"></div>
+      <button class="btn sm" onclick="changePw()">Update password</button>
     </div>`;
 }
-async function savePreferences(){
-  const prefs={email_notifications:document.getElementById('pref_email').checked,maintenance_updates:document.getElementById('pref_maint').checked};
-  try{await api('/portal/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({preferences:prefs})});}catch(e){}
-}
-function openEditProfile(){
-  const p=ME.profile;
-  const m=document.createElement('div');m.className='modal';m.id='editProfileModal';
-  m.innerHTML=`<div class="sheet"><span class="x" onclick="closeModal('editProfileModal')">×</span>
-    <h2>Edit details</h2><div class="sub">Update your personal information.</div>
-    <div class="err" id="eperr"></div>
-    <div class="fg"><label>Phone number</label><input id="ep_phone" value="${esc(p.phone||'')}" placeholder="+44 7XXX XXXXXX"></div>
-    <button class="btn accent" onclick="submitEditProfile()">Save changes</button></div>`;
-  document.body.appendChild(m);
-}
-async function submitEditProfile(){
-  const phone=document.getElementById('ep_phone').value.trim();
-  try{
-    const data=await api('/portal/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone})});
-    ME.profile.phone=data.phone;
-    closeModal('editProfileModal');viewProfile();
-  }catch(e){document.getElementById('eperr').textContent=e.message;document.getElementById('eperr').style.display='block';}
-}
-function openChangePassword(){
-  const m=document.createElement('div');m.className='modal';m.id='pwModal';
-  m.innerHTML=`<div class="sheet"><span class="x" onclick="closeModal('pwModal')">×</span>
-    <h2>Change password</h2><div class="sub">Your new password must be at least 8 characters.</div>
-    <div class="err" id="pwerr"></div>
-    <div class="fg"><label>Current password</label><input id="pw_cur" type="password"></div>
-    <div class="fg"><label>New password</label><input id="pw_new" type="password" placeholder="At least 8 characters"></div>
-    <div class="fg"><label>Confirm new password</label><input id="pw_con" type="password" onkeydown="if(event.key==='Enter')submitChangePassword()"></div>
-    <button class="btn accent" onclick="submitChangePassword()">Update password</button></div>`;
-  document.body.appendChild(m);
-}
-async function submitChangePassword(){
-  const cur=document.getElementById('pw_cur').value, newPw=document.getElementById('pw_new').value, con=document.getElementById('pw_con').value;
-  if(!cur||!newPw){document.getElementById('pwerr').textContent='Please fill in all fields';document.getElementById('pwerr').style.display='block';return;}
-  if(newPw!==con){document.getElementById('pwerr').textContent='New passwords do not match';document.getElementById('pwerr').style.display='block';return;}
-  if(newPw.length<8){document.getElementById('pwerr').textContent='New password must be at least 8 characters';document.getElementById('pwerr').style.display='block';return;}
-  try{
-    await api('/portal/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_password:cur,new_password:newPw})});
-    closeModal('pwModal');viewProfile();
-  }catch(e){document.getElementById('pwerr').textContent=e.message;document.getElementById('pwerr').style.display='block';}
+async function changePw(){
+  const old=document.getElementById('cp_old').value, nw=document.getElementById('cp_new').value;
+  if(!old||!nw){alert('Please fill in both fields');return;}
+  try{await api('/portal/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_password:old,new_password:nw})});alert('Password updated');}catch(e){alert(e.message);}
 }
 
-const SETUP=getParam('setup')||getParam('form_token');
-if(SETUP){
-  // If arriving via setup link from email, show the register screen
-  showRegister();
-}else if(TOKEN)loadDash();
-else renderLogin();
+// ── Bootstrap ──
+(function boot(){
+  const tok=getParam('token');
+  if(tok){TOKEN=tok;localStorage.setItem('portal_token',tok);history.replaceState({},'','/portal');}
+  if(TOKEN){loadDash();}else{renderLogin();}
+})();
 </script>
 </body>
 </html>
