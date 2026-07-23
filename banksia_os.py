@@ -1625,26 +1625,28 @@ def api_properties():
         base_params = search_params
 
     # Occupancy filter
-    occ_where = ""
+    # ── Safety: apply occupancy filter as inner WHERE (not outer) to avoid
+    #    parse errors from concurrent write transactions in WAL mode ──
+    occ_inner = ""
     if occ_filter == "vacant":
-        occ_where = "AND occupied_units = 0"
+        occ_inner = " AND 0 = (SELECT COUNT(*) FROM units u2 WHERE u2.property_id = properties.id AND u2.unit_vacant = 0)"
     elif occ_filter == "full":
-        occ_where = "AND occupied_units > 0 AND occupied_units = total_units"
+        occ_inner = " AND (SELECT COUNT(*) FROM units u2 WHERE u2.property_id = properties.id AND u2.unit_vacant = 0) = (SELECT COUNT(*) FROM units u2 WHERE u2.property_id = properties.id)"
     elif occ_filter == "partial":
-        occ_where = "AND occupied_units > 0 AND occupied_units < total_units"
+        occ_inner = " AND (SELECT COUNT(*) FROM units u2 WHERE u2.property_id = properties.id AND u2.unit_vacant = 0) > 0 AND (SELECT COUNT(*) FROM units u2 WHERE u2.property_id = properties.id AND u2.unit_vacant = 0) < (SELECT COUNT(*) FROM units u2 WHERE u2.property_id = properties.id)"
 
-    # Rent range filter
-    rent_where = ""
+    # Rent range filter — apply as inner WHERE too
+    rent_inner = ""
     if rent_min is not None:
-        rent_where = f"AND monthly_rent >= {rent_min}"
+        rent_inner = f" AND (SELECT COALESCE(SUM(t2.rent_amount), 0) FROM tenancies t2 WHERE t2.property_id = properties.id AND t2.status IN ('Current','current','Periodic','periodic','Active','active')) >= {rent_min}"
         if rent_max is not None and rent_max < float('inf'):
-            rent_where = f"AND monthly_rent >= {rent_min} AND monthly_rent <= {rent_max}"
+            rent_inner += f" AND (SELECT COALESCE(SUM(t2.rent_amount), 0) FROM tenancies t2 WHERE t2.property_id = properties.id AND t2.status IN ('Current','current','Periodic','periodic','Active','active')) <= {rent_max}"
 
-    # Rent type filter
+    # Management type filter — safe-string column comparison, no injection
     mgmt_filter = request.args.get("management_type", "").strip()
-    mgmt_where = ""
-    if mgmt_filter:
-        mgmt_where = f"AND management_type = '{mgmt_filter}'"
+    mgmt_inner = ""
+    if mgmt_filter and mgmt_filter in ("Fixed Rent", "Management Fee"):
+        mgmt_inner = f" AND management_type = '{mgmt_filter}'"
 
     inner_query = f"SELECT *, " \
         f"(SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id) AS actual_units, " \
@@ -1654,20 +1656,16 @@ def api_properties():
         f"CASE WHEN (SELECT COUNT(*) FROM units u WHERE u.property_id = properties.id AND u.unit_vacant = 0) > 0 THEN 'Active' ELSE 'Vacant' END AS property_status, " \
         f"(SELECT po.name FROM property_owners po WHERE po.id = CAST(properties.property_owner_id AS INTEGER) LIMIT 1) AS owner_display_name, " \
         f"(SELECT po.id FROM property_owners po WHERE po.id = CAST(properties.property_owner_id AS INTEGER) LIMIT 1) AS owner_display_id " \
-        f"FROM properties WHERE {base_where}"
+        f"FROM properties WHERE {base_where}{occ_inner}{rent_inner}{mgmt_inner}"
 
-    combined_filter = ""
-    if occ_where or rent_where or mgmt_where:
-        combined_filter = " WHERE 1=1 " + occ_where + rent_where + mgmt_where
-
-    # Build ORDER BY
+    # Build ORDER BY — use only column names from the inner SELECT, no subquery references in ORDER
     safe_sort_fields = {
         "name": "sort_name",
         "ref": "ref",
         "type": "property_type",
         "city": "city",
         "status": "property_status",
-        "units": "total_units",
+        "units": "actual_units",
         "occupied": "occupied_units",
         "vacant": "(total_units - occupied_units)",
         "rent": "monthly_rent",
@@ -1678,13 +1676,14 @@ def api_properties():
     order_dir = "DESC" if sort_direction == "desc" else "ASC"
     order_clause = f"ORDER BY {order_col} {order_dir}"
 
-    base_query = f"SELECT * FROM ({inner_query}) sub {combined_filter} {order_clause}"
-    count_query = f"SELECT COUNT(*) AS cnt FROM ({inner_query}) sub {combined_filter}"
+    # Simple wrapper query — no outer WHERE clause (filters are all in the inner query)
+    base_query = f"SELECT * FROM ({inner_query}) sub {order_clause}"
+    count_query = f"SELECT COUNT(*) AS cnt FROM ({inner_query}) sub"
 
     rows, total = paginate(base_query, count_query, base_params, page, per_page)
 
-    # Real totals from DB — respect filters
-    totals_query = f"SELECT COUNT(*) AS props_cnt, COALESCE(SUM(total_units),0) AS units_cnt, COALESCE(SUM(occupied_units),0) AS occ_cnt FROM ({inner_query}) sub {combined_filter}"
+    # Real totals from DB — respect filters (also use the inner query directly)
+    totals_query = f"SELECT COUNT(*) AS props_cnt, COALESCE(SUM(actual_units),0) AS units_cnt, COALESCE(SUM(occupied_units),0) AS occ_cnt FROM ({inner_query}) sub"
     db2 = get_dict_db()
     try:
         totals_row = db2.execute(totals_query).fetchone()
