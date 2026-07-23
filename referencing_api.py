@@ -937,6 +937,16 @@ def api_update_form(form_id):
         data = {k: v for k, v in data.items()
                 if k not in _control_keys and not isinstance(v, (dict, list))}
 
+        # Drop any key that is not a real column on referencing_forms. The
+        # frontend saveSection() always appends terms_confirmed (a checkbox that
+        # has no matching column) alongside declaration_confirmed. The applicant
+        # path whitelists it away, but the team path does not - an unknown
+        # column here 500s the entire save, so the form silently fails to
+        # advance and nothing is stored. Filtering to real columns fixes both.
+        _valid_cols = {r["name"] for r in
+                       db.execute("PRAGMA table_info(referencing_forms)").fetchall()}
+        data = {k: v for k, v in data.items() if k in _valid_cols}
+
         # Update fields
         if not data:
             return json_error("No valid fields to update")
