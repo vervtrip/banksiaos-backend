@@ -210,7 +210,7 @@ function viewOverview(){
     <div class="card"><h3>📋 My applications</h3>
       ${apps.length?apps.map(a=>`<div class="row"><div><div class="t">Referencing application</div><div class="s">${a.submitted_at?'Submitted '+esc(a.submitted_at.slice(0,10)):'Started '+esc((a.created||'').slice(0,10))} · ${esc((a.status||'').replace(/_/g,' '))}</div></div>
         <div>${a.form_token?`<button class="signbtn" onclick="location.href='/apply/${esc(a.form_token)}'">${a.status==='draft'?'Continue':'View'}</button>`:''}</div></div>`).join(''):'<div class="empty">No applications on file.</div>'}<br>
-      <button class="btn btn-outline" onclick="startNewApp()" style="width:100%;padding:10px;border:2px dashed var(--accent);border-radius:10px;background:none;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer">＋ Start a new application</button>
+      ${apps.length?'' : '<button class="btn btn-outline" onclick="startNewApp()" style="width:100%;padding:10px;border:2px dashed var(--accent);border-radius:10px;background:none;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer">＋ Start a new application</button>'}
     </div>
     <div class="card"><h3>🏡 My tenancies</h3>
       ${ten.length?ten.map(t=>`<div class="row"><div><div class="t">${esc(t.full_address||('Property #'+t.property_id))}</div><div class="s">${esc(t.start_date||'')} → ${esc(t.end_date||'ongoing')}</div></div>

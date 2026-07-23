@@ -35,3 +35,6 @@ run_push.py
 # Credentials — never commit
 users.json
 users.json.bak.*
+
+# API keys — never commit
+api_keys.json

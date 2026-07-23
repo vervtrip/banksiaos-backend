@@ -29,6 +29,19 @@ os.makedirs(TEMPLATE_DIR, exist_ok=True)
 
 PORTAL_SESSION_TTL = timedelta(hours=24)
 FORM_EXPIRY_DAYS = 14
+REFERENCING_DEADLINE_HOURS = 48
+REFERENCING_REMINDER_HOURS = 24
+ONGOING_FORM_STATUSES = ("draft", "submitted", "under_review")
+
+
+def _find_ongoing_form(db, portal_user_id):
+    """Return the applicant's current in-progress application, if any."""
+    placeholders = ",".join("?" for _ in ONGOING_FORM_STATUSES)
+    return db.execute(
+        f"SELECT * FROM referencing_forms WHERE portal_user_id = ? AND status IN ({placeholders}) "
+        "ORDER BY id DESC LIMIT 1",
+        [portal_user_id, *ONGOING_FORM_STATUSES]
+    ).fetchone()
 
 # ── Rate limiter (DB-backed — shared across all workers) ──
 _RATE_LIMIT_WINDOW = 60  # seconds
@@ -627,13 +640,16 @@ def _compute_form_progress(form, valid_docs):
     # 3. Declaration (10%)
     decl_pct = 10 if decl_ok else 0
 
-    # 4. Section completion (10%) — count sections where all required visible fields are filled
+    # 4. Section completion (10%) — count sections where all required visible fields are filled.
+    # Sections with no required fields (self-employed, student, guarantor, housing
+    # benefit, previous landlord, additional info) must NOT count as complete until
+    # the applicant has actually entered something — otherwise a totally blank form
+    # shows a non-zero "complete" section count, which is what this fixes.
     sec_ok = 0
     for i, section in enumerate(sections):
-        all_done = True
+        visible_fields = []
+        required_fields = []
         for field in section["fields"]:
-            if not field["required"]:
-                continue
             showIf = field.get("showIf")
             if showIf:
                 show_val = form.get(showIf["key"])
@@ -642,10 +658,18 @@ def _compute_form_progress(form, valid_docs):
                         continue
                 elif not show_val:
                     continue
-            val = form.get(field["key"])
-            if not val or not str(val).strip():
-                all_done = False
-                break
+            visible_fields.append(field)
+            if field["required"]:
+                required_fields.append(field)
+
+        def _filled(f):
+            val = form.get(f["key"])
+            return bool(val) and bool(str(val).strip())
+
+        if required_fields:
+            all_done = all(_filled(f) for f in required_fields)
+        else:
+            all_done = any(_filled(f) for f in visible_fields)
         if all_done:
             sec_ok += 1
     sec_pct = (sec_ok / len(sections)) * 10
@@ -2397,16 +2421,22 @@ def api_applicant_signup():
         ).fetchone()
         if existing and existing["password_hash"]:
             return json_error("An account already exists for this email — please log in", 409)
+        if existing and _find_ongoing_form(db, existing["id"]):
+            return json_error(
+                "An application is already in progress for this email. "
+                "Cancel it first before starting a new one.", 409
+            )
 
         now = datetime.now(timezone.utc).isoformat()
         form_token = secrets.token_urlsafe(32)
+        deadline_at = (datetime.now(timezone.utc) + timedelta(hours=REFERENCING_DEADLINE_HOURS)).isoformat()
 
         # Create the referencing form
         cur = db.execute(
             "INSERT INTO referencing_forms (form_token, status, first_name, last_name, "
-            "email, created, modified) "
-            "VALUES (?, 'draft', ?, ?, ?, ?, ?)",
-            [form_token, first_name, last_name, email, now, now]
+            "email, created, modified, deadline_at) "
+            "VALUES (?, 'draft', ?, ?, ?, ?, ?, ?)",
+            [form_token, first_name, last_name, email, now, now, deadline_at]
         )
         form_id = cur.lastrowid
 
@@ -2486,17 +2516,30 @@ def api_applicant_signup():
 @referencing_bp.route("/portal/self-create-form", methods=["POST"])
 @require_auth
 def api_portal_self_create_form():
-    """Create a blank referencing form linked to the logged-in portal user."""
+    """Create a blank referencing form linked to the logged-in portal user.
+
+    One ongoing application per applicant — if they already have one in
+    draft/submitted/under_review, they must cancel it before starting another.
+    """
     pu = request.portal_user
     db = get_dict_db()
     try:
-        form_token = generate_form_token()
-        expires_at = (datetime.now(timezone.utc) + timedelta(days=FORM_EXPIRY_DAYS)).isoformat()
+        existing = _find_ongoing_form(db, pu["pu_id"])
+        if existing:
+            return json_error(
+                "You already have an application in progress. "
+                "Cancel it first before starting a new one.", 409
+            )
 
+        form_token = generate_form_token()
+        deadline_at = (datetime.now(timezone.utc) + timedelta(hours=REFERENCING_DEADLINE_HOURS)).isoformat()
+
+        # Fields start genuinely blank — the applicant fills everything in from
+        # scratch, including name/email, so progress/section-complete read 0.
         db.execute(
-            """INSERT INTO referencing_forms (applicant_id, form_token, status, first_name, last_name, email, date_of_birth, portal_user_id)
-            VALUES (NULL, ?, 'draft', ?, ?, ?, NULL, ?)""",
-            [form_token, pu["first_name"], pu["last_name"], pu["email"], pu["id"]]
+            """INSERT INTO referencing_forms (applicant_id, form_token, status, first_name, last_name, email, date_of_birth, portal_user_id, deadline_at)
+            VALUES (NULL, ?, 'draft', '', '', '', NULL, ?, ?)""",
+            [form_token, pu["pu_id"], deadline_at]
         )
         form_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
 
@@ -2511,6 +2554,35 @@ def api_portal_self_create_form():
             )
         db.commit()
         return json_success({"form_id": form_id, "form_token": form_token})
+    except Exception as e:
+        db.rollback()
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@referencing_bp.route("/portal/request-cancellation", methods=["POST"])
+@require_auth
+def api_portal_request_cancellation():
+    """Applicant cancels their in-progress application immediately — no management approval needed.
+
+    Cancelling removes the application entirely (form_sections cascade-delete
+    with it) rather than leaving a 'cancelled' row behind on the portal.
+    """
+    pu = request.portal_user
+    db = get_dict_db()
+    try:
+        form = _find_ongoing_form(db, pu["pu_id"])
+        if not form:
+            return json_error("You don't have an application in progress to cancel.", 404)
+
+        db.execute("DELETE FROM referencing_forms WHERE id = ?", [form["id"]])
+        db.commit()
+        return json_success({
+            "form_id": form["id"],
+            "status": "cancelled",
+            "message": "Application cancelled. You can start a new one now."
+        })
     except Exception as e:
         db.rollback()
         return json_error(safe_error(e), 500)
@@ -2800,10 +2872,10 @@ def api_portal_me():
             "applicant_id": pu.get("applicant_id"),
         }
 
-        # Any referencing forms tied to this email
+        # Any referencing forms tied to this portal user (by portal_user_id or email)
         forms = db.execute(
-            "SELECT id, form_token, status, first_name, last_name, submitted_at, created FROM referencing_forms WHERE lower(email) = ? ORDER BY created DESC",
-            [pu["email"].lower()]
+            "SELECT id, form_token, status, first_name, last_name, submitted_at, created FROM referencing_forms WHERE portal_user_id = ? AND status NOT IN ('cancelled') ORDER BY created DESC",
+            [pu["pu_id"]]
         ).fetchall()
 
         # Any documents awaiting this person's signature

@@ -563,7 +563,8 @@ function renderField(field, sectionIdx) {
       input = `<input type="${field.type}" id="field-${field.key}" value="${escapeHtml(val)}" ${field.placeholder ? `placeholder="${escapeHtml(field.placeholder)}"` : ''} ${field.required ? 'required' : ''}${attrs}>`;
       break;
     case 'select':
-      const opts = field.options.map(o => `<option value="${o}" ${val === o ? 'selected' : ''}>${o}</option>`).join('');
+      const blankOpt = `<option value="" ${val === '' ? 'selected' : ''}>Select...</option>`;
+      const opts = blankOpt + field.options.map(o => `<option value="${o}" ${val === o ? 'selected' : ''}>${o}</option>`).join('');
       input = `<select id="field-${field.key}" ${field.required ? 'required' : ''}>${opts}</select>`;
       break;
     case 'textarea':
@@ -805,16 +806,22 @@ function isFieldFilled(field) {
     if (!shouldShow) return null; // hidden field, don't count
   }
   const val = formData[field.key];
-  return val && val.trim() !== '';
+  return !!(val && val.trim() !== '');
 }
 function isSectionComplete(idx) {
   const section = SECTIONS[idx];
-  if (idx === SECTIONS.length - 1) return formData.declaration_confirmed && formData.terms_confirmed;
-  return section.fields.every(f => {
-    if (!f.required) return true;
-    const result = isFieldFilled(f);
-    return result === true || result === null; // hidden required fields = fine
-  });
+  if (idx === SECTIONS.length - 1) return !!(formData.declaration_confirmed && formData.terms_confirmed);
+  const requiredFields = section.fields.filter(f => f.required);
+  if (requiredFields.length > 0) {
+    return requiredFields.every(f => {
+      const result = isFieldFilled(f);
+      return result === true || result === null; // hidden required fields = fine
+    });
+  }
+  // Sections with no required fields (self-employed, student, guarantor,
+  // housing benefit, previous landlord, additional info) must NOT read as
+  // complete on a blank form — only once the applicant has entered something.
+  return section.fields.some(f => isFieldFilled(f) === true);
 }
 function updateProgress() {
   // 1. Fields-based progress (60% of total)

@@ -94,11 +94,25 @@ _ROLE_POLICY = {
 
 @banksia_os_bp.before_request
 def _require_banksia_auth():
-    """All routes in this blueprint require a logged-in session."""
+    """All routes in this blueprint require a logged-in session or valid API key."""
     # Public routes that don't need auth
     public_prefixes = ("/submissions/public", "/applicants/public", "/tenancies/public")
     if request.path.startswith(public_prefixes):
         return None
+    # Check API key first (for programmatic access)
+    api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
+    if api_key:
+        _ak_path = os.path.join(os.path.dirname(__file__), "api_keys.json")
+        if os.path.exists(_ak_path):
+            try:
+                _ak_data = json.load(open(_ak_path))
+                _entry = _ak_data.get(api_key)
+                if _entry:
+                    request.current_user = {"username": _entry.get("name", "API"), "role": _entry.get("role", "admin")}
+                    return None
+            except Exception:
+                pass
+        return jsonify({"success": False, "error": "Invalid API key"}), 401
     user = session.get("user")
     if not user:
         return jsonify({"success": False, "error": "Not logged in"}), 401

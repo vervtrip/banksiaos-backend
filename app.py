@@ -231,9 +231,30 @@ from monday_push import push_all_pending, get_token
 from functools import wraps
 import traceback
 
+# ── API Key Auth (for external agents like Rock) ──
+_BANKSIA_API_KEYS = {}
+
+def _load_api_keys():
+    global _BANKSIA_API_KEYS
+    path = os.path.join(os.path.dirname(__file__), "api_keys.json")
+    if os.path.exists(path):
+        try:
+            _BANKSIA_API_KEYS = json.load(open(path))
+        except Exception:
+            _BANKSIA_API_KEYS = {}
+
 def require_auth(f):
     @wraps(f)
     def wrap(*a, **k):
+        # Check API key first (for programmatic access)
+        api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
+        if api_key:
+            _load_api_keys()
+            entry = _BANKSIA_API_KEYS.get(api_key)
+            if entry:
+                request.current_user = {"username": entry.get("name", "API"), "role": entry.get("role", "admin")}
+                return f(*a, **k)
+        # Fall back to session auth
         user = session.get("user")
         if not user:
             # API callers get JSON 401; page routes get redirected to login

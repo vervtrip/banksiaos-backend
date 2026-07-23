@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Cron entry point: push pending maintenance changes to Monday.com."""
-import sys
-sys.path.insert(0, '/root/banksia-backend')
-
-import banksia_os_db as verv_os_db
-from monday_push import push_all_pending
-
-db = verv_os_db.get_db()
-result = push_all_pending(db)
-pushed = result.get("pushed", 0)
-failed = result.get("failed", 0)
-msg = result.get("message", "Unknown")
-print(f"Monday push sync: {msg}")
-if failed:
-    print(f"Errors: {result.get('errors', [])}")
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import monday_push
+monday_push.TOKEN_PATH = '/root/.hermes/secrets/monday_token.txt'
+from banksia_os_db import get_db
+db = get_db()
+try:
+    result = monday_push.push_all_pending(db)
+    print(f"PUSH RESULT: {result["message"]}")
+    print(f"  Pushed: {result["pushed"]}")
+    print(f"  Failed: {result["failed"]}")
+    if result.get("errors"):
+        for e in result["errors"]:
+            print(f"  Error: {e}")
+finally:
+    db.close()
