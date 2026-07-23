@@ -9026,7 +9026,12 @@ def api_transition_applicant_status(app_id):
 
 @banksia_os_bp.route("/referencing/create", methods=["POST"])
 def api_create_referencing_standalone():
-    """Create a new referencing form standalone (no applicant required)."""
+    """Create a referencing record manually (the manual version of the applicant portal).
+
+    Mirrors the portal signup: creates an applicant record (so property/unit linkage and
+    the referencing detail view work) plus a referencing form linked to it, in one
+    atomic transaction. Property and unit are optional.
+    """
     data = request.get_json(silent=True) or {}
     first_name = (data.get("first_name") or "").strip()
     last_name = (data.get("last_name") or "").strip()
@@ -9039,27 +9044,44 @@ def api_create_referencing_standalone():
     db = get_dict_db()
     try:
         now = datetime.now(timezone.utc).isoformat()
-        form_token = secrets.token_urlsafe(32)
+        phone = (data.get("phone") or "").strip()
+        property_id = data.get("property_id") or None
+        unit_ref = data.get("unit_ref")
 
+        # Resolve property + unit (both optional). unit_ref may be a unit_ref string or a unit id.
+        unit_id = None
+        if property_id:
+            prop = db.execute("SELECT id FROM properties WHERE id = ?", (property_id,)).fetchone()
+            if not prop:
+                return json_error(f"Property {property_id} not found", 404)
+            if unit_ref:
+                unit = db.execute(
+                    "SELECT id FROM units WHERE property_id = ? AND (unit_ref = ? OR CAST(id AS TEXT) = ?)",
+                    (property_id, str(unit_ref), str(unit_ref))
+                ).fetchone()
+                if unit:
+                    unit_id = unit["id"]
+
+        # Create the applicant (manual entry) so property/unit link the same way the portal does
+        acur = db.execute(
+            "INSERT INTO applicants (first_name, last_name, email, phone, property_id, unit_id, "
+            "status, created, modified) VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?)",
+            [first_name, last_name, email, phone, property_id, unit_id, now, now]
+        )
+        applicant_id = acur.lastrowid
+
+        # Create the referencing form linked to the new applicant
+        form_token = secrets.token_urlsafe(32)
         cur = db.execute(
-            "INSERT INTO referencing_forms (form_token, status, first_name, last_name, "
-            "email, phone, created, modified) "
-            "VALUES (?, 'new', ?, ?, ?, ?, ?, ?)",
-            [form_token, first_name, last_name, email,
-             data.get("phone", ""), now, now]
+            "INSERT INTO referencing_forms (applicant_id, form_token, status, first_name, last_name, "
+            "email, mobile_phone, created, modified) "
+            "VALUES (?, ?, 'new', ?, ?, ?, ?, ?, ?)",
+            [applicant_id, form_token, first_name, last_name, email, phone, now, now]
         )
         form_id = cur.lastrowid
 
-        # If property_id provided, link via applicants table or direct link
-        property_id = data.get("property_id")
-        unit_ref = data.get("unit_ref")
-        if property_id:
-            db.execute(
-                "UPDATE referencing_forms SET property_name = (SELECT address_line_1 FROM properties WHERE id = ?), "
-                "unit_ref = ? WHERE id = ?",
-                [property_id, unit_ref or "", form_id]
-            )
-
+        _log_activity("applicant", applicant_id, "created",
+                       notes=f"Manual applicant {first_name} {last_name} created via New Referencing", db=db)
         _log_activity("referencing_form", form_id, "created",
                        notes=f"Standalone referencing created for {first_name} {last_name}", db=db)
 
@@ -9128,10 +9150,12 @@ def api_get_referencing(ref_id):
         unit_id = None
         if form.get("applicant_id"):
             app_info = db.execute(
-                "SELECT a.property_id AS apid, a.unit_id AS auid, p.name AS pname, u.unit_ref AS uref "
+                "SELECT a.property_id AS apid, a.unit_id AS auid, "
+                "COALESCE(p.name, p2.name, p2.address_line_1) AS pname, u.unit_ref AS uref "
                 "FROM applicants a "
                 "LEFT JOIN units u ON a.unit_id = u.id "
                 "LEFT JOIN properties p ON u.property_id = p.id "
+                "LEFT JOIN properties p2 ON a.property_id = p2.id "
                 "WHERE a.id = ?",
                 (form["applicant_id"],)
             ).fetchone()
