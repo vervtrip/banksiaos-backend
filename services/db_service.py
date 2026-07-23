@@ -70,11 +70,13 @@ def float_param(val):
 
 
 def build_search_clause(fields, search_term):
-    """Build a SQL WHERE clause for searching across multiple fields."""
+    """Build a bare SQL clause (no leading AND/WHERE) for searching across multiple
+    fields. Callers either wrap it in their own parens or join it into a where_parts
+    list with " AND ".join() — it must not carry its own leading boolean operator."""
     if not search_term:
         return "", []
     clauses = [f"{f} LIKE ?" for f in fields]
-    return " AND (" + " OR ".join(clauses) + ")", [f"%{search_term}%"] * len(fields)
+    return "(" + " OR ".join(clauses) + ")", [f"%{search_term}%"] * len(fields)
 
 
 def build_order_by(sortable_map, default_clause):
