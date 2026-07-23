@@ -1776,7 +1776,7 @@ def api_sync_monday_property_list():
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
-        return json_error(f"Monday API error: {str(e)}", 502)
+        return json_error(safe_error(e), 502)
 
     items = data.get("data", {}).get("boards", [{}])[0].get("items_page", {}).get("items", [])
     if not items:
@@ -1826,7 +1826,7 @@ def api_sync_monday_property_list():
         ).fetchall()
     except Exception as e:
         db.close()
-        return json_error(f"DB error: {str(e)}", 500)
+        return json_error(safe_error(e), 500)
 
     updated = 0
     matched = 0
@@ -5682,7 +5682,7 @@ def api_template_preview(template_id):
             "name": info["name"],
         })
     except Exception as e:
-        return json_error(f"Preview failed: {str(e)}", 500)
+        return json_error(safe_error(e), 500)
 
 
 @banksia_os_bp.route("/documents/templates/<template_id>/layout", methods=["GET"])
@@ -5699,7 +5699,7 @@ def api_get_template_layout(template_id):
             layout = json.load(f)
         return json_success(layout)
     except Exception as e:
-        return json_error(f"Failed to load layout: {str(e)}", 500)
+        return json_error(safe_error(e), 500)
 
 
 @banksia_os_bp.route("/documents/templates/<template_id>/layout", methods=["POST"])
@@ -5722,7 +5722,7 @@ def api_save_template_layout(template_id):
             json.dump(layout, f, indent=2)
         return json_success({"saved": True})
     except Exception as e:
-        return json_error(f"Failed to save layout: {str(e)}", 500)
+        return json_error(safe_error(e), 500)
 
 
 @banksia_os_bp.route("/documents/merge-fields", methods=["GET"])
@@ -5902,7 +5902,7 @@ def api_generate_with_layout(template_id):
             "has_layout": len(sig_blocks) > 0 if sig_blocks else False,
         })
     except Exception as e:
-        return json_error(f"PDF generation failed: {str(e)}", 500)
+        return json_error(safe_error(e), 500)
 
 
 @banksia_os_bp.route("/documents/generate-template-preview", methods=["POST"])

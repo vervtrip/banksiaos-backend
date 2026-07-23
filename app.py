@@ -55,6 +55,25 @@ app.config.update(
 from werkzeug.middleware.proxy_fix import ProxyFix
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_for=1)
 
+# -- Global safety net: never leak raw exceptions/tracebacks to clients --
+from werkzeug.exceptions import HTTPException
+
+@app.errorhandler(Exception)
+def _handle_unexpected_error(e):
+    # Preserve intentional HTTP responses (404/401/400/etc.)
+    if isinstance(e, HTTPException):
+        return e
+    import traceback
+    try:
+        log_error("Unhandled exception on %s: %s\n%s" % (request.path, e, traceback.format_exc()))
+    except Exception:
+        pass
+    return jsonify({
+        "success": False,
+        "error": "Something went wrong on our end \u2014 please try again, or contact support if it persists.",
+    }), 500
+
+
 # ── Local Imports ──
 from banksia_os_db import get_db, get_dict_db, _vos_local
 from services.auth_service import log_auth_event
