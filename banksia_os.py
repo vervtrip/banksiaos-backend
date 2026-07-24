@@ -2769,33 +2769,294 @@ def api_restore_property(prop_id):
         db.close()
 
 
+# ─── Universal archive / Records module ───
+
+def _ensure_archive_columns(db):
+    """Idempotently add the archive-tracking columns used by the universal
+    archive/Records module. Safe to call repeatedly (each ALTER is guarded)."""
+    for s in (
+        "ALTER TABLE units ADD COLUMN archived_by TEXT",
+        "ALTER TABLE tenancies ADD COLUMN archived_by TEXT",
+        "ALTER TABLE applicants ADD COLUMN archived_at TEXT",
+        "ALTER TABLE applicants ADD COLUMN archived_by TEXT",
+        "ALTER TABLE applicants ADD COLUMN pre_archive_status TEXT",
+        "ALTER TABLE guarantors ADD COLUMN archived_at TEXT",
+        "ALTER TABLE guarantors ADD COLUMN archived_by TEXT",
+    ):
+        try:
+            db.execute(s)
+        except Exception:
+            pass  # column already present
+    db.commit()
+
+
+def _archive_actor():
+    return (getattr(request, "current_user", None) or session.get("user", {}) or {}).get("username", "system")
+
+
 @banksia_os_bp.route("/archive", methods=["GET"])
 def api_archive_list():
-    """Archive module — every archived property with what was cascaded, so the
-    team can see and restore. Searchable by ref/name/address."""
+    """Universal archive / Records module. Returns every archived record across
+    all entity types: properties (with their cascade counts), plus tenancies,
+    units, deposits, applicants and guarantors that were archived in their own
+    right. Cascade children of an archived property are summarised under that
+    property rather than listed twice. Every row is restorable. Searchable."""
     search = request.args.get("search", "").strip()
-    where = ["p.status = 'archived'"]
-    params = []
-    if search:
-        where.append("(COALESCE(p.ref,'') LIKE ? OR COALESCE(p.name,'') LIKE ? OR COALESCE(p.address_line_1,'') LIKE ?)")
-        lv = f"%{search}%"
-        params += [lv, lv, lv]
-    where_sql = " AND ".join(where)
+    lv = "%" + search + "%"
     db = get_dict_db()
     try:
-        rows = db.execute(
-            f"SELECT p.id, p.ref, p.name, p.address_line_1, p.archived_at, p.archived_by, "
-            f"(SELECT COUNT(*) FROM units u WHERE u.property_id=p.id) AS units_count, "
-            f"(SELECT COUNT(*) FROM tenancies t WHERE t.property_id=p.id) AS tenancies_count, "
-            f"(SELECT COUNT(*) FROM deposits d WHERE d.property_id=p.id) AS deposits_count, "
-            f"(SELECT COALESCE(SUM(d.amount),0) FROM deposits d WHERE d.property_id=p.id) AS deposits_total "
-            f"FROM properties p WHERE {where_sql} ORDER BY p.archived_at DESC, p.id DESC",
-            params
+        _ensure_archive_columns(db)
+
+        def like(cols):
+            if not search:
+                return "", []
+            clause = " OR ".join("COALESCE(%s,'') LIKE ?" % c for c in cols)
+            return " AND (" + clause + ")", [lv] * len(cols)
+
+        # Properties (cascade parents)
+        pc, pp = like(["p.ref", "p.name", "p.address_line_1"])
+        properties = db.execute(
+            "SELECT p.id, p.ref, p.name, p.address_line_1, p.archived_at, p.archived_by, "
+            "(SELECT COUNT(*) FROM units u WHERE u.property_id=p.id) AS units_count, "
+            "(SELECT COUNT(*) FROM tenancies t WHERE t.property_id=p.id) AS tenancies_count, "
+            "(SELECT COUNT(*) FROM deposits d WHERE d.property_id=p.id) AS deposits_count, "
+            "(SELECT COALESCE(SUM(d.amount),0) FROM deposits d WHERE d.property_id=p.id) AS deposits_total "
+            "FROM properties p WHERE p.status='archived'" + pc + " ORDER BY p.archived_at DESC, p.id DESC",
+            pp
         ).fetchall()
+
+        arch = "(SELECT id FROM properties WHERE status='archived')"
+
+        # Tenancies archived independently (parent property not archived)
+        tc, tp = like(["t.ref", "t.main_tenant_name", "pr.name", "pr.ref"])
+        tenancies = db.execute(
+            "SELECT t.id, t.ref, t.main_tenant_name, t.status, t.pre_archive_status, t.archived_at, t.archived_by, "
+            "t.start_date, t.rent_amount, pr.name AS property_name, pr.ref AS property_ref "
+            "FROM tenancies t LEFT JOIN properties pr ON pr.id=t.property_id "
+            "WHERE t.status='Archived' AND (t.property_id IS NULL OR t.property_id NOT IN " + arch + ")" + tc +
+            " ORDER BY t.archived_at DESC, t.id DESC",
+            tp
+        ).fetchall()
+
+        # Units archived independently
+        uc, up = like(["u.unit_ref", "pr.name", "pr.ref"])
+        units = db.execute(
+            "SELECT u.id, u.unit_ref AS ref, u.archived_at, u.archived_by, "
+            "pr.name AS property_name, pr.ref AS property_ref "
+            "FROM units u LEFT JOIN properties pr ON pr.id=u.property_id "
+            "WHERE u.status='archived' AND (u.property_id IS NULL OR u.property_id NOT IN " + arch + ")" + uc +
+            " ORDER BY u.archived_at DESC, u.id DESC",
+            up
+        ).fetchall()
+
+        # Deposits archived independently
+        dc, dp = like(["dep.protection_reference", "pr.name", "pr.ref"])
+        deposits = db.execute(
+            "SELECT dep.id, dep.protection_reference AS ref, dep.amount, dep.archived_at, dep.pre_archive_status, "
+            "pr.name AS property_name, pr.ref AS property_ref "
+            "FROM deposits dep LEFT JOIN properties pr ON pr.id=dep.property_id "
+            "WHERE dep.current_status='archived' AND (dep.property_id IS NULL OR dep.property_id NOT IN " + arch + ")" + dc +
+            " ORDER BY dep.archived_at DESC, dep.id DESC",
+            dp
+        ).fetchall()
+
+        # Applicants archived
+        ac, ap = like(["a.first_name", "a.last_name", "a.email"])
+        applicants = db.execute(
+            "SELECT a.id, a.first_name, a.last_name, a.email, a.archived_at, a.archived_by, a.pre_archive_status "
+            "FROM applicants a WHERE a.archived_at IS NOT NULL AND a.archived_at<>''" + ac +
+            " ORDER BY a.archived_at DESC, a.id DESC",
+            ap
+        ).fetchall()
+
+        # Guarantors archived
+        gc, gp = like(["g.first_name", "g.last_name", "g.email"])
+        guarantors = db.execute(
+            "SELECT g.id, g.first_name, g.last_name, g.email, g.archived_at, g.archived_by, "
+            "a.first_name AS applicant_first, a.last_name AS applicant_last "
+            "FROM guarantors g LEFT JOIN applicants a ON a.id=g.applicant_id "
+            "WHERE g.archived_at IS NOT NULL AND g.archived_at<>''" + gc +
+            " ORDER BY g.archived_at DESC, g.id DESC",
+            gp
+        ).fetchall()
+
+        counts = {
+            "properties": len(properties), "tenancies": len(tenancies),
+            "units": len(units), "deposits": len(deposits),
+            "applicants": len(applicants), "guarantors": len(guarantors),
+        }
         return json_success({
-            "properties": rows,
-            "count": len(rows),
+            "properties": properties, "tenancies": tenancies, "units": units,
+            "deposits": deposits, "applicants": applicants, "guarantors": guarantors,
+            "counts": counts, "total": sum(counts.values()),
         })
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/tenancies/<int:tid>/archive", methods=["POST"])
+def api_archive_tenancy(tid):
+    db = get_dict_db()
+    try:
+        _ensure_archive_columns(db)
+        t = db.execute("SELECT * FROM tenancies WHERE id=?", (tid,)).fetchone()
+        if not t:
+            return json_error("Tenancy not found", 404)
+        if t.get("status") == "Archived":
+            return json_error("Tenancy is already archived", 409)
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute("UPDATE tenancies SET pre_archive_status=status, status='Archived', archived_at=?, archived_by=?, modified=? WHERE id=?",
+                   (now, _archive_actor(), now, tid))
+        db.commit()
+        _log_activity("tenancy", tid, "archived", notes="Tenancy '" + str(t.get("ref", "")) + "' archived", db=db)
+        return json_success({"id": tid, "status": "Archived", "message": "Tenancy archived"})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/tenancies/<int:tid>/restore", methods=["POST"])
+def api_restore_tenancy(tid):
+    db = get_dict_db()
+    try:
+        t = db.execute("SELECT * FROM tenancies WHERE id=?", (tid,)).fetchone()
+        if not t:
+            return json_error("Tenancy not found", 404)
+        if t.get("status") != "Archived":
+            return json_error("Tenancy is not archived", 409)
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute("UPDATE tenancies SET status=COALESCE(NULLIF(pre_archive_status,''),'Active'), pre_archive_status=NULL, archived_at=NULL, archived_by=NULL, modified=? WHERE id=?",
+                   (now, tid))
+        db.commit()
+        _log_activity("tenancy", tid, "restored", notes="Tenancy '" + str(t.get("ref", "")) + "' restored from archive", db=db)
+        return json_success({"id": tid, "message": "Tenancy restored"})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/units/<int:unit_id>/restore", methods=["POST"])
+def api_restore_unit(unit_id):
+    db = get_dict_db()
+    try:
+        u = db.execute("SELECT * FROM units WHERE id=?", (unit_id,)).fetchone()
+        if not u:
+            return json_error("Unit not found", 404)
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute("UPDATE units SET status='', is_active=1, unit_vacant=0, archived_at=NULL, archived_by=NULL, modified=? WHERE id=?",
+                   (now, unit_id))
+        db.commit()
+        _log_activity("unit", unit_id, "restored", notes="Unit '" + str(u.get("unit_ref", "")) + "' restored from archive", db=db)
+        return json_success({"id": unit_id, "message": "Unit restored"})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/deposits/<int:dep_id>/restore", methods=["POST"])
+def api_restore_deposit(dep_id):
+    db = get_dict_db()
+    try:
+        d = db.execute("SELECT * FROM deposits WHERE id=?", (dep_id,)).fetchone()
+        if not d:
+            return json_error("Deposit not found", 404)
+        if d.get("current_status") != "archived":
+            return json_error("Deposit is not archived", 409)
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute("UPDATE deposits SET current_status=COALESCE(NULLIF(pre_archive_status,''),'held'), pre_archive_status=NULL, archived_at=NULL, modified=? WHERE id=?",
+                   (now, dep_id))
+        db.commit()
+        _log_activity("deposit", dep_id, "restored", notes="Deposit restored from archive", db=db)
+        return json_success({"id": dep_id, "message": "Deposit restored"})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/applicants/<int:aid>/archive", methods=["POST"])
+def api_archive_applicant(aid):
+    db = get_dict_db()
+    try:
+        _ensure_archive_columns(db)
+        a = db.execute("SELECT * FROM applicants WHERE id=?", (aid,)).fetchone()
+        if not a:
+            return json_error("Applicant not found", 404)
+        if a.get("archived_at"):
+            return json_error("Applicant is already archived", 409)
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute("UPDATE applicants SET pre_archive_status=status, status='Archived', archived_at=?, archived_by=? WHERE id=?",
+                   (now, _archive_actor(), aid))
+        db.commit()
+        _log_activity("applicant", aid, "archived", notes="Applicant '" + str(a.get("first_name", "")) + " " + str(a.get("last_name", "")) + "' archived", db=db)
+        return json_success({"id": aid, "message": "Applicant archived"})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/applicants/<int:aid>/restore", methods=["POST"])
+def api_restore_applicant(aid):
+    db = get_dict_db()
+    try:
+        a = db.execute("SELECT * FROM applicants WHERE id=?", (aid,)).fetchone()
+        if not a:
+            return json_error("Applicant not found", 404)
+        if not a.get("archived_at"):
+            return json_error("Applicant is not archived", 409)
+        db.execute("UPDATE applicants SET status=COALESCE(NULLIF(pre_archive_status,''),'Active'), pre_archive_status=NULL, archived_at=NULL, archived_by=NULL WHERE id=?",
+                   (aid,))
+        db.commit()
+        _log_activity("applicant", aid, "restored", notes="Applicant '" + str(a.get("first_name", "")) + " " + str(a.get("last_name", "")) + "' restored from archive", db=db)
+        return json_success({"id": aid, "message": "Applicant restored"})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/guarantors/<int:gid>/archive", methods=["POST"])
+def api_archive_guarantor(gid):
+    db = get_dict_db()
+    try:
+        _ensure_archive_columns(db)
+        g = db.execute("SELECT * FROM guarantors WHERE id=?", (gid,)).fetchone()
+        if not g:
+            return json_error("Guarantor not found", 404)
+        if g.get("archived_at"):
+            return json_error("Guarantor is already archived", 409)
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute("UPDATE guarantors SET archived_at=?, archived_by=?, modified=? WHERE id=?",
+                   (now, _archive_actor(), now, gid))
+        db.commit()
+        _log_activity("guarantor", gid, "archived", notes="Guarantor '" + str(g.get("first_name", "")) + " " + str(g.get("last_name", "")) + "' archived", db=db)
+        return json_success({"id": gid, "message": "Guarantor archived"})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/guarantors/<int:gid>/restore", methods=["POST"])
+def api_restore_guarantor(gid):
+    db = get_dict_db()
+    try:
+        g = db.execute("SELECT * FROM guarantors WHERE id=?", (gid,)).fetchone()
+        if not g:
+            return json_error("Guarantor not found", 404)
+        if not g.get("archived_at"):
+            return json_error("Guarantor is not archived", 409)
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute("UPDATE guarantors SET archived_at=NULL, archived_by=NULL, modified=? WHERE id=?", (now, gid))
+        db.commit()
+        _log_activity("guarantor", gid, "restored", notes="Guarantor '" + str(g.get("first_name", "")) + " " + str(g.get("last_name", "")) + "' restored from archive", db=db)
+        return json_success({"id": gid, "message": "Guarantor restored"})
     except Exception as e:
         return json_error(safe_error(e), 500)
     finally:
@@ -3194,8 +3455,8 @@ def api_archive_unit(unit_id):
         # Soft-archive by setting status to 'archived'
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
-            "UPDATE units SET status='archived', unit_vacant=1, modified=? WHERE id=?",
-            (now, unit_id)
+            "UPDATE units SET status='archived', unit_vacant=1, is_active=0, archived_at=?, archived_by=?, modified=? WHERE id=?",
+            (now, _archive_actor(), now, unit_id)
         )
         db.commit()
 
