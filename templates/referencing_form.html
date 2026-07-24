@@ -195,6 +195,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#f8fafc;color:#0f17
 const FORM_TOKEN = new URLSearchParams(window.location.search).get('token') || "{{ url_token }}";
 let FORM_ID = null;
 let formData = {};
+let LOCKED = false;
 let uploadedDocs = [];
 let currentSection = 0;
 let isLoading = false;
@@ -434,6 +435,24 @@ function showFatalError(heading, message) {
      </div>`;
 }
 
+function applyLockedMode(){
+  var badge=document.getElementById("statusBadge");
+  if(badge){badge.textContent="Submitted \u2713";badge.className="status-badge submitted";}
+  if(!document.getElementById("lockedBanner")){
+    var b=document.createElement("div");
+    b.id="lockedBanner";
+    b.style.cssText="background:#dbeafe;border:1px solid #93c5fd;border-radius:12px;padding:16px 24px;margin:0 auto 24px;max-width:960px;display:flex;align-items:center;gap:12px;font-size:14px;color:#1e40af;line-height:1.5";
+    b.innerHTML="<span style=\"font-size:24px\">\u2705</span><span>Your application has been <strong>submitted</strong>. It is now read-only \u2014 you can review everything you entered, but changes and new uploads are no longer possible. If something needs correcting, please contact the Banksia team.</span>";
+    var fc=document.getElementById("formContainer");
+    if(fc&&fc.parentNode) fc.parentNode.insertBefore(b, fc);
+  }
+  var controls=document.querySelectorAll("#formContent input, #formContent select, #formContent textarea");
+  controls.forEach(function(el){ el.disabled=true; el.style.cursor="not-allowed"; });
+  document.querySelectorAll("#formContent .section-footer .btn, #formContent .upload-zone, #formContent .file-input, #formContent input[type=file]").forEach(function(el){ el.style.display="none"; });
+  document.querySelectorAll("#formContent .section-footer").forEach(function(el){ el.innerHTML="<span style=\"color:#16a34a;font-size:13px;font-weight:600\">\u2705 Submitted</span>"; });
+  var sb=document.getElementById("submitBar"); if(sb) sb.style.display="none";
+}
+
 async function init() {
   if (!FORM_TOKEN) {
     showFatalError('Invalid Link', 'This application link is missing its secure access token. Please use the full link sent to you by the Banksia team, or contact us for a new one.');
@@ -446,6 +465,7 @@ async function init() {
     if (!res.ok) throw new Error('Not found');
     const data = await res.json();
     formData = data.data.form || {};
+    LOCKED = ["submitted","under_review","approved","rejected","completed","referencing","tenant"].includes(String(formData.status||"").toLowerCase());
     FORM_ID = formData.id;
     uploadedDocs = data.data.documents || [];
     // Check if applicant has linked their portal account (signed up)
@@ -461,6 +481,7 @@ async function init() {
       showSaved();
       renderForm();
       updateProgress();
+      if (LOCKED) applyLockedMode();
     } else {
       // First visit — no account yet, show a clean landing state
       const statusBar = document.getElementById('statusBar');
@@ -765,6 +786,7 @@ function showValidationToast(missing){
 }
 
 async function saveSection(idx) {
+  if (LOCKED) return;
   const section = SECTIONS[idx];
 
   // Block save & continue until every mandatory field in this section is filled
@@ -845,6 +867,7 @@ async function saveSection(idx) {
 
 // ── Document Upload Handling ──
 async function uploadFile(event, category) {
+  if (LOCKED) return;
   const files = event.target.files;
   if (!files.length) return;
   
@@ -884,6 +907,7 @@ function handleDrop(event, category) {
 
 // ── Form Submission ──
 async function submitForm() {
+  if (LOCKED) return;
   if (isLoading) return;
   isLoading = true;
   const btn = document.getElementById('submitBtn');

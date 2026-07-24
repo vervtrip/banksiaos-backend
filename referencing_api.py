@@ -1486,6 +1486,11 @@ def api_upload_document():
         if not is_team and form["form_token"] != token:
             return json_error("Not authorised", 401)
 
+        # Once an applicant has submitted, the form is locked: no further
+        # document uploads from the applicant side. Team members are exempt.
+        if not is_team and (form["status"] or "").lower() not in ("draft", "sent"):
+            return json_error("This application has already been submitted and can no longer be modified.", 403)
+
         # Save file
         orig_filename = secure_filename(file.filename)
         ext = orig_filename.rsplit(".", 1)[-1] if "." in orig_filename else "bin"
