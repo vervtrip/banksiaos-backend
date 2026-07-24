@@ -1037,6 +1037,100 @@ def api_update_form(form_id):
         db.close()
 
 
+def _ensure_applicant_for_form(db, form_id):
+    """Create or refresh an applicant record linked to a referencing form.
+
+    Public /apply submissions arrive with NO applicant record, which breaks the
+    Applicants tab and the entire approve -> e-sign -> tenancy conversion chain
+    (all of which key off referencing_forms.applicant_id). This guarantees every
+    submitted form has a linked applicant carrying the applicant-entered data.
+    Returns the applicant id (or None on failure).
+    """
+    form = db.execute("SELECT * FROM referencing_forms WHERE id = ?", [form_id]).fetchone()
+    if not form:
+        return None
+
+    addr_bits = [form.get("current_address_line1"), form.get("current_address_line2"),
+                 form.get("current_city"), form.get("current_postcode"), form.get("current_country")]
+    full_address = ", ".join([b for b in addr_bits if b])
+
+    id_type = (form.get("id_type") or "").lower()
+    passport_number = form.get("id_number") if "passport" in id_type else None
+    emp = (form.get("employment_status") or "").lower()
+    student_status = "Student" if emp == "student" else None
+    now = datetime.now(timezone.utc).isoformat()
+
+    fields = {
+        "first_name": form.get("first_name"),
+        "last_name": form.get("last_name"),
+        "email": form.get("email"),
+        "mobile": form.get("mobile_phone"),
+        "phone": form.get("mobile_phone"),
+        "date_of_birth": form.get("date_of_birth"),
+        "gender": form.get("gender"),
+        "full_address": full_address or None,
+        "passport_number": passport_number,
+        "visa_number": form.get("visa_number"),
+        "visa_type": form.get("visa_type"),
+        "country_of_origin": form.get("country_of_origin"),
+        "ni_number": form.get("ni_number"),
+        "student_status": student_status,
+        "university": form.get("student_university"),
+        "course_name": form.get("student_course_name"),
+        "employment_company": form.get("employer_name"),
+        "employment_address": form.get("employer_address"),
+        "employment_salary": form.get("annual_salary"),
+        "employment_length": form.get("employment_length"),
+        "has_guarantor": form.get("has_guarantor") or 0,
+        "guarantor_first_name": form.get("guarantor_first_name"),
+        "guarantor_last_name": form.get("guarantor_last_name"),
+        "guarantor_date_of_birth": form.get("guarantor_date_of_birth"),
+        "guarantor_relation": form.get("guarantor_relation"),
+        "guarantor_email": form.get("guarantor_email"),
+        "guarantor_phone": form.get("guarantor_phone"),
+        "guarantor_mobile": form.get("guarantor_mobile"),
+        "guarantor_country": form.get("guarantor_country"),
+        "guarantor_postcode": form.get("guarantor_postcode"),
+        "guarantor_city": form.get("guarantor_city"),
+        "guarantor_profession": form.get("guarantor_profession"),
+        "kin_first_name": form.get("kin_first_name"),
+        "kin_last_name": form.get("kin_last_name"),
+        "kin_mobile": form.get("kin_mobile") or form.get("kin_phone"),
+        "bank_name": form.get("bank_name"),
+        "modified": now,
+    }
+
+    existing_id = form.get("applicant_id")
+    if existing_id:
+        app = db.execute("SELECT id FROM applicants WHERE id = ?", [existing_id]).fetchone()
+        if app:
+            sets, params = [], []
+            for col, val in fields.items():
+                if val in (None, "") or col == "modified":
+                    continue
+                sets.append(f"{col} = COALESCE(NULLIF({col}, ''), ?)")
+                params.append(val)
+            sets.append("modified = ?")
+            params.append(now)
+            params.append(existing_id)
+            db.execute(f"UPDATE applicants SET {', '.join(sets)} WHERE id = ?", params)
+            return existing_id
+
+    fields["status"] = "Active"
+    fields["source"] = "Referencing Portal"
+    fields["created"] = now
+    cols = list(fields.keys())
+    placeholders = ", ".join(["?"] * len(cols))
+    db.execute(
+        f"INSERT INTO applicants ({', '.join(cols)}) VALUES ({placeholders})",
+        [fields[c] for c in cols]
+    )
+    new_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
+    db.execute("UPDATE referencing_forms SET applicant_id = ?, modified = ? WHERE id = ?",
+               [new_id, now, form_id])
+    return new_id
+
+
 @referencing_bp.route("/forms/<int:form_id>/submit", methods=["POST"])
 def api_submit_form(form_id):
     """Submit a referencing form (applicant completes and submits)."""
@@ -1081,6 +1175,13 @@ def api_submit_form(form_id):
             "INSERT INTO referencing_checks (form_id, check_type, status) VALUES (?, 'right_to_rent', 'pending')",
             [form_id]
         )
+
+        # Ensure a linked applicant exists so the applicant shows in the Applicants
+        # tab and can flow through approval -> e-sign -> tenancy conversion.
+        try:
+            _ensure_applicant_for_form(db, form_id)
+        except Exception as _ae:
+            print(f"[SUBMIT] applicant link failed for form {form_id}: {_ae}", file=sys.stderr)
 
         db.commit()
 
