@@ -302,7 +302,7 @@ const SECTIONS = [
   {
     key: 'employment', title: 'Employment', desc: 'Your employment status and income details',
     fields: [
-      {key:'employment_status',label:'Employment Status',type:'select',options:['Employed','Self-Employed','Student','Unemployed','Retired','Homemaker'],required:true},
+      {key:'employment_status',label:'Employment Status',type:'select',options:['Employed','Self-Employed','Student','Unemployed','Retired','Homemaker'],required:true,inputAttrs:'onchange="refreshForm()"'},
       {key:'employer_name',label:'Employer Name',type:'text',showIf:{key:'employment_status',values:['Employed']}},
       {key:'employer_address',label:'Employer Address',type:'text',showIf:{key:'employment_status',values:['Employed']}},
       {key:'employer_email',label:'Employer Email',type:'email',showIf:{key:'employment_status',values:['Employed']}},
@@ -315,6 +315,7 @@ const SECTIONS = [
   },
   {
     key: 'self_employed', title: 'Self-Employment Details', desc: 'Complete if you are self-employed',
+    showIf: {key:'employment_status', values:['Self-Employed']},
     fields: [
       {key:'self_employed_company',label:'Company Name',type:'text'},
       {key:'self_employed_utr',label:'UTR Number',type:'text',hint:'Unique Taxpayer Reference'},
@@ -328,6 +329,7 @@ const SECTIONS = [
   },
   {
     key: 'student', title: 'Student Details', desc: 'Complete if you are a student',
+    showIf: {key:'employment_status', values:['Student']},
     fields: [
       {key:'student_university',label:'University/College',type:'text'},
       {key:'student_course_id',label:'Course ID',type:'text'},
@@ -483,7 +485,10 @@ function renderForm() {
   const container = document.getElementById('formContent');
   container.innerHTML = '';
 
+  let visNum = 0;
   SECTIONS.forEach((section, idx) => {
+    if (!sectionVisible(idx)) return; // conditional sections (self-employed / student)
+    visNum++;
     const isComplete = isSectionComplete(idx);
     const card = document.createElement('div');
     card.className = 'section-card';
@@ -492,7 +497,7 @@ function renderForm() {
     card.innerHTML = `
       <div class="section-header ${isComplete ? 'complete' : ''}" onclick="toggleSection(${idx})">
         <div class="left">
-          <div class="step-num">${isComplete ? '✓' : idx + 1}</div>
+          <div class="step-num">${isComplete ? '✓' : visNum}</div>
           <div>
             <div class="section-title">${section.title}</div>
             <div class="section-desc">${section.desc}</div>
@@ -505,13 +510,13 @@ function renderForm() {
           ${section.fields.map(f => renderField(f, idx)).join('')}
           ${idx === SECTIONS.length - 1 ? renderDeclaration() : ''}
           ${idx === 1 ? '<div style=\"grid-column:1/-1;font-size:12px;color:#64748b;margin-bottom:-8px\">Please provide at least one of the following \u2014 Passport/ID <strong>or</strong> Driving Licence.</div>' + renderDocumentUpload('passport') + renderDocumentUpload('driving_licence') : ''}
-          ${idx === 3 ? renderDocumentUpload('payslip') + renderDocumentUpload('bank_statement') + renderDocumentUpload('employment_contract') : ''}
+          ${idx === 3 ? renderEmploymentDocs() : ''}
           ${idx === 5 ? renderDocumentUpload('student_letter') + renderDocumentUpload('student_id') : ''}
         </div>
         <div class="section-footer">
           <span style="font-size:12px;color:#94a3b8">${isComplete ? '✅ Completed' : '○ Not completed'}</span>
           <div style="display:flex;gap:8px">
-            ${idx > 0 ? `<button class="btn btn-secondary" onclick="toggleSection(${idx-1})">← Previous</button>` : ''}
+            ${prevVisible(idx) !== -1 ? `<button class="btn btn-secondary" onclick="toggleSection(${prevVisible(idx)})">← Previous</button>` : ''}
             <button class="btn btn-primary" onclick="saveSection(${idx})">Save & Continue →</button>
           </div>
         </div>
@@ -684,6 +689,36 @@ function setFieldError(key,msg){
 function hasIdDoc(){
   return uploadedDocs.some(d => d && (d.category === 'passport' || d.category === 'driving_licence'));
 }
+// -- Section visibility (conditional sections) --
+function sectionVisible(idx){
+  const sec = SECTIONS[idx];
+  if(!sec || !sec.showIf) return true;
+  const cur = formData[sec.showIf.key];
+  return sec.showIf.values ? sec.showIf.values.includes(cur) : !!cur;
+}
+function nextVisible(idx){ for(let i=idx+1;i<SECTIONS.length;i++){ if(sectionVisible(i)) return i; } return -1; }
+function prevVisible(idx){ for(let i=idx-1;i>=0;i--){ if(sectionVisible(i)) return i; } return -1; }
+// -- Employment documents required by status --
+function docReqsForStatus(status){
+  if(status === 'Employed') return [['bank_statement','3 Bank Statements'],['employment_contract','Employment Contract']];
+  if(status === 'Self-Employed') return [['bank_statement','3 Bank Statements']];
+  if(status === 'Student') return [['bank_statement','3 Bank Statements']];
+  return [];
+}
+function hasDocIn(cat){ return uploadedDocs.some(d => d && d.category === cat); }
+function renderEmploymentDocs(){
+  const s = formData.employment_status;
+  let cats;
+  if(s === 'Employed') cats = ['payslip','bank_statement','employment_contract'];
+  else if(s === 'Self-Employed') cats = ['payslip','bank_statement'];
+  else if(s === 'Student') cats = ['bank_statement'];
+  else return ''; // Unemployed / Retired / Homemaker / not yet chosen
+  const reqs = docReqsForStatus(s);
+  const note = reqs.length
+    ? '<div style="grid-column:1/-1;font-size:12px;color:#64748b;margin-bottom:-8px">Required for <strong>' + escapeHtml(s) + '</strong>: ' + reqs.map(r => '<strong>' + r[1] + '</strong>').join(', ') + '.</div>'
+    : '';
+  return note + cats.map(renderDocumentUpload).join('');
+}
 function validateSection(idx){
   const section = SECTIONS[idx];
   const missing = [];
@@ -704,6 +739,13 @@ function validateSection(idx){
   }
   if(idx === 1 && !hasIdDoc()){
     missing.push('Passport/ID or Driving Licence (upload at least one)');
+  }
+  if(idx === 3){
+    const el = document.getElementById('field-employment_status');
+    const status = el ? el.value : formData.employment_status;
+    for(const [cat,label] of docReqsForStatus(status)){
+      if(!hasDocIn(cat)) missing.push(label);
+    }
   }
   return missing;
 }
@@ -786,12 +828,13 @@ async function saveSection(idx) {
       const currentBody = document.getElementById(`body-${idx}`);
       if (currentBody) currentBody.classList.remove('open');
       
-      if (idx < SECTIONS.length - 1) {
-        const nextBody = document.getElementById(`body-${idx + 1}`);
+      const nxt = nextVisible(idx);
+      if (nxt !== -1) {
+        const nextBody = document.getElementById(`body-${nxt}`);
         if (nextBody) nextBody.classList.add('open');
-        
+
         // Update section header styling for next section
-        const nextHeader = document.querySelector(`#section-${idx + 1} .section-header`);
+        const nextHeader = document.querySelector(`#section-${nxt} .section-header`);
         if (nextHeader) nextHeader.classList.add('active');
       }
     }
@@ -888,9 +931,17 @@ function isFieldFilled(field) {
   return !!(val && val.trim() !== '');
 }
 function isSectionComplete(idx) {
+  if (!sectionVisible(idx)) return true; // hidden conditional section never blocks
   const section = SECTIONS[idx];
   if (idx === SECTIONS.length - 1) return !!(formData.declaration_confirmed && formData.terms_confirmed);
   if (idx === 1 && !hasIdDoc()) return false;
+  if (idx === 3) {
+    const reqFields = section.fields.filter(f => f.required);
+    const fieldsOk = reqFields.every(f => { const r = isFieldFilled(f); return r === true || r === null; });
+    if (!fieldsOk) return false;
+    for (const r of docReqsForStatus(formData.employment_status)) { if (!hasDocIn(r[0])) return false; }
+    return true;
+  }
   const requiredFields = section.fields.filter(f => f.required);
   if (requiredFields.length > 0) {
     return requiredFields.every(f => {
@@ -909,6 +960,7 @@ function updateProgress() {
   let totalWeight = 0;
   SECTIONS.forEach((section, idx) => {
     if (idx === SECTIONS.length - 1) return; // declaration handled separately
+    if (!sectionVisible(idx)) return; // hidden conditional section
     section.fields.forEach(f => {
       const result = isFieldFilled(f);
       if (result === null) return; // hidden field
@@ -922,12 +974,7 @@ function updateProgress() {
   // Expected document categories based on employment/student/guarantor status
   const expectedDocs = [];
   expectedDocs.push('passport','driving_licence');
-  if (formData.employment_status === 'Employed' || formData.employment_status === 'Self-Employed') {
-    expectedDocs.push('payslip','bank_statement','employment_contract');
-  }
-  if (formData.employment_status === 'Student') {
-    expectedDocs.push('student_letter','student_id');
-  }
+  for (const r of docReqsForStatus(formData.employment_status)) expectedDocs.push(r[0]);
   const docsSubmitted = uploadedDocs.filter(d => !d.ai_flagged).length;
   const docsExpected = expectedDocs.length;
   const docsPct = docsExpected > 0 ? Math.min(docsSubmitted / docsExpected, 1) * 20 : 10; // if no docs expected, half credit
@@ -937,8 +984,9 @@ function updateProgress() {
   const declPct = declComplete * 10;
 
   // 4. Section completion (10% bonus — shows structural completeness)
-  const sectionsComplete = SECTIONS.filter((_, i) => isSectionComplete(i)).length;
-  const totalSections = SECTIONS.length;
+  const visibleIdxs = SECTIONS.map((_, i) => i).filter(sectionVisible);
+  const sectionsComplete = visibleIdxs.filter(i => isSectionComplete(i)).length;
+  const totalSections = visibleIdxs.length;
   const sectionsPct = (sectionsComplete / totalSections) * 10;
 
   const pct = Math.round(fieldsPct + docsPct + declPct + sectionsPct);
@@ -959,7 +1007,7 @@ function updateProgress() {
 
 function updateSubmitBtn() {
   // Called after render
-  const allComplete = SECTIONS.map((_, i) => isSectionComplete(i)).every(Boolean);
+  const allComplete = SECTIONS.map((_, i) => i).filter(sectionVisible).every(i => isSectionComplete(i));
   document.getElementById('submitBtn').disabled = !allComplete;
 }
 
