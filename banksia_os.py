@@ -206,6 +206,104 @@ def api_sync_activity():
     return json_success({"items": rows, "total": total})
 
 
+@banksia_os_bp.route("/activity-feed", methods=["GET"])
+def api_activity_feed():
+    """Unified audit feed from activity_log with before/after + page context.
+    Super admins/admins see EVERYONE's activity; every other role sees only their own."""
+    username, role = _get_current_user()
+    is_admin = (role or "").lower() in ("super_admin", "admin")
+
+    page = int_param(request.args.get("page"), 1)
+    per_page = int_param(request.args.get("per_page"), 50, max_val=MAX_PAGE_SIZE)
+    search = (request.args.get("search") or "").strip()
+
+    where, params = [], []
+    if not is_admin:
+        where.append("user_name = ?")
+        params.append(username)
+    if search:
+        like = f"%{search}%"
+        where.append("(user_name LIKE ? OR action LIKE ? OR entity_type LIKE ? OR "
+                     "COALESCE(field_changed,'') LIKE ? OR COALESCE(notes,'') LIKE ? OR "
+                     "COALESCE(old_value,'') LIKE ? OR COALESCE(new_value,'') LIKE ?)")
+        params.extend([like] * 7)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    PAGE_BY_ENTITY = {
+        "property": ("Properties", "/properties"),
+        "unit": ("Units", "/properties"),
+        "tenancy": ("Tenancies", "/tenancies"),
+        "tenant": ("Tenants", "/tenants"),
+        "applicant": ("Applicants", "/applicants"),
+        "referencing_form": ("Referencing", "/referencing"),
+        "guarantor": ("Guarantors", "/applicants"),
+        "deposit": ("Deposits", "/deposits"),
+        "property_owner": ("Property Owners", "/owners"),
+        "maintenance_job": ("Maintenance", "/maintenance"),
+        "invoice": ("Invoices", "/invoices"),
+        "message_thread": ("Messages", "/messages"),
+        "tag": ("Settings", "/settings"),
+    }
+
+    db = get_dict_db()
+    try:
+        total = db.execute(f"SELECT COUNT(*) AS c FROM activity_log {where_sql}", params).fetchone()["c"]
+        offset = (page - 1) * per_page
+        rows = db.execute(
+            f"SELECT * FROM activity_log {where_sql} ORDER BY created DESC, id DESC LIMIT ? OFFSET ?",
+            params + [per_page, offset]
+        ).fetchall()
+
+        items = []
+        for r in rows:
+            d = dict(r)
+            ent = d.get("entity_type") or ""
+            page_label, page_path = PAGE_BY_ENTITY.get(ent, (ent.replace("_", " ").title() or "System", ""))
+            label = _get_entity_label(db, ent, d.get("entity_id"))
+            fld = d.get("field_changed")
+            action = d.get("action") or "update"
+            if fld:
+                summary = f"{str(fld).replace('_', ' ')} changed on {ent.replace('_', ' ')} {label}"
+            elif d.get("notes"):
+                summary = d.get("notes")
+            else:
+                summary = f"{action.replace('_', ' ')} · {ent.replace('_', ' ')} {label}"
+            items.append({
+                "id": d.get("id"),
+                "user_name": d.get("user_name") or "system",
+                "action": action,
+                "entity_type": ent,
+                "entity_id": d.get("entity_id"),
+                "entity_label": label,
+                "page_label": page_label,
+                "page_path": page_path,
+                "field_changed": fld,
+                "old_value": d.get("old_value"),
+                "new_value": d.get("new_value"),
+                "summary": summary,
+                "notes": d.get("notes"),
+                "created_at": d.get("created"),
+            })
+        return json_success({
+            "items": items, "total": total, "page": page, "per_page": per_page,
+            "scope": "all" if is_admin else "own",
+            "viewer": username, "viewer_role": role,
+        })
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/activity-feed/fingerprint", methods=["GET"])
+def api_activity_feed_fingerprint():
+    """Lightweight change signal for the activity feed's realtime refresh."""
+    db = get_dict_db()
+    try:
+        row = db.execute("SELECT MAX(id) AS max_id, MAX(created) AS latest FROM activity_log").fetchone()
+        return json_success({"fingerprint": row["max_id"] or 0, "latest_ts": row["latest"] or ""})
+    finally:
+        db.close()
+
+
 # ── User helpers imported from services/auth_service.py ──
 #   _hash_password, _validate_password_strength, _load_users, _save_users
 # ── Utility helpers imported from services/db_service.py ──
@@ -256,11 +354,37 @@ def api_update_resource(table, item_id):
         set_parts.append("local_modified = ?"); params.append(_now)
         set_parts.append("sync_origin = ?");    params.append("banksia_os")
     params.append(item_id)
+    ENTITY_TYPE_BY_TABLE = {
+        "properties": "property", "units": "unit", "tenancies": "tenancy",
+        "tenants": "tenant", "applicants": "applicant",
+        "property_owners": "property_owner", "message_threads": "message_thread",
+        "tags": "tag",
+    }
+    _ent = ENTITY_TYPE_BY_TABLE.get(table, table)
     db = get_dict_db()
     try:
+        _old_row = db.execute(f"SELECT * FROM {table} WHERE id = ?", [item_id]).fetchone()
+        _old_row = dict(_old_row) if _old_row else {}
         db.execute(f"UPDATE {table} SET {', '.join(set_parts)} WHERE id = ?", params)
         db.commit()
         updated_fields = [k for k in data.keys() if k in real_cols and k not in protected_keys]
+        # -- Audit: log before/after for every field that actually changed --
+        try:
+            _logged = 0
+            for _k in updated_fields:
+                _o = _old_row.get(_k)
+                _n = data.get(_k)
+                if str(_o if _o is not None else "") != str(_n if _n is not None else ""):
+                    _log_activity(_ent, item_id, "update", _k, _o, _n, db=db)
+                    _logged += 1
+            if _logged:
+                db.commit()
+                _actor = getattr(request, "current_user", {}).get("username", "system")
+                _lbl = (_old_row.get("name") or _old_row.get("ref") or _old_row.get("unit_ref")
+                        or _old_row.get("main_tenant_name") or str(item_id))
+                record_change(_actor, "updated", _ent, str(item_id), str(_lbl))
+        except Exception:
+            pass
         return json_success({"updated": True, "id": item_id, "fields": updated_fields, "ignored": ignored})
     except Exception as e:
         return json_error(safe_error(e), 500)
@@ -5419,6 +5543,17 @@ def api_update_deposit(deposit_id):
 
         db.execute(f"UPDATE deposits SET {', '.join(set_parts)} WHERE id = ?", params)
         db.commit()
+        # -- Audit: log before/after for every changed deposit field --
+        try:
+            _old = dict(deposit) if deposit else {}
+            for key, val in data.items():
+                if key in protected_keys or key not in real_cols:
+                    continue
+                if str(_old.get(key) if _old.get(key) is not None else "") != str(val if val is not None else ""):
+                    _log_activity("deposit", deposit_id, "update", key, _old.get(key), val, db=db)
+            db.commit()
+        except Exception:
+            pass
 
         updated = db.execute("SELECT * FROM deposits WHERE id = ?", (deposit_id,)).fetchone()
         return json_success(updated)
