@@ -928,7 +928,8 @@ function isFieldFilled(field) {
     if (!shouldShow) return null; // hidden field, don't count
   }
   const val = formData[field.key];
-  return !!(val && val.trim() !== '');
+  if (field.type === 'checkbox') return !!val; // ticked = filled; unticked is a valid answer, not "empty"
+  return !!(val !== null && val !== undefined && String(val).trim() !== '');
 }
 function isSectionComplete(idx) {
   if (!sectionVisible(idx)) return true; // hidden conditional section never blocks
@@ -949,10 +950,10 @@ function isSectionComplete(idx) {
       return result === true || result === null; // hidden required fields = fine
     });
   }
-  // Sections with no required fields (self-employed, student, guarantor,
-  // housing benefit, previous landlord, additional info) must NOT read as
-  // complete on a blank form — only once the applicant has entered something.
-  return section.fields.some(f => isFieldFilled(f) === true);
+  // Sections with no mandatory fields are optional (Housing Benefit,
+  // Additional Info, etc). Leaving them blank is a valid answer, so they must
+  // never block submission. Required-field gates above still apply.
+  return true;
 }
 function updateProgress() {
   // 1. Fields-based progress (60% of total)
