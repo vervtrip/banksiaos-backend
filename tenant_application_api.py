@@ -24,6 +24,32 @@ from referencing_api import (
 
 tenant_app_bp = Blueprint("tenant_application", __name__, url_prefix="/api/tenant-application")
 
+# Properties where bills are NOT included (everywhere else bills are included).
+# Matched loosely against the property address / name (case + spacing insensitive).
+_NO_BILLS_PROPERTIES = ["22 carrol close", "10 beach street"]
+
+
+def _norm(s):
+    return " ".join((s or "").lower().split())
+
+
+def _money(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return ""
+    if f <= 0:
+        return ""
+    return "%.2f" % f
+
+
+def _bills_included_for(prop):
+    blob = _norm(prop.get("address_line_1")) + " | " + _norm(prop.get("name"))
+    for pat in _NO_BILLS_PROPERTIES:
+        if pat in blob:
+            return 0
+    return 1
+
 
 def _ensure_schema():
     db = get_dict_db()
@@ -85,8 +111,11 @@ def _row_public(r):
 @require_csrf
 def generate_tenant_application():
     """Create a blank Tenant Application pre-tied to a property + unit and return
-    a shareable client link. Property address / postcode / room are locked; rent
-    and deposit are pre-filled from the unit where available."""
+    a shareable client link. Property/postcode/room are locked. Monthly rent and
+    deposit are taken from the unit's market rent (there is no separate deposit
+    figure, so deposit = one month's rent). Holding deposit is computed as
+    (rent x 12 / 52) / 7 and mirrored to the amount-transferred field. Bills default
+    to Included except for the configured no-bills properties."""
     _ensure_schema()
     data = request.get_json() or {}
     property_id = data.get("property_id")
@@ -109,19 +138,25 @@ def generate_tenant_application():
 
         addr = ", ".join([b for b in [prop.get("address_line_1"), prop.get("address_line_2"),
                                       prop.get("city")] if b]) or prop.get("name") or ("Property #%s" % property_id)
+
+        try:
+            rentf = float(unit.get("market_rent") or 0)
+        except (TypeError, ValueError):
+            rentf = 0.0
+        monthly_rent = _money(rentf)
+        deposit = monthly_rent  # no separate deposit figure -> one month's rent
+        holding = _money((rentf * 12 / 52) / 7) if rentf > 0 else ""
+        bills = _bills_included_for(prop)
+
         token = generate_form_token()
         now = datetime.now(timezone.utc).isoformat()
-        rent = unit.get("market_rent")
-        dep = unit.get("deposit_amount")
-        rent_s = "" if rent in (None, 0, 0.0) else str(rent)
-        dep_s = "" if dep in (None, 0, 0.0) else str(dep)
         db.execute(
             "INSERT INTO tenant_applications "
             "(form_token, status, property_id, unit_id, property_address, post_code, room_number, "
-            "monthly_rent, deposit, created_at) "
-            "VALUES (?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?)",
+            "monthly_rent, deposit, holding_deposit, holding_deposit_paid, bills_included, created_at) "
+            "VALUES (?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [token, property_id, unit_id, addr, prop.get("postcode") or "",
-             unit.get("unit_ref") or "", rent_s, dep_s, now])
+             unit.get("unit_ref") or "", monthly_rent, deposit, holding, holding, bills, now])
         db.commit()
         new_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
         return json_success({
@@ -132,6 +167,10 @@ def generate_tenant_application():
             "unit_id": unit_id,
             "property_address": addr,
             "unit_ref": unit.get("unit_ref") or "",
+            "monthly_rent": monthly_rent,
+            "deposit": deposit,
+            "holding_deposit": holding,
+            "bills_included": bills,
         })
     except Exception as e:
         db.rollback()
@@ -154,14 +193,26 @@ def get_tenant_application(token):
         db.close()
 
 
+# Fields the applicant may set on submit. The locked money fields
+# (monthly_rent, deposit, holding_deposit, holding_deposit_paid, pro_rata,
+# check_in_installment) are server-authoritative from generate and are NOT
+# accepted from the client.
 _APPLICANT_FIELDS = [
     "a1_full_name", "a1_dob", "a1_email", "a1_gender", "a1_guarantor_email", "a1_guarantor_mobile",
     "a2_full_name", "a2_dob", "a2_email", "a2_gender", "a2_guarantor_email", "a2_guarantor_mobile",
-    "monthly_rent", "deposit", "holding_deposit", "pro_rata", "check_in_installment",
-    "check_in_date", "bills_included", "holding_deposit_paid", "holding_deposit_confirmed",
+    "check_in_date", "bills_included", "holding_deposit_confirmed",
     "declaration_confirmed", "signature_data", "signature_date",
 ]
 _BOOL_FIELDS = ("bills_included", "holding_deposit_confirmed", "declaration_confirmed")
+
+# Mandatory fields for the primary applicant.
+_REQUIRED = [
+    ("a1_full_name", "First applicant full name is required."),
+    ("a1_dob", "First applicant date of birth is required."),
+    ("a1_email", "First applicant email is required."),
+    ("a1_guarantor_email", "First applicant guarantor email is required."),
+    ("a1_guarantor_mobile", "First applicant guarantor phone number is required."),
+]
 
 
 def _create_or_update_applicant(db, r):
@@ -231,12 +282,13 @@ def submit_tenant_application(token):
         if str(r.get("status")) == "submitted":
             return json_error("This application has already been submitted.", 409)
 
-        if not (data.get("a1_full_name") or "").strip():
-            return json_error("First applicant full name is required.")
-        if not (data.get("a1_email") or "").strip():
-            return json_error("First applicant email is required.")
+        for key, msg in _REQUIRED:
+            if not str(data.get(key) or "").strip():
+                return json_error(msg)
         if not data.get("declaration_confirmed"):
             return json_error("You must confirm the declaration to submit.")
+        if not data.get("holding_deposit_confirmed"):
+            return json_error("You must confirm the holding deposit transfer to submit.")
 
         sets, params = [], []
         for f in _APPLICANT_FIELDS:
