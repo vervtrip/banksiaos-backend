@@ -5043,7 +5043,7 @@ def api_banksia_deposits():
     db = get_dict_db()
     try:
         rows = db.execute(
-            f"SELECT d.id, d.amount, d.registered_amount, d.scheme, d.protection_status, "
+            f"SELECT d.id, d.tenancy_id, d.amount, d.registered_amount, d.scheme, d.protection_status, "
             f"d.protection_reference, d.date_received, d.date_protected, d.current_status, "
             f"t.deposit_held_by, "
             f"t.ref AS tenancy_ref, t.main_tenant_name, t.status AS tenancy_status, "
@@ -5070,6 +5070,7 @@ def api_banksia_deposits():
                 addr = f"{addr} ({r['unit_ref']})" if addr else r["unit_ref"]
             base = {
                 "id": r["id"],
+                "tenancy_id": r.get("tenancy_id"),
                 "ref": r.get("tenancy_ref") or "",
                 "full_address": addr,
                 "main_tenant_name": r.get("main_tenant_name") or "",
