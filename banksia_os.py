@@ -6179,76 +6179,228 @@ def api_get_merge_fields():
     """Return all available merge fields grouped by category."""
     fields = {
         "Tenant Info": {
-            "tenant_name": {"label": "Tenant Name(s)", "description": "Full names of all tenants", "type": "text"},
-            "main_tenant_name": {"label": "Main Tenant Name", "description": "Primary tenant full name", "type": "text"},
-            "tenant_first_name": {"label": "Tenant First Name", "description": "Primary tenant first name", "type": "text"},
-            "tenant_last_name": {"label": "Tenant Last Name", "description": "Primary tenant last name", "type": "text"},
-            "tenant_email": {"label": "Tenant Email", "description": "Primary tenant email address", "type": "text"},
-            "tenant_phone": {"label": "Tenant Phone", "description": "Primary tenant phone number", "type": "text"},
-            "tenant_dob": {"label": "Tenant Date of Birth", "description": "Primary tenant date of birth", "type": "text"},
-            "tenant_employer": {"label": "Tenant Employer", "description": "Primary tenant employer/company", "type": "text"},
-            "tenant_ni": {"label": "Tenant NI Number", "description": "National Insurance number", "type": "text"},
-            "tenant_passport": {"label": "Tenant Passport", "description": "Passport number", "type": "text"},
+            "TenantName": {"label": "Tenant Name(s)", "description": "Full names of all tenants", "type": "text"},
+            "MainTenantName": {"label": "Main Tenant Name", "description": "Primary tenant full name", "type": "text"},
+            "TenantFirstName": {"label": "Tenant First Name", "description": "Primary tenant first name", "type": "text"},
+            "TenantLastName": {"label": "Tenant Last Name", "description": "Primary tenant last name", "type": "text"},
+            "TenantEmail": {"label": "Tenant Email", "description": "Primary tenant email address", "type": "text"},
+            "TenantPhone": {"label": "Tenant Phone", "description": "Primary tenant phone number", "type": "text"},
+            "TenantDOB": {"label": "Tenant Date of Birth", "description": "Primary tenant date of birth", "type": "text"},
+            "TenantEmployer": {"label": "Tenant Employer", "description": "Primary tenant employer/company", "type": "text"},
+            "TenantNI": {"label": "Tenant NI Number", "description": "National Insurance number", "type": "text"},
+            "TenantPassport": {"label": "Tenant Passport", "description": "Passport number", "type": "text"},
         },
         "Guarantor": {
-            "guarantor_name": {"label": "Guarantor Name", "description": "Guarantor full name", "type": "text"},
-            "guarantor_email": {"label": "Guarantor Email", "description": "Guarantor email address", "type": "text"},
+            "GuarantorName": {"label": "Guarantor Name", "description": "Guarantor full name", "type": "text"},
+            "GuarantorEmail": {"label": "Guarantor Email", "description": "Guarantor email address", "type": "text"},
         },
         "Property": {
-            "property_name": {"label": "Property Name", "description": "Property name/ref", "type": "text"},
-            "property_ref": {"label": "Property Ref", "description": "Property reference code", "type": "text"},
-            "property_address": {"label": "Full Address", "description": "Full property address", "type": "text"},
-            "property_address_line_1": {"label": "Address Line 1", "description": "First line of address", "type": "text"},
-            "property_city": {"label": "City", "description": "Property city/town", "type": "text"},
-            "property_postcode": {"label": "Postcode", "description": "Property postcode", "type": "text"},
-            "council_tax_band": {"label": "Council Tax Band", "description": "Council tax band", "type": "text"},
+            "PropertyName": {"label": "Property Name", "description": "Property name/ref", "type": "text"},
+            "PropertyRef": {"label": "Property Ref", "description": "Property reference code", "type": "text"},
+            "PropertyAddress": {"label": "Full Address", "description": "Full property address", "type": "text"},
+            "PropertyAddressLine1": {"label": "Address Line 1", "description": "First line of address", "type": "text"},
+            "PropertyCity": {"label": "City", "description": "Property city/town", "type": "text"},
+            "PropertyPostcode": {"label": "Postcode", "description": "Property postcode", "type": "text"},
+            "CouncilTaxBand": {"label": "Council Tax Band", "description": "Council tax band", "type": "text"},
         },
         "Unit": {
-            "unit_ref": {"label": "Unit Ref", "description": "Unit/room reference", "type": "text"},
-            "unit_type": {"label": "Unit Type", "description": "Studio/1-bed/2-bed etc", "type": "text"},
-            "unit_address": {"label": "Unit Address", "description": "Full unit address line", "type": "text"},
-            "unit_bedrooms": {"label": "Bedrooms", "description": "Number of bedrooms", "type": "text"},
-            "unit_max_occupancy": {"label": "Max Occupancy", "description": "Maximum occupants", "type": "text"},
+            "UnitRef": {"label": "Unit Ref", "description": "Unit/room reference", "type": "text"},
+            "UnitType": {"label": "Unit Type", "description": "Studio/1-bed/2-bed etc", "type": "text"},
+            "UnitAddress": {"label": "Unit Address", "description": "Full unit address line", "type": "text"},
+            "UnitBedrooms": {"label": "Bedrooms", "description": "Number of bedrooms", "type": "text"},
+            "UnitMaxOccupancy": {"label": "Max Occupancy", "description": "Maximum occupants", "type": "text"},
         },
         "Rent & Deposit": {
-            "rent_amount": {"label": "Rent Amount (formatted)", "description": "Rent amount with £ symbol", "type": "text"},
-            "rent_amount_numeric": {"label": "Rent Amount (numeric)", "description": "Rent amount as number only", "type": "text"},
-            "rent_frequency": {"label": "Rent Frequency", "description": "pcm/pw/etc", "type": "text"},
-            "deposit_amount": {"label": "Deposit Amount", "description": "Deposit with £ symbol", "type": "text"},
-            "deposit_scheme": {"label": "Deposit Scheme", "description": "DPS/TDS/MyDeposits", "type": "text"},
-            "deposit_held_by": {"label": "Deposit Held By", "description": "Who holds the deposit", "type": "text"},
+            "RentAmount": {"label": "Rent Amount (formatted)", "description": "Rent amount with GBP symbol", "type": "text"},
+            "RentAmountNumeric": {"label": "Rent Amount (numeric)", "description": "Rent amount as number only", "type": "text"},
+            "RentFrequency": {"label": "Rent Frequency", "description": "pcm/pw/etc", "type": "text"},
+            "RentReviewDate": {"label": "Rent Review Date", "description": "Rent review date", "type": "text"},
+            "DepositAmount": {"label": "Deposit Amount", "description": "Deposit with GBP symbol", "type": "text"},
+            "DepositScheme": {"label": "Deposit Scheme", "description": "DPS/TDS/MyDeposits", "type": "text"},
+            "DepositHeldBy": {"label": "Deposit Held By", "description": "Who holds the deposit", "type": "text"},
         },
         "Dates": {
-            "tenancy_start_date": {"label": "Start Date", "description": "Tenancy start date", "type": "text"},
-            "tenancy_end_date": {"label": "End Date", "description": "Tenancy end date", "type": "text"},
-            "renewal_start": {"label": "Renewal Start", "description": "Renewal period start", "type": "text"},
-            "renewal_end": {"label": "Renewal End", "description": "Renewal period end", "type": "text"},
-            "break_clause_date": {"label": "Break Clause Date", "description": "Break clause date", "type": "text"},
-            "move_in_date": {"label": "Move In Date", "description": "Move in date", "type": "text"},
-            "move_out_date": {"label": "Move Out Date", "description": "Move out date", "type": "text"},
-            "notice_period": {"label": "Notice Period", "description": "Notice period required", "type": "text"},
+            "TenancyStartDate": {"label": "Start Date", "description": "Tenancy start date", "type": "text"},
+            "TenancyEndDate": {"label": "End Date", "description": "Tenancy end date", "type": "text"},
+            "RenewalStart": {"label": "Renewal Start", "description": "Renewal period start", "type": "text"},
+            "RenewalEnd": {"label": "Renewal End", "description": "Renewal period end", "type": "text"},
+            "BreakClauseDate": {"label": "Break Clause Date", "description": "Break clause date", "type": "text"},
+            "MoveInDate": {"label": "Move In Date", "description": "Move in date", "type": "text"},
+            "MoveOutDate": {"label": "Move Out Date", "description": "Move out date", "type": "text"},
+            "NoticePeriod": {"label": "Notice Period", "description": "Notice period required", "type": "text"},
         },
         "Landlord / Agent": {
-            "landlord_name": {"label": "Landlord Name", "description": "Property owner/landlord", "type": "text"},
-            "landlord_address": {"label": "Landlord Address", "description": "Landlord's address", "type": "text"},
-            "agent_name": {"label": "Agent Name", "description": "Managing agent name", "type": "text"},
-            "agent_address": {"label": "Agent Address", "description": "Agent office address", "type": "text"},
-            "agent_email": {"label": "Agent Email", "description": "Agent contact email", "type": "text"},
-            "agent_phone": {"label": "Agent Phone", "description": "Agent contact phone", "type": "text"},
+            "LandlordName": {"label": "Landlord Name", "description": "Property owner/landlord", "type": "text"},
+            "LandlordAddress": {"label": "Landlord Address", "description": "Landlord's address", "type": "text"},
+            "AgentName": {"label": "Agent Name", "description": "Managing agent name", "type": "text"},
+            "AgentAddress": {"label": "Agent Address", "description": "Agent office address", "type": "text"},
+            "AgentEmail": {"label": "Agent Email", "description": "Agent contact email", "type": "text"},
+            "AgentPhone": {"label": "Agent Phone", "description": "Agent contact phone", "type": "text"},
         },
         "Today": {
-            "date": {"label": "Date (dd/mm/yyyy)", "description": "Today's date short format", "type": "text"},
-            "date_long": {"label": "Date (long format)", "description": "Today's date long format", "type": "text"},
-            "year": {"label": "Year", "description": "Current year", "type": "text"},
-            "month": {"label": "Month", "description": "Current month name", "type": "text"},
-            "day": {"label": "Day", "description": "Current day number", "type": "text"},
-        },
-        "Signature Blocks": {
-            "tenant_signature": {"label": "Tenant Signature Block", "description": "Signed by tenant", "type": "signature"},
-            "team_signature": {"label": "Banksia Authorised Signatory", "description": "Signed by authorised team member", "type": "signature"},
+            "Date": {"label": "Date (dd/mm/yyyy)", "description": "Today's date short format", "type": "text"},
+            "DateLong": {"label": "Date (long format)", "description": "Today's date long format", "type": "text"},
+            "Year": {"label": "Year", "description": "Current year", "type": "text"},
+            "Month": {"label": "Month", "description": "Current month name", "type": "text"},
+            "Day": {"label": "Day", "description": "Current day number", "type": "text"},
         },
     }
+
     return json_success(fields)
+
+
+# ─── Inline document editor: read/write template body as ordered blocks ───────
+
+def _iter_block_items(doc):
+    """Yield ('p', Paragraph) and ('tbl', Table) in true document order."""
+    from docx.text.paragraph import Paragraph
+    from docx.table import Table
+    for child in doc.element.body.iterchildren():
+        tag = child.tag
+        if tag.endswith('}p'):
+            yield ('p', Paragraph(child, doc))
+        elif tag.endswith('}tbl'):
+            yield ('tbl', Table(child, doc))
+
+
+def _set_paragraph_text(paragraph, text):
+    """Replace a paragraph's text while keeping its first run's formatting."""
+    runs = paragraph.runs
+    if runs:
+        runs[0].text = text
+        for r in runs[1:]:
+            r.text = ""
+    else:
+        paragraph.add_run(text)
+
+
+@banksia_os_bp.route("/documents/templates/<template_id>/document", methods=["GET"])
+def api_template_document(template_id):
+    """Return the template body as an ordered list of editable text blocks.
+    PDF/non-docx templates come back non-editable with a preview URL."""
+    info = get_template_info(template_id)
+    if not info:
+        return json_error("Template not found", 404)
+    path = os.path.join(DOCUMENTS_TEMPLATES_DIR, info["filename"])
+    if not os.path.exists(path):
+        return json_error("Template file not found on disk", 404)
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(5)
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+
+    if head[:4] == b"%PDF":
+        return json_success({
+            "editable": False, "format": "pdf",
+            "name": info["name"], "filename": info["filename"],
+            "preview_url": "/api/banksia-os/documents/templates/%s/download" % template_id,
+            "blocks": [],
+            "reason": "This template is a PDF, which cannot hold inline Word variables. Upload a Word (.docx) version to edit variables inline.",
+        })
+
+    try:
+        from docx import Document
+        doc = Document(path)
+    except Exception as e:
+        return json_success({
+            "editable": False, "format": "unknown",
+            "name": info["name"], "filename": info["filename"],
+            "preview_url": "/api/banksia-os/documents/templates/%s/download" % template_id,
+            "blocks": [],
+            "reason": "This file is not a valid Word document, so variables cannot be edited inline. Upload a Word (.docx) version. (%s)" % safe_error(e),
+        })
+
+    blocks = []
+    pcount = 0
+    tcount = 0
+    for kind, item in _iter_block_items(doc):
+        if kind == 'p':
+            style = item.style.name if item.style else "Normal"
+            blocks.append({
+                "id": "p%d" % pcount, "kind": "paragraph",
+                "style": style, "text": item.text,
+            })
+            pcount += 1
+        else:
+            rows = []
+            for ri, row in enumerate(item.rows):
+                cells = []
+                for ci, cell in enumerate(row.cells):
+                    cells.append({"id": "t%dr%dc%d" % (tcount, ri, ci), "text": cell.text})
+                rows.append(cells)
+            blocks.append({"id": "t%d" % tcount, "kind": "table", "rows": rows})
+            tcount += 1
+
+    return json_success({
+        "editable": True, "format": "docx",
+        "name": info["name"], "filename": info["filename"],
+        "blocks": blocks,
+    })
+
+
+@banksia_os_bp.route("/documents/templates/<template_id>/document", methods=["POST"])
+def api_save_template_document(template_id):
+    """Write edited block texts back into the .docx, preserving each
+    paragraph/cell's formatting. Only touches blocks whose text changed."""
+    info = get_template_info(template_id)
+    if not info:
+        return json_error("Template not found", 404)
+    path = os.path.join(DOCUMENTS_TEMPLATES_DIR, info["filename"])
+    if not os.path.exists(path):
+        return json_error("Template file not found on disk", 404)
+    with open(path, "rb") as fh:
+        if fh.read(4) == b"%PDF":
+            return json_error("This template is a PDF and cannot be edited inline. Upload a Word (.docx) version.", 400)
+
+    data = request.get_json(silent=True) or {}
+    incoming = data.get("blocks", [])
+    if not isinstance(incoming, list):
+        return json_error("blocks must be a list")
+
+    para_edits, cell_edits = {}, {}
+    for b in incoming:
+        bid = b.get("id", "")
+        if bid.startswith("t") and "r" in bid and "c" in bid:
+            cell_edits[bid] = b.get("text", "")
+        elif bid.startswith("p"):
+            para_edits[bid] = b.get("text", "")
+
+    try:
+        from docx import Document
+        doc = Document(path)
+        changed = 0
+        pcount = 0
+        tcount = 0
+        for kind, item in _iter_block_items(doc):
+            if kind == 'p':
+                key = "p%d" % pcount
+                if key in para_edits and para_edits[key] != item.text:
+                    _set_paragraph_text(item, para_edits[key])
+                    changed += 1
+                pcount += 1
+            else:
+                for ri, row in enumerate(item.rows):
+                    for ci, cell in enumerate(row.cells):
+                        key = "t%dr%dc%d" % (tcount, ri, ci)
+                        if key in cell_edits and cell_edits[key] != cell.text:
+                            paras = cell.paragraphs
+                            if paras:
+                                _set_paragraph_text(paras[0], cell_edits[key])
+                                for extra in paras[1:]:
+                                    _set_paragraph_text(extra, "")
+                            changed += 1
+                tcount += 1
+
+        if changed:
+            try:
+                shutil.copy2(path, path + ".bak")
+            except Exception:
+                pass
+            doc.save(path)
+        return json_success({"saved": True, "changed": changed})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
 
 
 @banksia_os_bp.route("/documents/templates/<template_id>/generate-with-layout", methods=["POST"])
