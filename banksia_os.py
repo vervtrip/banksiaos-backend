@@ -10,7 +10,7 @@ import json, os, sys, re
 from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from flask import Blueprint, jsonify, request, session, current_app
+from flask import Blueprint, jsonify, request, session, current_app, g, has_request_context
 from functools import wraps
 
 from banksia_os_db import get_db, get_dict_db, count, dict_from_row, raw_query
@@ -2559,6 +2559,11 @@ def api_create_property_full():
 def _create_activity_log(db, action, resource_id, description, user=None):
     """Create an activity log entry. Writes to the activity_log table
     (used by the PATCH endpoint) as well as the legacy activity table."""
+    try:
+        if has_request_context():
+            g._audit_detailed = True
+    except Exception:
+        pass
     if user is None:
         user = getattr(request, "current_user", {}).get("username", "system")
     try:
@@ -2629,6 +2634,11 @@ def _log_activity(entity_type, entity_id, action, field_changed=None,
     For property updates, also creates notifications for the responsible_manager
     and all super_admin users.
     """
+    try:
+        if has_request_context():
+            g._audit_detailed = True
+    except Exception:
+        pass
     # Redact sensitive fields
     if field_changed and field_changed in SENSITIVE_FIELDS:
         old_value = _redact_if_sensitive(old_value)
@@ -7412,6 +7422,96 @@ def _get_current_user():
     return getattr(u, "username", "System"), getattr(u, "role", "")
 
 
+# ═══════════════════════════════════════════════
+# UNIVERSAL AUDIT HOOK
+# Logs every successful mutating request that a detailed logger did not
+# already record (guarded by g._audit_detailed). Guarantees no user action
+# is invisible on /activity. Uses its own short-lived connection so it never
+# interferes with the request's shared thread-local connection.
+# ═══════════════════════════════════════════════
+
+_AUDIT_SEGMENT_ENTITY = {
+    "properties": "property", "property-owners": "property_owner", "owners": "property_owner",
+    "units": "unit", "tenancies": "tenancy", "tenants": "tenant", "applicants": "applicant",
+    "referencing": "referencing_form", "guarantors": "guarantor", "guarantor": "guarantor",
+    "deposits": "deposit", "maintenance-jobs": "maintenance_job", "maintenance-orders": "maintenance_order",
+    "maintenance": "maintenance_job", "invoices": "invoice", "threads": "message_thread",
+    "messages": "message_thread", "tags": "tag", "users": "user", "documents": "document",
+    "entity-documents": "document", "templates": "template", "comments": "comment",
+    "access": "access", "rent-charges": "rent_charge", "images": "property_image",
+    "ll-comms": "ll_comms", "company-settings": "company_settings",
+}
+
+_AUDIT_DENY = {
+    "sync", "sync-from-monday", "sync-monday-property-list", "monday-sync",
+    "import-monday-comments", "preview", "fingerprint", "read", "mark-read",
+    "mark-all-read", "recalculate", "keepalive", "health", "me", "login",
+    "logout", "session", "deposits-migrate",
+}
+
+
+def _audit_generic(entity, entity_id, action, username, notes):
+    import sqlite3
+    from banksia_os_db import DB_PATH
+    conn = sqlite3.connect(DB_PATH, timeout=15)
+    try:
+        conn.execute(
+            "INSERT INTO activity_log (entity_type, entity_id, action, user_name, notes) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [entity, entity_id, action, username, notes],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@banksia_os_bp.after_request
+def _audit_mutations(response):
+    try:
+        if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+            return response
+        if not (200 <= response.status_code < 300):
+            return response
+        if getattr(g, "_audit_detailed", False):
+            return response
+        rel = (request.path or "").replace("/api/banksia-os", "", 1).strip("/")
+        segs = [x for x in rel.split("/") if x]
+        if not segs or any(x in _AUDIT_DENY for x in segs):
+            return response
+        entity, entity_id = "system", None
+        for i, seg in enumerate(segs):
+            if seg in _AUDIT_SEGMENT_ENTITY:
+                entity = _AUDIT_SEGMENT_ENTITY[seg]
+                entity_id = segs[i + 1] if (i + 1 < len(segs) and segs[i + 1].isdigit()) else None
+        last = segs[-1]
+        trailing = last if (not last.isdigit() and last not in _AUDIT_SEGMENT_ENTITY) else None
+        if request.method == "DELETE":
+            action = "deleted"
+        elif request.method == "POST":
+            action = trailing.replace("-", " ") if trailing else "created"
+        else:
+            action = trailing.replace("-", " ") if trailing else "updated"
+        if entity_id is None:
+            # New-record ids aren't in the URL; try the response body, else sentinel 0
+            try:
+                body = response.get_json(silent=True)
+                if isinstance(body, dict):
+                    src = body.get("data") if isinstance(body.get("data"), dict) else body
+                    for k in ("id", "new_id", f"{entity}_id"):
+                        v = src.get(k)
+                        if isinstance(v, int):
+                            entity_id = v
+                            break
+            except Exception:
+                pass
+        username, _role = _get_current_user()
+        notes = f"{action} {entity.replace(chr(95), chr(32))}"
+        _audit_generic(entity, entity_id if entity_id is not None else 0, action, username, notes)
+    except Exception:
+        pass
+    return response
+
+
 @banksia_os_bp.route("/me")
 def api_get_current_user():
     username, role = _get_current_user()
@@ -10232,11 +10332,20 @@ def api_delete_referencing(ref_id):
     """Delete a referencing record."""
     db = get_dict_db()
     try:
-        form = db.execute("SELECT id FROM referencing_forms WHERE id = ?", (ref_id,)).fetchone()
+        form = db.execute("SELECT * FROM referencing_forms WHERE id = ?", (ref_id,)).fetchone()
         if not form:
             return json_error("Referencing not found", 404)
+        applicant_id = form.get("applicant_id")
+        who = ((str(form.get("first_name") or "") + " " + str(form.get("last_name") or "")).strip()
+               or form.get("email") or f"#{ref_id}")
+        status = form.get("status") or ""
         db.execute("DELETE FROM referencing_forms WHERE id = ?", (ref_id,))
         db.commit()
+        _log_activity("referencing", ref_id, "deleted",
+                      notes=f"Referencing application for {who}"
+                            + (f" (status: {status})" if status else "")
+                            + " permanently deleted",
+                      db=db)
         return json_success({"deleted": ref_id})
     except Exception as e:
         return json_error(safe_error(e), 500)

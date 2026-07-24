@@ -111,6 +111,8 @@ def record_change(user_name, action, entity_type, entity_id=None, summary=None, 
             [user_name, action, entity_type, entity_id, summary, details]
         )
         db.commit()
-        db.close()
+        # NOTE: get_dict_db() returns a shared thread-local connection.
+        # Do NOT close it here — the calling endpoint owns its lifecycle and
+        # closing mid-request breaks its subsequent commits (property save regression).
     except Exception:
         pass

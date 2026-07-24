@@ -15,7 +15,7 @@ def record_change(user_name, action, entity_type, entity_id=None, summary=None, 
             [user_name, action, entity_type, entity_id, summary, details]
         )
         db.commit()
-        db.close()
+        # Shared thread-local connection: caller owns close (see db_service.record_change fix).
     except Exception:
         pass
 
@@ -47,7 +47,7 @@ def log_activity(entity_type, entity_id, action, field_changed=None,
             VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
         """, [entity_type, entity_id, action, field_changed, old_value, new_value, user or "system"])
         db.commit()
-        db.close()
+        # Shared thread-local connection: caller owns close (see db_service.record_change fix).
         return True
     except Exception:
         return False

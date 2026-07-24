@@ -115,7 +115,7 @@ def log_auth_event(event_type: str, username: str, details: str = None, ip: str 
             [event_type, username, details, ip or "unknown", datetime.now(timezone.utc).isoformat()]
         )
         db.commit()
-        db.close()
+        # Shared thread-local connection: caller owns close (see db_service.record_change fix).
     except Exception:
         pass  # Audit log table may not exist yet
 

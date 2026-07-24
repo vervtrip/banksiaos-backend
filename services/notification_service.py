@@ -16,7 +16,7 @@ def create_notification(username, message, link=None):
             [username, message, link]
         )
         db.commit()
-        db.close()
+        # Shared thread-local connection: caller owns close (see db_service.record_change fix).
     except Exception:
         pass
 
