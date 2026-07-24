@@ -10086,6 +10086,37 @@ def api_create_referencing(app_id):
         db.close()
 
 
+@banksia_os_bp.route("/applicants/<int:app_id>/referencing", methods=["GET"])
+def api_applicant_referencing(app_id):
+    """Latest referencing form (full submitted data) for the Applicant detail Referencing tab."""
+    db = get_dict_db()
+    try:
+        app = db.execute("SELECT id FROM applicants WHERE id = ?", (app_id,)).fetchone()
+        if not app:
+            return json_error("Applicant not found", 404)
+        form = db.execute(
+            "SELECT * FROM referencing_forms WHERE applicant_id = ? ORDER BY created DESC LIMIT 1",
+            (app_id,)
+        ).fetchone()
+        if not form:
+            return json_success(None)
+        if form.get("status") == "draft":
+            form["status"] = "new"
+        form["checks"] = db.execute(
+            "SELECT * FROM referencing_checks WHERE form_id = ? ORDER BY created",
+            (form["id"],)
+        ).fetchall()
+        form["documents"] = db.execute(
+            "SELECT * FROM referencing_documents WHERE form_id = ? ORDER BY uploaded_at",
+            (form["id"],)
+        ).fetchall()
+        return json_success(form)
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
 @banksia_os_bp.route("/referencing/<int:ref_id>", methods=["GET"])
 def api_get_referencing(ref_id):
     """Get referencing detail with forms, documents, history."""
