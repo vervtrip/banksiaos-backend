@@ -4720,88 +4720,115 @@ def api_deposits():
 
 @banksia_os_bp.route("/deposits", methods=["GET"])
 def api_banksia_deposits():
-    """Paginated deposit list with summary stats."""
-    page = int_param(request.args.get("page"))
-    per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
+    """Deposit register: MyDeposits registration tracking + 28-day compliance.
+
+    Returns registered vs unregistered splits with, per deposit:
+      - tenant name, property, tenancy start (commencement), deposit amount
+      - registered: registration date (date_protected), scheme, reference,
+        days_to_register (registration date - commencement) and a `late` flag
+        when that exceeds the 28-day statutory window.
+      - unregistered: days_overdue = days since commencement beyond 28.
+    Deposit registration date/scheme/reference are editable via PATCH; Arthur
+    does not hold the registration date (it lives on MyDeposits), so it is NULL
+    until captured.
+    """
+    LIMIT_DAYS = 28
     search = request.args.get("search", "").strip()
-    status_filter = request.args.get("status", "").strip()
-    protection_filter = request.args.get("protection", "").strip()
 
-    where_parts = ["1=1"]
+    where_parts = ["d.current_status = 'held'"]
     params = []
-
-    if status_filter:
-        where_parts.append("d.current_status = ?")
-        params.append(status_filter)
-    if protection_filter:
-        where_parts.append("d.protection_status = ?")
-        params.append(protection_filter)
     if search:
-        where_parts.append("(COALESCE(t.main_tenant_name, '') LIKE ? OR COALESCE(p.ref, '') LIKE ? OR COALESCE(p.address_line_1, '') LIKE ?)")
+        where_parts.append("(COALESCE(t.main_tenant_name,'') LIKE ? OR COALESCE(p.ref,'') LIKE ? OR COALESCE(p.address_line_1,'') LIKE ? OR COALESCE(t.ref,'') LIKE ?)")
         like_val = f"%{search}%"
-        params.extend([like_val, like_val, like_val])
-
+        params.extend([like_val, like_val, like_val, like_val])
     where = " AND ".join(where_parts)
+
+    def _days_between(a, b):
+        """Whole days from date-string a to date-string b (b - a). None if unparseable."""
+        if not a or not b:
+            return None
+        try:
+            da = datetime.fromisoformat(str(a)[:10])
+            db_ = datetime.fromisoformat(str(b)[:10])
+            return (db_ - da).days
+        except Exception:
+            return None
 
     db = get_dict_db()
     try:
-        # Stats
-        currently_held = db.execute(
-            "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt FROM deposits WHERE current_status = 'held'"
-        ).fetchone()
-        protected_total = db.execute(
-            "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt FROM deposits WHERE protection_status = 'protected' AND current_status = 'held'"
-        ).fetchone()
-        awaiting_protection = db.execute(
-            "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt FROM deposits WHERE protection_status = 'unprotected' AND current_status = 'held'"
-        ).fetchone()
-        historic = db.execute(
-            "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt FROM deposits WHERE current_status IN ('returned', 'deducted')"
-        ).fetchone()
-        returned_total = db.execute(
-            "SELECT COALESCE(SUM(amount_returned), 0) AS total FROM deposits WHERE current_status = 'returned'"
-        ).fetchone()
-        deduction_total = db.execute(
-            "SELECT COALESCE(SUM(deductions), 0) AS total FROM deposits"
-        ).fetchone()
-
-        # Paginated list
-        total = db.execute(
-            f"SELECT COUNT(*) AS cnt FROM deposits d LEFT JOIN tenancies t ON d.tenancy_id = t.id LEFT JOIN properties p ON d.property_id = p.id WHERE {where}",
-            params
-        ).fetchone()["cnt"]
-
-        offset = (page - 1) * per_page
         rows = db.execute(
-            f"SELECT d.*, "
-            f"t.main_tenant_name, t.ref AS tenancy_ref, t.status AS tenancy_status, "
-            f"tn.first_name AS tenant_first_name, tn.last_name AS tenant_last_name, "
-            f"COALESCE(NULLIF(p.ref, ''), NULLIF(p.address_line_1, ''), p.name) AS property_name, "
+            f"SELECT d.id, d.amount, d.registered_amount, d.scheme, d.protection_status, "
+            f"d.protection_reference, d.date_received, d.date_protected, d.current_status, "
+            f"t.deposit_held_by, "
+            f"t.ref AS tenancy_ref, t.main_tenant_name, t.status AS tenancy_status, "
+            f"COALESCE(NULLIF(t.start_date,''), NULLIF(t.move_in_date,''), d.date_received) AS commencement, "
+            f"COALESCE(NULLIF(p.ref,''), NULLIF(p.address_line_1,''), p.name) AS full_address, "
             f"u.unit_ref "
             f"FROM deposits d "
             f"LEFT JOIN tenancies t ON d.tenancy_id = t.id "
-            f"LEFT JOIN tenants tn ON d.tenant_id = tn.id "
             f"LEFT JOIN properties p ON d.property_id = p.id "
             f"LEFT JOIN units u ON d.unit_id = u.id "
-            f"WHERE {where} ORDER BY d.created DESC LIMIT ? OFFSET ?",
-            params + [per_page, offset]
+            f"WHERE {where} ORDER BY t.start_date DESC, d.id DESC",
+            params
         ).fetchall()
 
-        return json_success({
-            "deposits": rows,
-            "stats": {
-                "currently_held": round(currently_held["total"], 2),
-                "currently_held_count": currently_held["cnt"],
-                "protected_total": round(protected_total["total"], 2),
-                "protected_count": protected_total["cnt"],
-                "awaiting_protection": round(awaiting_protection["total"], 2),
-                "awaiting_protection_count": awaiting_protection["cnt"],
-                "historic_total": round(historic["total"], 2),
-                "historic_count": historic["cnt"],
-                "returned_total": round(returned_total["total"], 2),
-                "deduction_total": round(deduction_total["total"], 2),
+        today = datetime.now(timezone.utc).date().isoformat()
+        registered, unregistered = [], []
+        total_reg = total_unreg = 0.0
+        late_count = 0
+
+        for r in rows:
+            amt = r.get("registered_amount") or r.get("amount") or 0
+            addr = r.get("full_address") or ""
+            if r.get("unit_ref"):
+                addr = f"{addr} ({r['unit_ref']})" if addr else r["unit_ref"]
+            base = {
+                "id": r["id"],
+                "ref": r.get("tenancy_ref") or "",
+                "full_address": addr,
+                "main_tenant_name": r.get("main_tenant_name") or "",
+                "deposit_held_by": r.get("deposit_held_by") or "",
+                "deposit_scheme": r.get("scheme") or "",
+                "protection_reference": r.get("protection_reference") or "",
+                "deposit_amount": round(amt, 2),
+                "tenancy_start": r.get("commencement") or "",
             }
-        }, total, page, per_page)
+            if r.get("protection_status") == "protected":
+                reg_date = r.get("date_protected") or ""
+                dtr = _days_between(r.get("commencement"), reg_date) if reg_date else None
+                late = dtr is not None and dtr > LIMIT_DAYS
+                if late:
+                    late_count += 1
+                registered.append({
+                    **base,
+                    "date_registered": reg_date,
+                    "days_to_register": dtr,
+                    "late": late,
+                    "date_missing": not bool(reg_date),
+                })
+                total_reg += amt
+            else:
+                dss = _days_between(r.get("commencement"), today)
+                overdue_by = (dss - LIMIT_DAYS) if (dss is not None and dss > LIMIT_DAYS) else 0
+                unregistered.append({
+                    **base,
+                    "days_since_start": dss,
+                    "days_overdue": overdue_by,
+                    "overdue": overdue_by > 0,
+                })
+                total_unreg += amt
+
+        return json_success({
+            "registered": registered,
+            "unregistered": unregistered,
+            "registered_count": len(registered),
+            "unregistered_count": len(unregistered),
+            "total_registered_amount": round(total_reg, 2),
+            "total_unregistered_amount": round(total_unreg, 2),
+            "late_registered_count": late_count,
+            "overdue_unregistered_count": sum(1 for x in unregistered if x["overdue"]),
+            "limit_days": LIMIT_DAYS,
+        })
     except Exception as e:
         return json_error(safe_error(e), 500)
     finally:
