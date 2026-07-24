@@ -579,6 +579,12 @@ def api_generate_form_for_unit():
 # Required fields worth 2, optional 1. Hidden conditional fields excluded.
 def _compute_form_progress(form, valid_docs):
     """Compute progress percentage from form data fields and valid doc count."""
+    # A form that has passed the submit gate is, by definition, complete — the
+    # gate already enforces every required field, document and the declaration.
+    # Show it as 100% rather than re-deriving a lower number from optional fields.
+    _st = str(form.get("status", "")).lower()
+    if _st in ("submitted", "under_review", "approved", "referencing", "completed", "tenant"):
+        return 100
     # Section definitions mirroring the frontend SECTIONS array
     sections = [
         {"fields": [{"key":"title","required":True},{"key":"first_name","required":True},

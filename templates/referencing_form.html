@@ -1030,7 +1030,30 @@ function updateProgress() {
   const totalSections = visibleIdxs.length;
   const sectionsPct = (sectionsComplete / totalSections) * 10;
 
-  const pct = Math.round(fieldsPct + docsPct + declPct + sectionsPct);
+  // Progress reflects readiness to submit. It counts only the items that are
+  // actually required: required visible fields + the ID document + any documents
+  // required for the chosen employment status + the declaration. Optional fields
+  // and a second ID never hold the bar below 100%, so a form that is complete
+  // enough to submit reads 100%, matching the submit button. (Previously this
+  // averaged in every optional field and demanded two IDs, capping a complete
+  // application at ~62%.)
+  let reqGot = 0, reqTotal = 0;
+  SECTIONS.forEach((section, idx) => {
+    if (!sectionVisible(idx)) return;
+    if (idx === SECTIONS.length - 1) return; // declaration handled below
+    section.fields.forEach(f => {
+      if (!f.required) return;
+      const r = isFieldFilled(f);
+      if (r === null) return; // hidden required field — not applicable
+      reqTotal += 1;
+      if (r === true) reqGot += 1;
+    });
+  });
+  reqTotal += 1; if (hasIdDoc()) reqGot += 1; // ID document (passport or licence)
+  for (const dr of docReqsForStatus(formData.employment_status)) { reqTotal += 1; if (hasDocIn(dr[0])) reqGot += 1; }
+  reqTotal += 1; if (formData.declaration_confirmed && formData.terms_confirmed) reqGot += 1; // declaration + terms
+  let pct = reqTotal > 0 ? Math.round((reqGot / reqTotal) * 100) : 0;
+  if (LOCKED) pct = 100; // a submitted / locked application is, by definition, fully complete
   const clampedPct = Math.min(Math.max(pct, 0), 100);
 
   document.getElementById('progressValue').textContent = `${clampedPct}%`;
