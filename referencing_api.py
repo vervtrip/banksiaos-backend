@@ -929,7 +929,7 @@ def api_update_form(form_id):
                 'has_pet', 'pet_details', 'has_ccj', 'ccj_details', 'has_iva', 'iva_details',
                 'has_bankruptcy', 'bankruptcy_details', 'has_eviction', 'eviction_details',
                 'smoking_preference', 'preferred_move_in_date', 'special_requirements',
-                'declaration_confirmed', 'declaration_signed_at'
+                'declaration_confirmed', 'declaration_signed_at', 'terms_confirmed'
             }
             data = {k: v for k, v in data.items() if k in allowed}
 
