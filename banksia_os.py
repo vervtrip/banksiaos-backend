@@ -1628,15 +1628,15 @@ def api_properties():
     sort_direction = request.args.get("sort_direction", "asc").strip().lower()
 
     # Show all properties by default — including archived ones when searching
-    base_where = "1=1"
+    base_where = "(status IS NULL OR status <> 'archived')"
     base_params = []
 
     if search:
         search_clause, search_params = build_search_clause(
             ["name", "ref", "address_line_1", "city", "postcode"], search
         )
-        base_where = f"({search_clause})"
-        # Include archived properties in search results
+        base_where = f"({search_clause}) AND (status IS NULL OR status <> 'archived')"
+        # Archived properties live in the Archive page, never the main list
         base_params = search_params
 
     # Occupancy filter
@@ -1706,8 +1706,8 @@ def api_properties():
         real_units = totals_row["units_cnt"]
         real_occupied = totals_row["occ_cnt"]
         # Active/inactive counts — unfiltered (from full DB, not current page)
-        active_cnt = db2.execute("SELECT COUNT(*) AS cnt FROM properties WHERE is_active = 1").fetchone()["cnt"]
-        inactive_cnt = db2.execute("SELECT COUNT(*) AS cnt FROM properties WHERE is_active = 0").fetchone()["cnt"]
+        active_cnt = db2.execute("SELECT COUNT(*) AS cnt FROM properties WHERE is_active = 1 AND (status IS NULL OR status <> 'archived')").fetchone()["cnt"]
+        inactive_cnt = db2.execute("SELECT COUNT(*) AS cnt FROM properties WHERE is_active = 0 AND (status IS NULL OR status <> 'archived')").fetchone()["cnt"]
     finally:
         db2.close()
 
