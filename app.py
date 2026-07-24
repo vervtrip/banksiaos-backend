@@ -301,6 +301,8 @@ def api_push_to_monday():
 # ── Register Referencing Blueprint ──
 from referencing_api import referencing_bp
 app.register_blueprint(referencing_bp)
+from tenant_application_api import tenant_app_bp
+app.register_blueprint(tenant_app_bp)
 
 # ── Multi-user auth system ──
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
@@ -2946,6 +2948,12 @@ def referencing_apply_page():
 def referencing_form_page(token):
     # Support both /apply/x (path) and /apply?token=x (query) link styles.
     return render_template("referencing_form.html", url_token=token)
+
+
+@app.route("/tenant-application/<token>")
+def tenant_application_form_page(token):
+    """Public Tenant Application form (separate from referencing)."""
+    return render_template("tenant_application_form.html", url_token=token)
 
 
 # ── Referencing Admin Panel (team) ──

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tenant Application — Banksia OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,sans-serif;background:#f8fafc;color:#0f172a;min-height:100vh}
+.top-bar{background:#fff;border-bottom:1px solid #e2e8f0;padding:20px 40px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
+.top-bar .brand h1{font-size:22px;font-weight:800;color:#1e293b;letter-spacing:-0.5px}
+.top-bar .brand .tag{font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:2px;background:#f1f5f9;padding:3px 8px;border-radius:4px;margin-left:10px}
+.status-badge{font-size:12px;font-weight:600;padding:6px 14px;border-radius:20px}
+.status-badge.draft{background:#fef3c7;color:#92400e}
+.status-badge.submitted{background:#dbeafe;color:#1e40af}
+.banner{max-width:960px;margin:24px auto 0;padding:0 40px}
+.banner .box{background:#ecfdf5;border:1px solid #a7f3d0;border-radius:14px;padding:16px 22px}
+.banner .box .l{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#059669}
+.banner .box .v{font-size:15px;font-weight:700;color:#065f46;margin-top:3px}
+.banner .locked{background:#eff6ff;border-color:#bfdbfe}
+.banner .locked .l{color:#1d4ed8}.banner .locked .v{color:#1e3a8a}
+.form-container{max-width:960px;margin:28px auto 60px;padding:0 40px}
+.section-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;margin-bottom:22px;overflow:hidden}
+.section-header{padding:18px 26px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:12px}
+.section-header .num{width:26px;height:26px;border-radius:50%;background:#1e293b;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.section-header .section-title{font-size:15px;font-weight:700;color:#1e293b}
+.section-header .opt{font-size:11px;color:#94a3b8;font-weight:500;margin-left:6px}
+.section-body{padding:24px 26px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.form-group{display:flex;flex-direction:column;gap:5px}
+.form-group.full{grid-column:1/-1}
+.form-group label{font-size:12px;font-weight:600;color:#475569}
+.form-group label .required{color:#ef4444;margin-left:2px}
+.form-group input,.form-group select,.form-group textarea{padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;font-family:inherit;color:#0f172a;background:#fff;outline:none;transition:border-color .15s}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:#1e293b;box-shadow:0 0 0 3px rgba(30,41,59,.08)}
+.form-group input:disabled{background:#f1f5f9;color:#475569;cursor:not-allowed}
+.checkbox-row{display:flex;align-items:flex-start;gap:10px;padding:6px 0}
+.checkbox-row input[type=checkbox]{width:18px;height:18px;accent-color:#059669;margin-top:2px;flex-shrink:0}
+.checkbox-row label{font-size:13px;font-weight:400;color:#334155;cursor:pointer;line-height:1.5}
+.decl-text{font-size:12.5px;color:#475569;line-height:1.7;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px 18px;margin-bottom:16px}
+.decl-text li{margin:6px 0 6px 18px}
+.submit-bar{max-width:960px;margin:0 auto;padding:0 40px 60px;display:flex;justify-content:flex-end;gap:12px}
+.btn{padding:12px 26px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;border:none;font-family:inherit}
+.btn-primary{background:#059669;color:#fff}
+.btn-primary:disabled{background:#94a3b8;cursor:not-allowed}
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:14px 22px;border-radius:12px;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.14);z-index:9999;max-width:90%;display:none;text-align:center;line-height:1.5}
+.toast.err{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c}
+.toast.ok{background:#ecfdf5;border:1px solid #a7f3d0;color:#047857}
+.toast.show{display:block}
+.locked-banner{background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:14px;padding:16px 22px;font-size:13.5px;font-weight:600;margin-bottom:22px}
+.loading{max-width:960px;margin:80px auto;text-align:center;color:#94a3b8;font-size:14px}
+</style>
+</head>
+<body>
+<div class="top-bar">
+  <div class="brand"><h1 style="display:inline">Banksia</h1><span class="tag">Tenant Application</span></div>
+  <span id="statusBadge" class="status-badge draft">Draft</span>
+</div>
+
+<div id="loading" class="loading">Loading your application…</div>
+
+<div id="app" style="display:none">
+  <div class="banner">
+    <div class="box locked">
+      <div class="l">You are applying for</div>
+      <div class="v" id="propBanner">—</div>
+    </div>
+  </div>
+
+  <div class="form-container">
+    <div id="lockedBanner" class="locked-banner" style="display:none">
+      This application has been submitted and is now read-only. Please contact the team if anything needs correcting.
+    </div>
+
+    <!-- Property (locked) -->
+    <div class="section-card">
+      <div class="section-header"><span class="num">1</span><span class="section-title">Property Address</span></div>
+      <div class="section-body">
+        <div class="form-grid">
+          <div class="form-group full"><label>Address</label><input id="property_address" disabled></div>
+          <div class="form-group"><label>Post Code</label><input id="post_code" disabled></div>
+          <div class="form-group"><label>Room Number</label><input id="room_number" disabled></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 1st Applicant -->
+    <div class="section-card">
+      <div class="section-header"><span class="num">2</span><span class="section-title">Applicant Information — 1st Applicant</span></div>
+      <div class="section-body">
+        <div class="form-grid">
+          <div class="form-group"><label>Full Name<span class="required">*</span></label><input id="a1_full_name"></div>
+          <div class="form-group"><label>Date of Birth</label><input id="a1_dob" type="date"></div>
+          <div class="form-group"><label>Email<span class="required">*</span></label><input id="a1_email" type="email"></div>
+          <div class="form-group"><label>Gender</label><select id="a1_gender"><option value="">Select…</option><option>Male</option><option>Female</option></select></div>
+          <div class="form-group"><label>Guarantor Email</label><input id="a1_guarantor_email" type="email"></div>
+          <div class="form-group"><label>Guarantor Mobile</label><input id="a1_guarantor_mobile"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2nd Applicant -->
+    <div class="section-card">
+      <div class="section-header"><span class="num">3</span><span class="section-title">Applicant Information — 2nd Applicant</span><span class="opt">optional</span></div>
+      <div class="section-body">
+        <div class="form-grid">
+          <div class="form-group"><label>Full Name</label><input id="a2_full_name"></div>
+          <div class="form-group"><label>Date of Birth</label><input id="a2_dob" type="date"></div>
+          <div class="form-group"><label>Email</label><input id="a2_email" type="email"></div>
+          <div class="form-group"><label>Gender</label><select id="a2_gender"><option value="">Select…</option><option>Male</option><option>Female</option></select></div>
+          <div class="form-group"><label>Guarantor Email</label><input id="a2_guarantor_email" type="email"></div>
+          <div class="form-group"><label>Guarantor Mobile</label><input id="a2_guarantor_mobile"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Terms Agreed -->
+    <div class="section-card">
+      <div class="section-header"><span class="num">4</span><span class="section-title">Terms Agreed</span></div>
+      <div class="section-body">
+        <div class="form-grid">
+          <div class="form-group"><label>Monthly Rent (£)</label><input id="monthly_rent"></div>
+          <div class="form-group"><label>Deposit (£)</label><input id="deposit"></div>
+          <div class="form-group"><label>Check-In Date</label><input id="check_in_date" type="date"></div>
+          <div class="form-group"><label>Bills</label><select id="bills_included"><option value="0">Not Included</option><option value="1">Included</option></select></div>
+          <div class="form-group"><label>Pro-Rata (£)</label><input id="pro_rata"></div>
+          <div class="form-group"><label>Check-In Installment (Pro-Rata + Deposit − Holding Deposit)</label><input id="check_in_installment"></div>
+          <div class="form-group"><label>Holding Deposit (£)</label><input id="holding_deposit"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Holding Deposit confirmation -->
+    <div class="section-card">
+      <div class="section-header"><span class="num">5</span><span class="section-title">Holding Deposit</span></div>
+      <div class="section-body">
+        <div class="form-grid">
+          <div class="form-group"><label>Amount Transferred (£)</label><input id="holding_deposit_paid"></div>
+          <div class="form-group full">
+            <div class="checkbox-row"><input type="checkbox" id="holding_deposit_confirmed">
+              <label for="holding_deposit_confirmed">I confirm that I have transferred the above sum as a Holding Deposit to reserve the specified accommodation unit provided by the Landlord, which will go toward my deposit.</label></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Declaration -->
+    <div class="section-card">
+      <div class="section-header"><span class="num">6</span><span class="section-title">Applicant Declaration</span></div>
+      <div class="section-body">
+        <div class="decl-text">
+          <ul>
+            <li>I/We confirm that the information provided in this application is true and accurate to the best of my/our knowledge.</li>
+            <li>I/We confirm that I/we have the legal Right to Rent in the UK for the duration of the proposed tenancy.</li>
+            <li>I/We understand that providing false or misleading information may result in rejection of this application or termination of any agreement entered into.</li>
+            <li>I/We acknowledge that submission of this application does not guarantee acceptance and that final approval is subject to satisfactory referencing, affordability assessment, and Landlord approval.</li>
+            <li>I/We authorise the Landlord and/or its appointed referencing agency to conduct credit and identity checks and to obtain relevant information from employers, previous landlords and other necessary sources for the purpose of assessing this application.</li>
+          </ul>
+        </div>
+        <div class="form-group full">
+          <div class="checkbox-row"><input type="checkbox" id="declaration_confirmed">
+            <label for="declaration_confirmed">I/We have read and agree to the Applicant Declaration above.<span class="required">*</span></label></div>
+        </div>
+        <div class="form-grid" style="margin-top:12px">
+          <div class="form-group"><label>Signature (type your full name)</label><input id="signature_data"></div>
+          <div class="form-group"><label>Date</label><input id="signature_date" type="date"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="submit-bar">
+    <button id="submitBtn" class="btn btn-primary">Submit Application</button>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const TOKEN = "{{ url_token }}";
+const TEXT_FIELDS = ["a1_full_name","a1_dob","a1_email","a1_gender","a1_guarantor_email","a1_guarantor_mobile",
+  "a2_full_name","a2_dob","a2_email","a2_gender","a2_guarantor_email","a2_guarantor_mobile",
+  "monthly_rent","deposit","check_in_date","pro_rata","check_in_installment","holding_deposit",
+  "holding_deposit_paid","signature_data","signature_date","property_address","post_code","room_number"];
+let SUBMITTED = false;
+
+function toast(msg, ok){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.className='toast '+(ok?'ok':'err')+' show';
+  setTimeout(()=>t.classList.remove('show'), 4200);
+}
+function setVal(id,v){ const el=document.getElementById(id); if(el!=null && v!=null) el.value=v; }
+
+async function load(){
+  try{
+    const res=await fetch(`/api/tenant-application/${encodeURIComponent(TOKEN)}`);
+    const json=await res.json();
+    if(!json.success){ document.getElementById('loading').textContent = json.error||'Application not found.'; return; }
+    const d=json.data;
+    document.getElementById('propBanner').textContent =
+      (d.property_address||'') + (d.room_number? '  —  Room '+d.room_number : '');
+    TEXT_FIELDS.forEach(f=>setVal(f, d[f]));
+    document.getElementById('bills_included').value = String(d.bills_included||0);
+    document.getElementById('holding_deposit_confirmed').checked = !!d.holding_deposit_confirmed;
+    document.getElementById('declaration_confirmed').checked = !!d.declaration_confirmed;
+
+    if(String(d.status)==='submitted' || String(d.status)==='under_review' || String(d.status)==='approved'){
+      SUBMITTED=true; lockForm();
+    }
+    document.getElementById('loading').style.display='none';
+    document.getElementById('app').style.display='block';
+  }catch(e){ document.getElementById('loading').textContent='Could not load the application. Please refresh.'; }
+}
+
+function lockForm(){
+  document.getElementById('statusBadge').className='status-badge submitted';
+  document.getElementById('statusBadge').textContent='Submitted';
+  document.getElementById('lockedBanner').style.display='block';
+  document.querySelectorAll('#app input, #app select, #app textarea').forEach(el=>el.disabled=true);
+  const b=document.getElementById('submitBtn'); b.disabled=true; b.textContent='Submitted';
+}
+
+async function submit(){
+  const payload={};
+  TEXT_FIELDS.forEach(f=>{ if(f!=='property_address'&&f!=='post_code'&&f!=='room_number') payload[f]=document.getElementById(f).value; });
+  payload.bills_included = document.getElementById('bills_included').value;
+  payload.holding_deposit_confirmed = document.getElementById('holding_deposit_confirmed').checked;
+  payload.declaration_confirmed = document.getElementById('declaration_confirmed').checked;
+
+  if(!payload.a1_full_name.trim()){ toast('Please enter the 1st applicant full name.'); return; }
+  if(!payload.a1_email.trim()){ toast('Please enter the 1st applicant email.'); return; }
+  if(!payload.declaration_confirmed){ toast('Please confirm the Applicant Declaration to submit.'); return; }
+
+  const b=document.getElementById('submitBtn'); b.disabled=true; b.textContent='Submitting…';
+  try{
+    const res=await fetch(`/api/tenant-application/${encodeURIComponent(TOKEN)}/submit`,{
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    const json=await res.json();
+    if(!json.success){ toast(json.error||'Submission failed.'); b.disabled=false; b.textContent='Submit Application'; return; }
+    SUBMITTED=true; lockForm();
+    toast('Application submitted. Thank you!', true);
+    window.scrollTo({top:0,behavior:'smooth'});
+  }catch(e){ toast('Submission failed. Please try again.'); b.disabled=false; b.textContent='Submit Application'; }
+}
+
+document.getElementById('submitBtn').addEventListener('click', submit);
+load();
+</script>
+</body>
+</html>
