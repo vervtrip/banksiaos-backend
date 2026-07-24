@@ -2989,6 +2989,14 @@ def api_form_by_token():
             "SELECT * FROM referencing_documents WHERE form_id = ? ORDER BY uploaded_at DESC",
             [form["id"]]
         ).fetchall()
+        if form.get("property_id"):
+            _prop = db.execute("SELECT name, address_line_1, address_line_2, city, postcode FROM properties WHERE id = ?", [form["property_id"]]).fetchone()
+            if _prop:
+                form["property_address"] = ", ".join([b for b in [_prop.get("address_line_1"), _prop.get("address_line_2"), _prop.get("city"), _prop.get("postcode")] if b]) or _prop.get("name") or ""
+        if form.get("unit_id"):
+            _unit = db.execute("SELECT unit_ref FROM units WHERE id = ?", [form["unit_id"]]).fetchone()
+            if _unit:
+                form["unit_ref"] = _unit.get("unit_ref") or ""
         return jsonify({
             "success": True, "data": {
                 "form": form,

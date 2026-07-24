@@ -516,6 +516,63 @@ def api_create_form():
         db.close()
 
 
+@referencing_bp.route("/forms/generate", methods=["POST"])
+@require_team_auth
+@require_csrf
+def api_generate_form_for_unit():
+    """Generate a blank tenant-application (referencing) form pre-tied to a
+    property + unit and return a shareable link for the client. The applicant
+    fills in their own details; the property and room are fixed (team-selected)
+    and shown read-only on the form."""
+    data = request.get_json() or {}
+    property_id = data.get("property_id")
+    unit_id = data.get("unit_id")
+    if not property_id or not unit_id:
+        return json_error("property_id and unit_id are required")
+
+    db = get_dict_db()
+    try:
+        prop = db.execute(
+            "SELECT id, name, address_line_1, address_line_2, city, postcode FROM properties WHERE id = ?",
+            [property_id]
+        ).fetchone()
+        if not prop:
+            return json_error(f"Property {property_id} not found", 404)
+        unit = db.execute(
+            "SELECT id, unit_ref FROM units WHERE id = ? AND property_id = ?",
+            [unit_id, property_id]
+        ).fetchone()
+        if not unit:
+            return json_error(f"Unit {unit_id} not found under property {property_id}", 404)
+
+        form_token = generate_form_token()
+        db.execute(
+            "INSERT INTO referencing_forms (form_token, status, first_name, last_name, email, date_of_birth, property_id, unit_id, submitted_at) "
+            "VALUES (?, 'draft', '', '', '', '1900-01-01', ?, ?, NULL)",
+            [form_token, property_id, unit_id]
+        )
+        form_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
+        for section in ['personal','contact','residential','employment','self_employed','student','guarantor','housing_benefit','kin','bank','landlord','additional','declaration']:
+            db.execute("INSERT INTO form_sections (form_id, section_key) VALUES (?, ?)", [form_id, section])
+        db.commit()
+
+        addr = ", ".join([b for b in [prop.get("address_line_1"), prop.get("address_line_2"), prop.get("city"), prop.get("postcode")] if b]) or prop.get("name") or ("Property #%s" % property_id)
+        return json_success({
+            "form_id": form_id,
+            "form_token": form_token,
+            "link": "%s/apply/%s" % (PUBLIC_BASE_URL, form_token),
+            "property_id": property_id,
+            "unit_id": unit_id,
+            "property_address": addr,
+            "unit_ref": unit.get("unit_ref") or "",
+        })
+    except Exception as e:
+        db.rollback()
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
 # ── Referencing Form Progress Calculator ──
 # Mirrors the frontend logic in referencing_form.html's updateProgress()
 # Weights: fields 60%, documents 20%, declaration 10%, sections 10%
@@ -1099,6 +1156,11 @@ def _ensure_applicant_for_form(db, form_id):
         "bank_name": form.get("bank_name"),
         "modified": now,
     }
+
+    if form.get("property_id"):
+        fields["property_id"] = form.get("property_id")
+    if form.get("unit_id"):
+        fields["unit_id"] = form.get("unit_id")
 
     existing_id = form.get("applicant_id")
     if existing_id:

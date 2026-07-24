@@ -169,6 +169,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#f8fafc;color:#0f17
 
 <!-- Form Container -->
 <div class="form-container" id="formContainer">
+  <div id="propertyBanner"></div>
   <div id="formContent"></div>
   <div class="submit-bar" id="submitBar" style="display:none">
     <div class="summary">
@@ -476,9 +477,11 @@ async function init() {
       (formData.email && formData.email.length > 5);
     
     // Only show the full form + progress if applicant has actually started
-    if (hasPortalUser || hasStartedForm) {
+    const isPreassigned = !!(formData.property_id);
+    if (hasPortalUser || hasStartedForm || isPreassigned) {
       showUserMenu(formData.first_name, formData.email);
       showSaved();
+      renderPropertyBanner();
       renderForm();
       updateProgress();
       if (LOCKED) applyLockedMode();
@@ -502,6 +505,19 @@ async function init() {
 }
 
 // ── Render Form ──
+function renderPropertyBanner() {
+  const el = document.getElementById('propertyBanner');
+  if (!el) return;
+  const addr = formData.property_address || '';
+  const room = formData.unit_ref || '';
+  if (!addr && !room) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:14px 16px;margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#059669;margin-bottom:6px">You are applying for</div>
+      <div style="font-size:15px;font-weight:600;color:#065f46">${addr || '\u2014'}</div>
+      ${room ? `<div style="font-size:13px;color:#047857;margin-top:2px">Room / Unit: <strong>${room}</strong></div>` : ''}
+    </div>`;
+}
 function renderForm() {
   const container = document.getElementById('formContent');
   container.innerHTML = '';
