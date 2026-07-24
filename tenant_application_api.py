@@ -51,6 +51,48 @@ def _bills_included_for(prop):
     return 1
 
 
+def _to_monthly(amount, freq):
+    """Normalise a rent amount to a monthly figure based on its frequency."""
+    try:
+        a = float(amount or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if a <= 0:
+        return 0.0
+    f = (freq or "monthly").lower()
+    if "biweek" in f or "fortnight" in f:
+        return a * 26 / 12
+    if "week" in f:
+        return a * 52 / 12
+    if "dai" in f or "day" in f:
+        return a * 365 / 12
+    if "annual" in f or "year" in f or "yearly" in f:
+        return a / 12
+    if "quarter" in f:
+        return a / 3
+    return a  # monthly (default)
+
+
+def _unit_monthly_rent(db, unit, unit_id):
+    """Monthly rent for a unit: the unit's own market rent, or - when that is
+    blank (typical for vacant units) - the most recent tenancy rent for that unit,
+    normalised to monthly."""
+    try:
+        rentf = float(unit.get("market_rent") or 0)
+    except (TypeError, ValueError):
+        rentf = 0.0
+    if rentf > 0:
+        return _to_monthly(rentf, unit.get("market_rent_frequency"))
+    t = db.execute(
+        "SELECT rent_amount, rent_frequency FROM tenancies "
+        "WHERE unit_id = ? AND COALESCE(rent_amount,0) > 0 "
+        "ORDER BY COALESCE(move_in_date,'') DESC, id DESC LIMIT 1",
+        [unit_id]).fetchone()
+    if t:
+        return _to_monthly(t.get("rent_amount"), t.get("rent_frequency"))
+    return 0.0
+
+
 def _ensure_schema():
     db = get_dict_db()
     try:
@@ -131,7 +173,8 @@ def generate_tenant_application():
         if not prop:
             return json_error("Property %s not found" % property_id, 404)
         unit = db.execute(
-            "SELECT id, unit_ref, market_rent, deposit_amount FROM units WHERE id = ? AND property_id = ?",
+            "SELECT id, unit_ref, market_rent, market_rent_frequency, deposit_amount "
+            "FROM units WHERE id = ? AND property_id = ?",
             [unit_id, property_id]).fetchone()
         if not unit:
             return json_error("Unit %s not found under property %s" % (unit_id, property_id), 404)
@@ -139,10 +182,7 @@ def generate_tenant_application():
         addr = ", ".join([b for b in [prop.get("address_line_1"), prop.get("address_line_2"),
                                       prop.get("city")] if b]) or prop.get("name") or ("Property #%s" % property_id)
 
-        try:
-            rentf = float(unit.get("market_rent") or 0)
-        except (TypeError, ValueError):
-            rentf = 0.0
+        rentf = _unit_monthly_rent(db, unit, unit_id)
         monthly_rent = _money(rentf)
         deposit = monthly_rent  # no separate deposit figure -> one month's rent
         holding = _money((rentf * 12 / 52) / 7) if rentf > 0 else ""
