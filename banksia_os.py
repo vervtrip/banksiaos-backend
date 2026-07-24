@@ -7576,6 +7576,77 @@ def api_users_autocomplete():
 # 6. FINANCE — Rent Schedule & Tenancy Summary
 # ═══════════════════════════════════════════════
 
+
+@banksia_os_bp.route("/finance/move-in/<int:tenancy_id>", methods=["GET"])
+def api_get_move_in(tenancy_id):
+    """Return the move-in breakdown (Holding Deposit, Deposit, Pro-Rata, Move-in Amount) for a tenancy."""
+    db = get_dict_db()
+    try:
+        row = db.execute("SELECT * FROM tenancy_move_in WHERE tenancy_id = ?", (tenancy_id,)).fetchone()
+        ten = db.execute("SELECT rent_amount, start_date FROM tenancies WHERE id = ?", (tenancy_id,)).fetchone()
+        rent = ten.get("rent_amount") if ten else None
+        start = ten.get("start_date") if ten else None
+        if not row:
+            return json_success({"tenancy_id": tenancy_id, "holding_deposit": 0, "deposit": 0,
+                "pro_rata": 0, "first_month": 0, "move_in_amount": None, "needs_review": 1,
+                "note": "No move-in data on file", "rent_amount": rent, "start_date": start, "exists": False})
+        d = dict(row)
+        d["rent_amount"] = rent
+        d["start_date"] = start
+        d["exists"] = True
+        return json_success(d)
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/finance/move-in/<int:tenancy_id>", methods=["PATCH"])
+def api_update_move_in(tenancy_id):
+    """Edit the move-in breakdown. Recomputes Move-in Amount from components unless one is explicitly supplied."""
+    data = request.get_json() or {}
+    db = get_dict_db()
+    try:
+        row = db.execute("SELECT * FROM tenancy_move_in WHERE tenancy_id = ?", (tenancy_id,)).fetchone()
+        cur = dict(row) if row else {"holding_deposit": 0, "deposit": 0, "pro_rata": 0,
+                                     "first_month": 0, "move_in_amount": None, "needs_review": 1, "note": ""}
+        for key in ("holding_deposit", "deposit", "pro_rata", "first_month"):
+            if key in data and data[key] is not None:
+                cur[key] = float(data[key])
+        if "move_in_amount" in data and data["move_in_amount"] is not None:
+            cur["move_in_amount"] = float(data["move_in_amount"])
+        else:
+            initial = cur.get("pro_rata") or 0
+            if not initial:
+                initial = cur.get("first_month") or 0
+            cur["move_in_amount"] = round(float(cur.get("deposit") or 0)
+                                          - float(cur.get("holding_deposit") or 0)
+                                          + float(initial), 2)
+        if "needs_review" in data:
+            cur["needs_review"] = 1 if data["needs_review"] else 0
+        if "note" in data:
+            cur["note"] = data["note"]
+        actor = getattr(request, "current_user", {}).get("username", "system") if hasattr(request, "current_user") else "system"
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "INSERT INTO tenancy_move_in (tenancy_id,holding_deposit,deposit,pro_rata,first_month,move_in_amount,needs_review,note,source,edited_by,updated) "
+            "VALUES (?,?,?,?,?,?,?,?,'manual',?,?) "
+            "ON CONFLICT(tenancy_id) DO UPDATE SET holding_deposit=excluded.holding_deposit, deposit=excluded.deposit, "
+            "pro_rata=excluded.pro_rata, first_month=excluded.first_month, move_in_amount=excluded.move_in_amount, "
+            "needs_review=excluded.needs_review, note=excluded.note, edited_by=excluded.edited_by, updated=excluded.updated",
+            (tenancy_id, cur.get("holding_deposit") or 0, cur.get("deposit") or 0, cur.get("pro_rata") or 0,
+             cur.get("first_month") or 0, cur.get("move_in_amount"), cur.get("needs_review") or 0,
+             cur.get("note") or "", actor, now))
+        db.commit()
+        out = dict(db.execute("SELECT * FROM tenancy_move_in WHERE tenancy_id = ?", (tenancy_id,)).fetchone())
+        out["updated"] = True
+        return json_success(out)
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
 @banksia_os_bp.route("/finance/rent-schedule/<int:tenancy_id>")
 def api_rent_schedule(tenancy_id):
     """Return projected rent payment schedule for a tenancy."""
