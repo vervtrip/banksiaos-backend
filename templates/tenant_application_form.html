@@ -209,6 +209,7 @@ async function load(){
     document.getElementById('propBanner').textContent =
       (d.property_address||'') + (d.room_number? '  —  Room '+d.room_number : '');
     TEXT_FIELDS.forEach(f=>setVal(f, d[f]));
+    if(d.created_at){ try{ document.getElementById('appDate').textContent = new Date(d.created_at).toLocaleDateString('en-GB'); }catch(e){} }
     document.getElementById('bills_included').value = String(d.bills_included||0);
     document.getElementById('holding_deposit_confirmed').checked = !!d.holding_deposit_confirmed;
     document.getElementById('declaration_confirmed').checked = !!d.declaration_confirmed;

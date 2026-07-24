@@ -12,6 +12,7 @@ the client opens it, fills their details and submits. On submit we create/link a
 Applicant record so it appears under the Applicants tab. It does NOT create a
 referencing form - this flow is intentionally independent of referencing.
 """
+import calendar
 from datetime import datetime, timezone
 
 from flask import Blueprint, request
@@ -93,6 +94,34 @@ def _unit_monthly_rent(db, unit, unit_id):
     return 0.0
 
 
+def _days_until_month_end(d):
+    """Number of days from date d until the end of d's month (remaining days
+    in the month, i.e. last_day - today). For 24 July -> 31 - 24 = 7."""
+    last_day = calendar.monthrange(d.year, d.month)[1]
+    return last_day - d.day
+
+
+def _compute_prorata(holding_f, monthly_rent_f, today):
+    """Pro-Rata + Check-In Installment, per Banksia's rule:
+      daily_rate       = holding_deposit / 7
+      days             = days from today until the end of the month
+      pro_rata         = days * daily_rate
+                         (+ one month's rent if days < 10)
+      check_in_install = pro_rata + deposit - holding_deposit
+                         (deposit = one month's rent)
+    Returns (pro_rata_str, check_in_installment_str)."""
+    if holding_f <= 0 or monthly_rent_f <= 0:
+        return "", ""
+    daily_rate = holding_f / 7.0
+    days = _days_until_month_end(today)
+    pro_rata = days * daily_rate
+    if days < 10:
+        pro_rata += monthly_rent_f
+    # deposit == monthly_rent_f (no separate deposit figure)
+    check_in = pro_rata + monthly_rent_f - holding_f
+    return _money(pro_rata), _money(check_in)
+
+
 def _ensure_schema():
     db = get_dict_db()
     try:
@@ -138,7 +167,7 @@ _PUBLIC_KEYS = [
     "holding_deposit_paid", "holding_deposit_confirmed",
     "a1_full_name", "a1_dob", "a1_email", "a1_gender", "a1_guarantor_email", "a1_guarantor_mobile",
     "a2_full_name", "a2_dob", "a2_email", "a2_gender", "a2_guarantor_email", "a2_guarantor_mobile",
-    "declaration_confirmed", "signature_date",
+    "declaration_confirmed", "signature_date", "created_at",
 ]
 
 
@@ -185,18 +214,25 @@ def generate_tenant_application():
         rentf = _unit_monthly_rent(db, unit, unit_id)
         monthly_rent = _money(rentf)
         deposit = monthly_rent  # no separate deposit figure -> one month's rent
-        holding = _money(rentf * 12 / 52) if rentf > 0 else ""
+        holding_f = rentf * 12 / 52 if rentf > 0 else 0.0
+        holding = _money(holding_f)
         bills = _bills_included_for(prop)
 
         token = generate_form_token()
-        now = datetime.now(timezone.utc).isoformat()
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        # Pro-Rata + Check-In Installment, computed against today (the generation
+        # date, which is what the form shows top-right as Date of Application).
+        pro_rata, check_in_installment = _compute_prorata(holding_f, rentf, now_dt.date())
         db.execute(
             "INSERT INTO tenant_applications "
             "(form_token, status, property_id, unit_id, property_address, post_code, room_number, "
-            "monthly_rent, deposit, holding_deposit, holding_deposit_paid, bills_included, created_at) "
-            "VALUES (?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "monthly_rent, deposit, holding_deposit, holding_deposit_paid, pro_rata, "
+            "check_in_installment, bills_included, created_at) "
+            "VALUES (?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [token, property_id, unit_id, addr, prop.get("postcode") or "",
-             unit.get("unit_ref") or "", monthly_rent, deposit, holding, holding, bills, now])
+             unit.get("unit_ref") or "", monthly_rent, deposit, holding, holding,
+             pro_rata, check_in_installment, bills, now])
         db.commit()
         new_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
         return json_success({
@@ -210,6 +246,8 @@ def generate_tenant_application():
             "monthly_rent": monthly_rent,
             "deposit": deposit,
             "holding_deposit": holding,
+            "pro_rata": pro_rata,
+            "check_in_installment": check_in_installment,
             "bills_included": bills,
         })
     except Exception as e:
