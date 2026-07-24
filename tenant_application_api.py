@@ -156,7 +156,7 @@ def generate_tenant_application():
     a shareable client link. Property/postcode/room are locked. Monthly rent and
     deposit are taken from the unit's market rent (there is no separate deposit
     figure, so deposit = one month's rent). Holding deposit is computed as
-    (rent x 12 / 52) / 7 and mirrored to the amount-transferred field. Bills default
+    (rent x 12 / 52) and mirrored to the amount-transferred field. Bills default
     to Included except for the configured no-bills properties."""
     _ensure_schema()
     data = request.get_json() or {}
@@ -185,7 +185,7 @@ def generate_tenant_application():
         rentf = _unit_monthly_rent(db, unit, unit_id)
         monthly_rent = _money(rentf)
         deposit = monthly_rent  # no separate deposit figure -> one month's rent
-        holding = _money((rentf * 12 / 52) / 7) if rentf > 0 else ""
+        holding = _money(rentf * 12 / 52) if rentf > 0 else ""
         bills = _bills_included_for(prop)
 
         token = generate_form_token()
