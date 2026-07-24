@@ -331,21 +331,21 @@ def api_dashboard():
     db = get_dict_db()
     try:
         # Total properties
-        total_properties = db.execute("SELECT COUNT(*) AS cnt FROM properties").fetchone()["cnt"]
+        total_properties = db.execute("SELECT COUNT(*) AS cnt FROM properties WHERE status IS NULL OR status <> 'archived'").fetchone()["cnt"]
 
         # Total units
-        total_units = db.execute("SELECT COUNT(*) AS cnt FROM units").fetchone()["cnt"]
+        total_units = db.execute("SELECT COUNT(*) AS cnt FROM units WHERE is_active IS NULL OR is_active = 1").fetchone()["cnt"]
 
         # Occupied / vacant units
         occupied_units = db.execute(
-            "SELECT COUNT(*) AS cnt FROM units WHERE unit_vacant = 0"
+            "SELECT COUNT(*) AS cnt FROM units WHERE unit_vacant = 0 AND (is_active IS NULL OR is_active = 1)"
         ).fetchone()["cnt"]
         vacant_units = db.execute(
-            "SELECT COUNT(*) AS cnt FROM units WHERE unit_vacant = 1"
+            "SELECT COUNT(*) AS cnt FROM units WHERE unit_vacant = 1 AND (is_active IS NULL OR is_active = 1)"
         ).fetchone()["cnt"]
 
         # Total tenancies & tenants
-        total_tenancies = db.execute("SELECT COUNT(*) AS cnt FROM tenancies").fetchone()["cnt"]
+        total_tenancies = db.execute("SELECT COUNT(*) AS cnt FROM tenancies WHERE status <> 'Archived'").fetchone()["cnt"]
         total_tenants = db.execute("SELECT COUNT(*) AS cnt FROM tenants").fetchone()["cnt"]
         total_applicants = db.execute("SELECT COUNT(*) AS cnt FROM applicants").fetchone()["cnt"]
 
@@ -2092,6 +2092,24 @@ def _api_patch_property(prop_id):
         if not prop:
             return json_error("Property not found", 404)
 
+        # Status set to/from 'archived' triggers the full cascade (units,
+        # tenancies, deposits) instead of just writing the status text — this is
+        # what makes archiving actually take effect from the front-end.
+        _incoming = (data.get("status") or "").strip().lower()
+        _current = (prop.get("status") or "").strip().lower()
+        if _incoming == "archived" and _current != "archived":
+            _archive_property_cascade(db, prop_id)
+            _create_activity_log(db, "property_archived", prop_id,
+                "Property '" + (prop.get("name") or prop.get("ref") or "") + "' archived via status change")
+            db.commit()
+            return json_success({"updated": True, "id": prop_id, "status": "archived", "cascade": True})
+        if _current == "archived" and _incoming and _incoming != "archived":
+            _restore_property_cascade(db, prop_id)
+            _create_activity_log(db, "property_restored", prop_id,
+                "Property '" + (prop.get("name") or prop.get("ref") or "") + "' restored via status change")
+            db.commit()
+            return json_success({"updated": True, "id": prop_id, "status": _incoming, "cascade": True})
+
         # 2. Optimistic concurrency check
         if provided_modified is not None:
             current_modified = prop.get("modified")
@@ -2628,97 +2646,35 @@ def api_archive_properties_bulk():
 
 @banksia_os_bp.route("/properties/<int:prop_id>/archive", methods=["POST"])
 def api_archive_property(prop_id):
-    """Archive (soft delete) a property. Checks for active tenancies and
-    other dependencies first. If dependencies exist, returns them so the
-    UI can display what blocks archiving."""
+    """Archive a property and CASCADE to everything connected to it — units,
+    tenancies and deposits — so nothing tied to it keeps showing on live
+    figures/financials. Unlike the old behaviour this does NOT block when
+    active tenancies exist (an archived property is one returned to the
+    landlord / no longer operated), it archives them too. Fully reversible
+    via /restore. Returns the dependency counts it acted on."""
     db = get_dict_db()
     try:
         prop = db.execute("SELECT * FROM properties WHERE id = ?", (prop_id,)).fetchone()
         if not prop:
             return json_error("Property not found", 404)
+        if prop.get("status") == "archived":
+            return json_error("Property is already archived", 409)
 
-        # ── Aggregate all dependency counts ──
-        active_statuses = ("'Current','current','Periodic','periodic','Active','active'")
+        user = (getattr(request, "current_user", None) or session.get("user", {}) or {}).get("username", "system")
+        counts = _archive_property_cascade(db, prop_id)
 
-        units_count = db.execute(
-            "SELECT COUNT(*) AS cnt FROM units WHERE property_id = ?",
-            (prop_id,)
-        ).fetchone()["cnt"]
-
-        tenants_count = db.execute(
-            "SELECT COUNT(*) AS cnt FROM tenants WHERE property_id = ?",
-            (prop_id,)
-        ).fetchone()["cnt"]
-
-        active_tenancies = db.execute(
-            f"SELECT COUNT(*) AS cnt FROM tenancies "
-            f"WHERE property_id = ? AND status IN ({active_statuses})",
-            (prop_id,)
-        ).fetchone()["cnt"]
-
-        total_tenancies = db.execute(
-            "SELECT COUNT(*) AS cnt FROM tenancies WHERE property_id = ?",
-            (prop_id,)
-        ).fetchone()["cnt"]
-
-        active_jobs = db.execute(
-            "SELECT COUNT(*) AS cnt FROM maintenance_jobs "
-            "WHERE property_id = ? AND status NOT IN ('COMPLETED', 'CANCELLED', 'No Invoice Found')",
-            (prop_id,)
-        ).fetchone()["cnt"]
-
-        total_jobs = db.execute(
-            "SELECT COUNT(*) AS cnt FROM maintenance_jobs WHERE property_id = ?",
-            (prop_id,)
-        ).fetchone()["cnt"]
-
-        dependencies = {
-            "units": units_count,
-            "tenants": tenants_count,
-            "active_tenancies": active_tenancies,
-            "total_tenancies": total_tenancies,
-            "active_maintenance_jobs": active_jobs,
-            "total_maintenance_jobs": total_jobs,
-        }
-
-        # ── If any blocking dependency exists, return dependency info ──
-        blockers = []
-        if active_tenancies > 0:
-            blockers.append("active_tenancies")
-        if active_jobs > 0:
-            blockers.append("active_maintenance_jobs")
-
-        if blockers:
-            return json_success({
-                "archived": False,
-                "message": "Property has dependencies that prevent archiving",
-                "dependencies": dependencies,
-                "blockers": blockers,
-            })
-
-        # ── Perform archive ──
-        db.execute(
-            "UPDATE properties SET status = 'archived', modified = ? WHERE id = ?",
-            [datetime.now(timezone.utc).isoformat(), prop_id]
+        _create_activity_log(
+            db, "property_archived", prop_id,
+            f"Property '{prop.get('name','') or prop.get('ref','')}' archived (cascade: "
+            f"{counts['tenancies']} tenancies, {counts['units']} units, {counts['deposits']} deposits)"
         )
-
-        # Cascade: archive all units under this property
-        db.execute(
-            "UPDATE units SET is_active = 0, modified = ? WHERE property_id = ? AND (is_active IS NULL OR is_active = 1)",
-            [datetime.now(timezone.utc).isoformat(), prop_id]
-        )
-
-        _create_activity_log(db, "property_archived", prop_id,
-                             f"Property '{prop.get('name', '') or prop.get('ref', '')}' archived")
-
         db.commit()
         return json_success({
             "id": prop_id,
-            "message": "Property archived successfully",
             "status": "archived",
-            "dependencies": dependencies,
+            "message": "Property and all connected records archived",
+            "cascade": counts,
         })
-
     except Exception as e:
         db.rollback()
         return json_error(safe_error(e), 500)
@@ -2726,52 +2682,121 @@ def api_archive_property(prop_id):
         db.close()
 
 
-# ═══════════════════════════════════════════════
-# 2e. RESTORE PROPERTY — undo archive
-# ═══════════════════════════════════════════════
+def _archive_property_cascade(db, prop_id):
+    """Set property + all connected units/tenancies/deposits to archived.
+    Preserves each record's live status so restore can put it back exactly."""
+    now = datetime.now(timezone.utc).isoformat()
+    user = (getattr(request, "current_user", None) or session.get("user", {}) or {}).get("username", "system")
+
+    db.execute(
+        "UPDATE properties SET status='archived', is_active=0, archived_at=?, archived_by=?, modified=? WHERE id=?",
+        [now, user, now, prop_id]
+    )
+    u = db.execute(
+        "UPDATE units SET is_active=0, archived_at=?, modified=? WHERE property_id=? AND (is_active IS NULL OR is_active=1)",
+        [now, now, prop_id]
+    ).rowcount
+    # Tenancies: stash live status into pre_archive_status, flip to 'Archived'
+    # (every live query filters status IN Active/Periodic/Current, so this drops
+    # them from rent roll, arrears, occupancy automatically).
+    t = db.execute(
+        "UPDATE tenancies SET pre_archive_status=status, status='Archived', archived_at=?, modified=? "
+        "WHERE property_id=? AND status <> 'Archived'",
+        [now, now, prop_id]
+    ).rowcount
+    # Deposits: stash current_status, flip to 'archived' (drops from held-deposit
+    # figures + the deposits register automatically).
+    d = db.execute(
+        "UPDATE deposits SET pre_archive_status=current_status, current_status='archived', archived_at=?, modified=? "
+        "WHERE property_id=? AND current_status <> 'archived'",
+        [now, now, prop_id]
+    ).rowcount
+    return {"units": u, "tenancies": t, "deposits": d}
+
+
+def _restore_property_cascade(db, prop_id):
+    """Reverse _archive_property_cascade — put every record back to its
+    pre-archive live status."""
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        "UPDATE properties SET status='active', is_active=1, archived_at=NULL, archived_by=NULL, modified=? WHERE id=?",
+        [now, prop_id]
+    )
+    u = db.execute(
+        "UPDATE units SET is_active=1, archived_at=NULL, modified=? WHERE property_id=? AND is_active=0",
+        [now, prop_id]
+    ).rowcount
+    t = db.execute(
+        "UPDATE tenancies SET status=COALESCE(NULLIF(pre_archive_status,''),'Active'), pre_archive_status=NULL, "
+        "archived_at=NULL, modified=? WHERE property_id=? AND status='Archived'",
+        [now, prop_id]
+    ).rowcount
+    d = db.execute(
+        "UPDATE deposits SET current_status=COALESCE(NULLIF(pre_archive_status,''),'held'), pre_archive_status=NULL, "
+        "archived_at=NULL, modified=? WHERE property_id=? AND current_status='archived'",
+        [now, prop_id]
+    ).rowcount
+    return {"units": u, "tenancies": t, "deposits": d}
+
 
 @banksia_os_bp.route("/properties/<int:prop_id>/restore", methods=["POST"])
 def api_restore_property(prop_id):
-    """Restore an archived property back to 'active' status."""
+    """Restore an archived property (and everything cascaded) to live."""
     db = get_dict_db()
     try:
         prop = db.execute("SELECT * FROM properties WHERE id = ?", (prop_id,)).fetchone()
         if not prop:
             return json_error("Property not found", 404)
+        if prop.get("status") != "archived":
+            return json_error(f"Property is not archived (status: '{prop.get('status')}')", 409)
 
-        current_status = prop.get("status")
-        if current_status != "archived":
-            return json_error({
-                "message": f"Property is not archived (current status: '{current_status}'). Only archived properties can be restored.",
-                "code": "NOT_ARCHIVED",
-                "current_status": current_status,
-            }, 409)
-
-        # Restore to active
-        now = datetime.now(timezone.utc).isoformat()
-        db.execute(
-            "UPDATE properties SET status = 'active', modified = ? WHERE id = ?",
-            [now, prop_id]
+        counts = _restore_property_cascade(db, prop_id)
+        _create_activity_log(
+            db, "property_restored", prop_id,
+            f"Property '{prop.get('name','') or prop.get('ref','')}' restored from archive (cascade: "
+            f"{counts['tenancies']} tenancies, {counts['units']} units, {counts['deposits']} deposits)"
         )
-
-        # Cascade: restore all units under this property
-        db.execute(
-            "UPDATE units SET is_active = 1, modified = ? WHERE property_id = ? AND (is_active IS NULL OR is_active = 0)",
-            [now, prop_id]
-        )
-
-        _create_activity_log(db, "property_restored", prop_id,
-                             f"Property '{prop.get('name', '') or prop.get('ref', '')}' restored from archive")
-
         db.commit()
         return json_success({
-            "id": prop_id,
-            "message": "Property restored successfully",
-            "status": "active",
+            "id": prop_id, "status": "active",
+            "message": "Property and all connected records restored",
+            "cascade": counts,
         })
-
     except Exception as e:
         db.rollback()
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/archive", methods=["GET"])
+def api_archive_list():
+    """Archive module — every archived property with what was cascaded, so the
+    team can see and restore. Searchable by ref/name/address."""
+    search = request.args.get("search", "").strip()
+    where = ["p.status = 'archived'"]
+    params = []
+    if search:
+        where.append("(COALESCE(p.ref,'') LIKE ? OR COALESCE(p.name,'') LIKE ? OR COALESCE(p.address_line_1,'') LIKE ?)")
+        lv = f"%{search}%"
+        params += [lv, lv, lv]
+    where_sql = " AND ".join(where)
+    db = get_dict_db()
+    try:
+        rows = db.execute(
+            f"SELECT p.id, p.ref, p.name, p.address_line_1, p.archived_at, p.archived_by, "
+            f"(SELECT COUNT(*) FROM units u WHERE u.property_id=p.id) AS units_count, "
+            f"(SELECT COUNT(*) FROM tenancies t WHERE t.property_id=p.id) AS tenancies_count, "
+            f"(SELECT COUNT(*) FROM deposits d WHERE d.property_id=p.id) AS deposits_count, "
+            f"(SELECT COALESCE(SUM(d.amount),0) FROM deposits d WHERE d.property_id=p.id) AS deposits_total "
+            f"FROM properties p WHERE {where_sql} ORDER BY p.archived_at DESC, p.id DESC",
+            params
+        ).fetchall()
+        return json_success({
+            "properties": rows,
+            "count": len(rows),
+        })
+    except Exception as e:
         return json_error(safe_error(e), 500)
     finally:
         db.close()
