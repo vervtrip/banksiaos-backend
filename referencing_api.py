@@ -2874,6 +2874,92 @@ def api_portal_self_register():
     except Exception as e:
         db.rollback()
         return json_error(safe_error(e), 500)
+
+@referencing_bp.route("/portal/register-with-tenant-app", methods=["POST"])
+def api_portal_register_with_tenant_app():
+    """Register a portal account linked to a tenant application token."""
+    ip = request.remote_addr or "unknown"
+    if not _check_rate_limit(f"portal_ta_register:{ip}", max_attempts=5, window=300):
+        return json_error("Too many registration attempts from this IP. Please try again later.", 429)
+
+    data = request.get_json() or {}
+    first_name = (data.get("first_name") or "").strip()
+    last_name = (data.get("last_name") or "").strip()
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password", "")
+    ta_token = data.get("ta_token", "")
+
+    if not first_name or not last_name:
+        return json_error("First and last name are required")
+    if not email or "@" not in email:
+        return json_error("A valid email address is required")
+    if not password or len(password) < 10:
+        return json_error("Password must be at least 10 characters")
+    if not re.search(r'[A-Z]', password):
+        return json_error("Password must contain an uppercase letter")
+    if not re.search(r'[a-z]', password):
+        return json_error("Password must contain a lowercase letter")
+    if not re.search(r'[0-9]', password):
+        return json_error("Password must contain a digit")
+    if not ta_token:
+        return json_error("Tenant application token is required")
+
+    db = get_dict_db()
+    try:
+        # Validate TA token
+        ta = db.execute(
+            "SELECT id, property_address, monthly_rent, status FROM tenant_applications WHERE form_token = ?",
+            [ta_token]
+        ).fetchone()
+        if not ta:
+            return json_error("Invalid application link", 404)
+        if str(ta.get("status")) == "submitted":
+            return json_error("This application has already been submitted.", 400)
+
+        existing = db.execute(
+            "SELECT * FROM portal_users WHERE lower(email) = ?", [email]
+        ).fetchone()
+        if existing:
+            return json_error("An account with this email already exists", 409)
+
+        pw_hash = hash_password(password)
+        db.execute(
+            "INSERT INTO portal_users (email, password_hash, first_name, last_name, "
+            "portal_type, is_active, email_verified, created, modified) "
+            "VALUES (?, ?, ?, ?, 'applicant', 1, 1, datetime('now'), datetime('now'))",
+            [email, pw_hash, first_name, last_name],
+        )
+        user_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
+
+        # Auto-login
+        token = generate_token()
+        expires_at = (datetime.now(timezone.utc) + PORTAL_SESSION_TTL).isoformat()
+        db.execute(
+            "INSERT INTO portal_sessions (user_id, session_token, ip_address, user_agent, expires_at, last_activity) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+            [user_id, token, request.remote_addr or '', request.headers.get("User-Agent", ""), expires_at],
+        )
+        db.execute(
+            "UPDATE portal_users SET last_login_at = datetime('now'), last_login_ip = ? WHERE id = ?",
+            [request.remote_addr or '', user_id],
+        )
+        db.commit()
+
+        _audit_log(user_id, email, "register_with_ta", "Portal account registered via tenant application link")
+
+        return json_success({
+            "token": token,
+            "expires_at": expires_at,
+            "user": {
+                "id": user_id,
+                "email": email,
+                "first_name": first_name,
+                "last_name": last_name,
+                "portal_type": "applicant",
+            },
+        })
+    except Exception as e:
+        db.rollback()
+        return json_error(safe_error(e), 500)
     finally:
         db.close()
 
@@ -3159,6 +3245,114 @@ def api_portal_rent():
     finally:
         db.close()
 
+# ── Portal: tenant application roadmap ──
+
+@referencing_bp.route("/portal/roadmap", methods=["GET"])
+@require_auth
+def api_portal_roadmap():
+    """Onboarding roadmap for the tenant."""
+    pu = request.portal_user
+    db = get_dict_db()
+    try:
+        applicant_id = pu.get("applicant_id")
+        user_id = pu["pu_id"]
+        steps = _compute_roadmap(db, applicant_id, user_id)
+        return json_success({"steps": steps})
+    finally:
+        db.close()
+
+
+def _compute_roadmap(db, applicant_id, user_id):
+    """Build the 4-step roadmap: TA, referencing, contract, payment."""
+    steps = [
+        {"id": 1, "status": "locked", "label": "Tenant Application"},
+        {"id": 2, "status": "locked", "label": "Referencing Form"},
+        {"id": 3, "status": "locked", "label": "Contract"},
+        {"id": 4, "status": "locked", "label": "Payment"},
+    ]
+
+    # Step 1: Tenant Application
+    if applicant_id:
+        ta = db.execute(
+            "SELECT status, form_token, check_in_installment FROM tenant_applications "
+            "WHERE applicant_id = ? ORDER BY id DESC LIMIT 1",
+            [applicant_id]
+        ).fetchone()
+        if ta and str(ta.get("status")) == "submitted":
+            steps[0]["status"] = "completed"
+            steps[1]["status"] = "active"
+        elif ta and str(ta.get("status")) == "draft":
+            steps[0]["status"] = "active"
+            steps[0]["url"] = "/tenant-application/" + ta["form_token"]
+        else:
+            steps[0]["status"] = "active"
+    else:
+        steps[0]["status"] = "active"
+
+    # Step 2: Referencing Form
+    if applicant_id:
+        ref = db.execute(
+            "SELECT f.id, f.form_token, f.status FROM referencing_forms f "
+            "WHERE f.applicant_id = ? ORDER BY f.id DESC LIMIT 1",
+            [applicant_id]
+        ).fetchone()
+        if ref:
+            ref_status = str(ref.get("status", ""))
+            if ref_status in ("approved",):
+                steps[1]["status"] = "completed"
+                steps[2]["status"] = "active"
+            else:
+                steps[1]["status"] = "active"
+                if ref.get("form_token"):
+                    steps[1]["url"] = "/apply/" + ref["form_token"]
+        else:
+            steps[1]["status"] = "active"
+
+    # Step 3: Contract signing
+    if applicant_id:
+        try:
+            ref_form = db.execute(
+                "SELECT id FROM referencing_forms WHERE applicant_id = ? ORDER BY id DESC LIMIT 1",
+                [applicant_id]
+            ).fetchone()
+            form_id = ref_form["id"] if ref_form else None
+            if form_id:
+                signed = db.execute(
+                    "SELECT e.id FROM esignature_requests e JOIN referencing_forms rf ON e.form_id = rf.id "
+                    "WHERE rf.applicant_id = ? AND e.signed_at IS NOT NULL LIMIT 1",
+                    [applicant_id]
+                ).fetchone()
+                if signed:
+                    steps[2]["status"] = "completed"
+                    steps[3]["status"] = "active"
+                else:
+                    pending = db.execute(
+                        "SELECT e.id, e.signer_token FROM esignature_requests e "
+                        "JOIN referencing_forms rf ON e.form_id = rf.id "
+                        "WHERE rf.applicant_id = ? AND e.signed_at IS NULL LIMIT 1",
+                        [applicant_id]
+                    ).fetchone()
+                    if pending:
+                        steps[2]["url"] = "/sign/" + pending["signer_token"]
+        except Exception:
+            pass
+
+    # Step 4: Payment
+    if applicant_id:
+        try:
+            ta_pay = db.execute(
+                "SELECT holding_deposit_paid, check_in_installment FROM tenant_applications "
+                "WHERE applicant_id = ? AND status='submitted' ORDER BY id DESC LIMIT 1",
+                [applicant_id]
+            ).fetchone()
+            if ta_pay and ta_pay.get("holding_deposit_paid"):
+                pd = str(ta_pay["holding_deposit_paid"]).strip()
+                if pd and float(pd) > 0:
+                    steps[3]["status"] = "completed"
+        except Exception:
+            pass
+
+    return steps
 
 # ── Portal: maintenance requests ──
 
@@ -3264,7 +3458,72 @@ def api_portal_documents():
             [email]
         ).fetchall()
 
-        return json_success({"uploaded": uploaded, "signed": signed, "pending": pending})
+                # Tenant application PDFs (from entity_documents linked to applicant)
+        ta_pdfs = []
+        applicant_id = pu.get("applicant_id")
+        if applicant_id:
+            ta_pdfs = db.execute(
+                "SELECT id, original_filename, file_path, file_type, file_size, category, created "
+                "FROM entity_documents WHERE entity_type = 'applicant' AND entity_id = ? "
+                "ORDER BY created DESC",
+                [applicant_id]
+            ).fetchall()
+
+        # Build unified documents list
+        documents = []
+        for doc in uploaded:
+            documents.append({
+                "id": doc["id"],
+                "name": doc["original_filename"],
+                "document_type": doc.get("category", "general"),
+                "uploaded_at": doc.get("uploaded_at", doc.get("created", "")),
+                "file_size": doc.get("file_size"),
+                "is_verified": doc.get("is_verified"),
+                "file_path": True,
+                "source": "referencing"
+            })
+        for doc in signed:
+            documents.append({
+                "id": f"esign_{doc['id']}",
+                "name": doc["document_title"],
+                "document_type": doc.get("document_type", "agreement"),
+                "uploaded_at": doc.get("completed_at", doc.get("signed_at", "")),
+                "source": "esignature"
+            })
+        for doc in ta_pdfs:
+            documents.append({
+                "id": doc["id"],
+                "name": doc["original_filename"],
+                "document_type": doc.get("category", "tenant_application"),
+                "uploaded_at": doc.get("created", ""),
+                "file_size": doc.get("file_size"),
+                "file_path": doc.get("file_path"),
+                "source": "ta_pdf"
+            })
+        return json_success({"uploaded": uploaded, "signed": signed, "pending": pending, "ta_pdfs": ta_pdfs, "documents": documents})
+    finally:
+        db.close()
+
+
+# ── Portal: download entity document (TA PDFs) ──
+
+@referencing_bp.route("/portal/download-entity-document/<int:doc_id>", methods=["GET"])
+@require_auth
+def api_portal_download_entity_document(doc_id):
+    """Download an entity document (TA PDF) belonging to the logged-in portal user."""
+    pu = request.portal_user
+    db = get_dict_db()
+    try:
+        applicant_id = pu.get("applicant_id")
+        if not applicant_id:
+            return json_error("No applicant linked to your account", 404)
+        doc = db.execute(
+            "SELECT * FROM entity_documents WHERE id = ? AND entity_type = 'applicant' AND entity_id = ?",
+            [doc_id, applicant_id]
+        ).fetchone()
+        if not doc:
+            return json_error("Document not found or not authorised", 404)
+        return send_file(doc["file_path"], as_attachment=True, download_name=doc["original_filename"])
     finally:
         db.close()
 

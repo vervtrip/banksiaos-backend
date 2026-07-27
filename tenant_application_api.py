@@ -13,6 +13,7 @@ Applicant record so it appears under the Applicants tab. It does NOT create a
 referencing form - this flow is intentionally independent of referencing.
 """
 import calendar
+import os
 from datetime import datetime, timezone
 
 from flask import Blueprint, request
@@ -151,6 +152,7 @@ def _ensure_schema():
             "declaration_confirmed INTEGER DEFAULT 0,"
             "signature_data TEXT,"
             "signature_date TEXT,"
+            "num_applicants INTEGER DEFAULT 1,"
             "applicant_id INTEGER,"
             "created_at TEXT,"
             "submitted_at TEXT"
@@ -167,7 +169,7 @@ _PUBLIC_KEYS = [
     "holding_deposit_paid", "holding_deposit_confirmed",
     "a1_full_name", "a1_dob", "a1_email", "a1_gender", "a1_guarantor_email", "a1_guarantor_mobile",
     "a2_full_name", "a2_dob", "a2_email", "a2_gender", "a2_guarantor_email", "a2_guarantor_mobile",
-    "declaration_confirmed", "signature_date", "created_at",
+    "declaration_confirmed", "signature_data", "signature_date", "num_applicants", "num_applicants", "created_at",
 ]
 
 
@@ -228,17 +230,17 @@ def generate_tenant_application():
             "INSERT INTO tenant_applications "
             "(form_token, status, property_id, unit_id, property_address, post_code, room_number, "
             "monthly_rent, deposit, holding_deposit, holding_deposit_paid, pro_rata, "
-            "check_in_installment, bills_included, created_at) "
-            "VALUES (?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "check_in_installment, bills_included, created_at, check_in_date, num_applicants) "
+            "VALUES (?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [token, property_id, unit_id, addr, prop.get("postcode") or "",
              unit.get("unit_ref") or "", monthly_rent, deposit, holding, holding,
-             pro_rata, check_in_installment, bills, now])
+             pro_rata, check_in_installment, bills, now, now_dt.date().isoformat(), 1])
         db.commit()
         new_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
         return json_success({
             "id": new_id,
             "form_token": token,
-            "link": "%s/tenant-application/%s" % (PUBLIC_BASE_URL, token),
+            "link": "%s/portal?ta=%s" % (PUBLIC_BASE_URL, token),
             "property_id": property_id,
             "unit_id": unit_id,
             "property_address": addr,
@@ -249,6 +251,7 @@ def generate_tenant_application():
             "pro_rata": pro_rata,
             "check_in_installment": check_in_installment,
             "bills_included": bills,
+            "num_applicants": 1,
         })
     except Exception as e:
         db.rollback()
@@ -279,7 +282,7 @@ _APPLICANT_FIELDS = [
     "a1_full_name", "a1_dob", "a1_email", "a1_gender", "a1_guarantor_email", "a1_guarantor_mobile",
     "a2_full_name", "a2_dob", "a2_email", "a2_gender", "a2_guarantor_email", "a2_guarantor_mobile",
     "check_in_date", "bills_included", "holding_deposit_confirmed",
-    "declaration_confirmed", "signature_data", "signature_date",
+    "declaration_confirmed", "signature_data", "signature_date", "num_applicants",
 ]
 _BOOL_FIELDS = ("bills_included", "holding_deposit_confirmed", "declaration_confirmed")
 
@@ -290,7 +293,64 @@ _REQUIRED = [
     ("a1_email", "First applicant email is required."),
     ("a1_guarantor_email", "First applicant guarantor email is required."),
     ("a1_guarantor_mobile", "First applicant guarantor phone number is required."),
+    ("signature_data", "Signature is required."),
 ]
+
+_REQUIRED_A2 = [
+    ("a2_full_name", "Second applicant full name is required."),
+    ("a2_dob", "Second applicant date of birth is required."),
+    ("a2_email", "Second applicant email is required."),
+]
+
+import re as _re
+
+_EMAIL_RE = _re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+_DATE_RE = _re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
+
+def _validate_application_data(data, r):
+    """Run extended validation on tenant application submit data.
+    Returns None if OK, or (error_message, status_code) tuple."""
+
+    # Standard required fields
+    for key, msg in _REQUIRED:
+        if not str(data.get(key) or "").strip():
+            return json_error(msg)
+
+    # Non-standard email/age checks
+    a1_email = (data.get("a1_email") or "").strip()
+    a1_guar_email = (data.get("a1_guarantor_email") or "").strip()
+    if not _EMAIL_RE.match(a1_email):
+        return json_error("First applicant email address is not valid.")
+    if not _EMAIL_RE.match(a1_guar_email):
+        return json_error("First applicant guarantor email address is not valid.")
+    if a1_email.lower() == a1_guar_email.lower():
+        return json_error("First applicant email and guarantor email must be different.")
+
+    # Age check: must be 18+
+    a1_dob_str = str(data.get("a1_dob") or "").strip()
+    if _DATE_RE.match(a1_dob_str):
+        from datetime import date
+        try:
+            dob = datetime.strptime(a1_dob_str, "%Y-%m-%d").date()
+            today = date.today()
+            age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+            if age < 18:
+                return json_error("First applicant must be at least 18 years old.")
+        except (ValueError, TypeError):
+            pass
+
+    # Conditional a2 fields
+    num_apps = int(data.get("num_applicants") or 1)
+    if num_apps == 2:
+        for key, msg in _REQUIRED_A2:
+            if not str(data.get(key) or "").strip():
+                return json_error(msg)
+        a2_email = (data.get("a2_email") or "").strip()
+        if a2_email and not _EMAIL_RE.match(a2_email):
+            return json_error("Second applicant email address is not valid.")
+
+    return None  # all good
 
 
 def _create_or_update_applicant(db, r):
@@ -347,6 +407,171 @@ def _create_or_update_applicant(db, r):
     return db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
 
 
+def _generate_application_pdf(db, r):
+    """Generate a PDF document from a submitted tenant application
+    and save it linked to the matching tenancy or applicant."""
+    from fpdf import FPDF
+    import textwrap
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    # Title
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "Tenant Application Form", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.ln(4)
+
+    # Property details
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 7, "Property Details", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    addr = r.get("property_address") or ""
+    postcode = r.get("post_code") or ""
+    room = r.get("room_number") or ""
+    pdf.cell(0, 6, f"Address: {addr}", new_x="LMARGIN", new_y="NEXT")
+    if postcode:
+        pdf.cell(0, 6, f"Postcode: {postcode}", new_x="LMARGIN", new_y="NEXT")
+    if room:
+        pdf.cell(0, 6, f"Room: {room}", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.ln(3)
+
+    # Financial
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 7, "Financial Details", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    monthly = r.get("monthly_rent") or "0"
+    deposit_amt = r.get("deposit") or "0"
+    holding = r.get("holding_deposit") or "0"
+    prorata = r.get("pro_rata") or "0"
+    checkin_inst = r.get("check_in_installment") or "0"
+    pdf.cell(0, 6, f"Monthly Rent: GBP {monthly}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Deposit: GBP {deposit_amt}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Holding Deposit: GBP {holding}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Pro-Rata: GBP {prorata}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Check-In Installment: GBP {checkin_inst}", new_x="LMARGIN", new_y="NEXT")
+
+    checkin_date = r.get("check_in_date") or ""
+    bills = "Yes" if r.get("bills_included") else "No"
+    if checkin_date:
+        pdf.cell(0, 6, f"Check-In Date: {checkin_date}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Bills Included: {bills}", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.ln(3)
+
+    # Applicant 1
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 7, "Primary Applicant", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    a1_name = r.get("a1_full_name") or ""
+    a1_dob = r.get("a1_dob") or ""
+    a1_email = r.get("a1_email") or ""
+    a1_gender = r.get("a1_gender") or ""
+    a1_guar_email = r.get("a1_guarantor_email") or ""
+    a1_guar_mob = r.get("a1_guarantor_mobile") or ""
+    pdf.cell(0, 6, f"Full Name: {a1_name}", new_x="LMARGIN", new_y="NEXT")
+    if a1_dob: pdf.cell(0, 6, f"Date of Birth: {a1_dob}", new_x="LMARGIN", new_y="NEXT")
+    if a1_email: pdf.cell(0, 6, f"Email: {a1_email}", new_x="LMARGIN", new_y="NEXT")
+    if a1_gender: pdf.cell(0, 6, f"Gender: {a1_gender}", new_x="LMARGIN", new_y="NEXT")
+    if a1_guar_email: pdf.cell(0, 6, f"Guarantor Email: {a1_guar_email}", new_x="LMARGIN", new_y="NEXT")
+    if a1_guar_mob: pdf.cell(0, 6, f"Guarantor Mobile: {a1_guar_mob}", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.ln(3)
+
+    # Applicant 2 (if present)
+    a2_name = r.get("a2_full_name") or ""
+    if a2_name.strip():
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 7, "Secondary Applicant", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 10)
+        a2_dob = r.get("a2_dob") or ""
+        a2_email = r.get("a2_email") or ""
+        a2_gender = r.get("a2_gender") or ""
+        a2_guar_email = r.get("a2_guarantor_email") or ""
+        a2_guar_mob = r.get("a2_guarantor_mobile") or ""
+        pdf.cell(0, 6, f"Full Name: {a2_name}", new_x="LMARGIN", new_y="NEXT")
+        if a2_dob: pdf.cell(0, 6, f"Date of Birth: {a2_dob}", new_x="LMARGIN", new_y="NEXT")
+        if a2_email: pdf.cell(0, 6, f"Email: {a2_email}", new_x="LMARGIN", new_y="NEXT")
+        if a2_gender: pdf.cell(0, 6, f"Gender: {a2_gender}", new_x="LMARGIN", new_y="NEXT")
+        if a2_guar_email: pdf.cell(0, 6, f"Guarantor Email: {a2_guar_email}", new_x="LMARGIN", new_y="NEXT")
+        if a2_guar_mob: pdf.cell(0, 6, f"Guarantor Mobile: {a2_guar_mob}", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(3)
+
+    # Declaration & Signature
+    sig = r.get("signature_data") or ""
+    sig_date = r.get("signature_date") or ""
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 7, "Declaration & Signature", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    declared = "Confirmed" if r.get("declaration_confirmed") else "Not confirmed"
+    pdf.cell(0, 6, f"Declaration: {declared}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Signature: {sig}", new_x="LMARGIN", new_y="NEXT")
+    if sig_date:
+        pdf.cell(0, 6, f"Date: {sig_date}", new_x="LMARGIN", new_y="NEXT")
+
+    submitted_at = r.get("submitted_at") or ""
+    if submitted_at:
+        pdf.ln(3)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.cell(0, 5, f"Submitted: {submitted_at}", new_x="LMARGIN", new_y="NEXT")
+
+    # Save PDF
+    docs_dir = os.path.join(os.path.dirname(__file__), "documents", "uploads")
+    os.makedirs(docs_dir, exist_ok=True)
+
+    from datetime import datetime, timezone
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    safe_name = f"tenant_app_{ts}_{a1_name.replace(' ','_')[:30]}.pdf"
+    save_path = os.path.join(docs_dir, safe_name)
+    pdf.output(save_path)
+
+    # Determine related entity: try tenancy, fall back to applicant
+    related_to = "applicant"
+    related_id = str(r.get("applicant_id") or "")
+    pid = r.get("property_id")
+    uid = r.get("unit_id")
+    if pid and uid:
+        tenancy = db.execute(
+            "SELECT id FROM tenancies WHERE property_id = ? AND unit_id = ? "
+            "AND status NOT IN ('cancelled','ended') ORDER BY id DESC LIMIT 1",
+            [pid, uid]
+        ).fetchone()
+        if tenancy:
+            related_to = "tenancy"
+            related_id = str(tenancy["id"])
+
+    # Save to documents table (for tenancy/property linking)
+    db.execute(
+        "INSERT INTO documents (filename, file_path, file_type, category, related_to, related_id, notes, created) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (safe_name, save_path, "pdf", "Tenant Application",
+         related_to, related_id, "Auto-generated from tenant application form submission",
+         datetime.now(timezone.utc).isoformat())
+    )
+    # Also save to entity_documents so it shows under the applicant's Documents tab
+    applicant_id = r.get("applicant_id")
+    if applicant_id:
+        import os as _os
+        file_size = _os.path.getsize(save_path) if _os.path.exists(save_path) else 0
+        db.execute(
+            "INSERT INTO entity_documents "
+            "(entity_type, entity_id, original_filename, stored_filename, file_path, file_type, "
+            "file_size, mime_type, category, notes, uploaded_by, is_verified, created, updated) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            ("applicant", applicant_id, safe_name, safe_name, save_path, "pdf",
+             file_size, "application/pdf", "Tenant Application",
+             "Auto-generated from tenant application form submission",
+             "system", datetime.now(timezone.utc).isoformat(),
+             datetime.now(timezone.utc).isoformat())
+        )
+
+    db.commit()
+    doc_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
+    print(f"[tenant_application] PDF generated: {safe_name} (doc_id={doc_id}, {related_to}={related_id}, applicant_id={applicant_id})")
+    return doc_id
+
+
 @tenant_app_bp.route("/<token>/submit", methods=["POST"])
 def submit_tenant_application(token):
     """Public: applicant fills + submits their tenant application."""
@@ -360,9 +585,9 @@ def submit_tenant_application(token):
         if str(r.get("status")) == "submitted":
             return json_error("This application has already been submitted.", 409)
 
-        for key, msg in _REQUIRED:
-            if not str(data.get(key) or "").strip():
-                return json_error(msg)
+        validation_error = _validate_application_data(data, r)
+        if validation_error:
+            return validation_error
         if not data.get("declaration_confirmed"):
             return json_error("You must confirm the declaration to submit.")
         if not data.get("holding_deposit_confirmed"):
@@ -377,6 +602,20 @@ def submit_tenant_application(token):
                 sets.append("%s = ?" % f)
                 params.append(val)
         now = datetime.now(timezone.utc).isoformat()
+        # Recalculate pro-rata and check-in installment against the check_in_date
+        if data.get("check_in_date"):
+            try:
+                ci_date = datetime.strptime(str(data["check_in_date"]), "%Y-%m-%d").date()
+                holding_f_db = float(r.get("holding_deposit") or 0)
+                monthly_rent_f_db = float(r.get("monthly_rent") or 0)
+                if holding_f_db > 0 and monthly_rent_f_db > 0:
+                    pro_rata_new, check_in_new = _compute_prorata(holding_f_db, monthly_rent_f_db, ci_date)
+                    sets.append("pro_rata = ?")
+                    params.append(pro_rata_new)
+                    sets.append("check_in_installment = ?")
+                    params.append(check_in_new)
+            except (ValueError, TypeError):
+                pass
         sets.append("status = ?")
         params.append("submitted")
         sets.append("submitted_at = ?")
@@ -389,7 +628,22 @@ def submit_tenant_application(token):
         applicant_id = _create_or_update_applicant(db, r2)
         db.execute("UPDATE tenant_applications SET applicant_id = ? WHERE form_token = ?",
                    [applicant_id, token])
+        # Sync applicant_id to portal user (may have been registered before submission)
+        a1_email = r2.get("a1_email")
+        if a1_email:
+            db.execute("UPDATE portal_users SET applicant_id = ? WHERE lower(email) = ?",
+                       [applicant_id, a1_email.strip().lower()])
         db.commit()
+
+        # Generate PDF of the submitted application (fire-and-forget: don't fail the response)
+        try:
+            r3 = db.execute("SELECT * FROM tenant_applications WHERE form_token = ?", [token]).fetchone()
+            _generate_application_pdf(db, r3)
+        except Exception as pdf_err:
+            import traceback
+            print("[tenant_application] PDF generation failed after successful submit:", pdf_err)
+            traceback.print_exc()
+
         return json_success({"submitted": True, "applicant_id": applicant_id})
     except Exception as e:
         db.rollback()
