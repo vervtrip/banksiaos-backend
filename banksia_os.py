@@ -7722,6 +7722,253 @@ def api_compliance_email_send(row_id):
                          "resent": bool(prev)})
 
 
+# -- Landlord replies ----------------------------------------------------------
+# Norbert, 2026-07-30: "if the Landlord replies, means someone needs to go on
+# Missive and check the email". They should not have to. The board sent the
+# email, so the board shows the answer.
+#
+# Read-only on purpose. Missive stays the system of record -- nothing is moved
+# out of it, nothing is deleted, and replying from the board is deliberately NOT
+# built while the standing instruction is that no landlord is emailed.
+#
+# The link between a property and a thread is `compliance_emails.conversation_id`,
+# written at send time. It cannot be reconstructed afterwards, which is why it
+# went in before any of this.
+
+MISSIVE_API = "https://public.missiveapp.com/v1"
+
+# Missive has no webhook that can be created through the API (/v1/hooks is a 404 --
+# it is set up by hand in Missive's own integration settings). So replies are
+# pulled, not pushed. Pulling on every board load would hammer their API for no
+# reason, so a refresh does nothing if one ran in the last minute.
+_REPLY_REFRESH_MIN_GAP = 60
+_reply_refresh_last = [0.0]
+
+
+def _ensure_compliance_reply_table():
+    db = get_dict_db()
+    try:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS compliance_email_replies ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  compliance_id INTEGER NOT NULL,"
+            "  cert_key TEXT NOT NULL,"
+            "  conversation_id TEXT NOT NULL,"
+            "  message_id TEXT NOT NULL UNIQUE,"
+            "  from_email TEXT DEFAULT '',"
+            "  from_name TEXT DEFAULT '',"
+            "  subject TEXT DEFAULT '',"
+            "  body TEXT DEFAULT '',"
+            "  attachments TEXT DEFAULT '',"
+            "  received_at TEXT DEFAULT '',"
+            "  seen INTEGER DEFAULT 0,"
+            "  created TEXT DEFAULT (datetime('now'))"
+            ")"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_compliance_replies_row"
+            " ON compliance_email_replies (compliance_id, cert_key)"
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _missive_get(path):
+    import urllib.request
+    import urllib.error
+    token = _missive_token()
+    if not token:
+        return None
+    try:
+        req = urllib.request.Request(
+            MISSIVE_API + path,
+            headers={"Authorization": "Bearer " + token},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=20) as res:
+            return json.loads(res.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_STYLE_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.S | re.I)
+
+
+def _html_to_text(html):
+    """A reply arrives as HTML written by someone outside the business. It is
+    reduced to plain text here rather than rendered, so nothing a landlord (or
+    anyone forging their address) puts in an email can execute on our board."""
+    v = str(html or "")
+    v = _STYLE_RE.sub(" ", v)
+    v = re.sub(r"<br\s*/?>", "\n", v, flags=re.I)
+    v = re.sub(r"</p\s*>", "\n\n", v, flags=re.I)
+    v = _TAG_RE.sub("", v)
+    for a, b in (("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
+                 ("&quot;", '"'), ("&#39;", "'")):
+        v = v.replace(a, b)
+    v = re.sub(r"[ \t]+", " ", v)
+    # Marketing and portal mail is built out of nested tables, which leaves a line of
+    # whitespace per cell. Trimming each line first is what makes the blank-run
+    # collapse below actually work -- " \n \n " is not an empty run until it is.
+    lines = [ln.strip() for ln in v.split("\n")]
+    out = []
+    for ln in lines:
+        if not ln and out and not out[-1]:
+            continue
+        out.append(ln)
+    return "\n".join(out).strip()
+
+
+def _our_addresses():
+    return {x["address"].lower() for x in COMPLIANCE_EMAIL_SENDERS}
+
+
+def _refresh_compliance_replies(force=False):
+    """Pull anything new on the threads we started. Returns how many replies landed."""
+    import time
+    if not force and (time.time() - _reply_refresh_last[0]) < _REPLY_REFRESH_MIN_GAP:
+        return None  # too soon -- say nothing rather than pretend a check happened
+    _reply_refresh_last[0] = time.time()
+
+    _ensure_compliance_email_table()
+    _ensure_compliance_reply_table()
+    db = get_dict_db()
+    try:
+        threads = db.execute(
+            "SELECT DISTINCT conversation_id, compliance_id, cert_key FROM compliance_emails"
+            " WHERE conversation_id <> ''"
+        ).fetchall()
+        known = {r["message_id"] for r in
+                 db.execute("SELECT message_id FROM compliance_email_replies").fetchall()}
+    finally:
+        db.close()
+
+    ours = _our_addresses()
+    found = 0
+    for t in threads:
+        data = _missive_get("/conversations/%s/messages" % t["conversation_id"])
+        if not data:
+            continue
+        for m in (data.get("messages") or []):
+            mid = str(m.get("id") or "")
+            frm = ((m.get("from_field") or {}).get("address") or "").lower()
+            # Ours went out; anything else on the thread is the answer.
+            if not mid or mid in known or frm in ours:
+                continue
+            full = _missive_get("/messages/%s" % mid) or {}
+            full = full.get("messages") or {}
+            body = _html_to_text(full.get("body") or m.get("preview") or "")
+            atts = [a.get("filename") or a.get("name") or "attachment"
+                    for a in (full.get("attachments") or [])]
+            stamp = full.get("delivered_at") or m.get("delivered_at") or m.get("created_at")
+            try:
+                stamp = datetime.fromtimestamp(int(stamp), timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                stamp = ""
+            db = get_dict_db()
+            try:
+                db.execute(
+                    "INSERT OR IGNORE INTO compliance_email_replies (compliance_id, cert_key,"
+                    " conversation_id, message_id, from_email, from_name, subject, body,"
+                    " attachments, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (t["compliance_id"], t["cert_key"], t["conversation_id"], mid, frm,
+                     (m.get("from_field") or {}).get("name") or "",
+                     full.get("subject") or m.get("subject") or "", body,
+                     ", ".join(atts), stamp)
+                )
+                db.commit()
+            finally:
+                db.close()
+            known.add(mid)
+            found += 1
+    return found
+
+
+@banksia_os_bp.route("/compliance/emails/refresh", methods=["POST"])
+def api_compliance_replies_refresh():
+    """Check the threads for new answers. Safe to call often -- it throttles itself."""
+    found = _refresh_compliance_replies(force=bool((request.get_json(silent=True) or {}).get("force")))
+    if found is None:
+        return json_success({"checked": False, "new": 0})
+    return json_success({"checked": True, "new": found})
+
+
+@banksia_os_bp.route("/compliance/replies", methods=["GET"])
+def api_compliance_replies():
+    """One line per row that has been answered, so the board can mark it."""
+    _ensure_compliance_reply_table()
+    db = get_dict_db()
+    try:
+        rows = db.execute(
+            "SELECT compliance_id, cert_key, COUNT(*) AS reply_count,"
+            " MAX(received_at) AS last_reply, MIN(seen) AS all_seen"
+            " FROM compliance_email_replies GROUP BY compliance_id, cert_key"
+        ).fetchall()
+    finally:
+        db.close()
+    return json_success(rows)
+
+
+@banksia_os_bp.route("/compliance/<int:row_id>/thread", methods=["GET"])
+def api_compliance_thread(row_id):
+    """The whole conversation for one property's certificate: what we sent and
+    what came back, oldest first."""
+    _ensure_compliance_email_table()
+    _ensure_compliance_reply_table()
+    cert = str(request.args.get("cert", "")).strip().lower()
+    if cert not in COMPLIANCE_CERT_KEYS:
+        return json_error("Unknown certificate type", 422)
+
+    db = get_dict_db()
+    try:
+        prop = db.execute("SELECT property_name, landlord FROM compliance WHERE id = ?",
+                          (row_id,)).fetchone()
+        if not prop:
+            return json_error("Compliance record not found", 404)
+        sent = db.execute(
+            "SELECT to_email, from_email, subject, body, sent_at, sent_by"
+            " FROM compliance_emails WHERE compliance_id = ? AND cert_key = ?"
+            " ORDER BY sent_at",
+            (row_id, cert)
+        ).fetchall()
+        replies = db.execute(
+            "SELECT id, from_email, from_name, subject, body, attachments, received_at"
+            " FROM compliance_email_replies WHERE compliance_id = ? AND cert_key = ?"
+            " ORDER BY received_at",
+            (row_id, cert)
+        ).fetchall()
+        if replies:
+            db.execute(
+                "UPDATE compliance_email_replies SET seen = 1"
+                " WHERE compliance_id = ? AND cert_key = ?", (row_id, cert))
+            db.commit()
+    finally:
+        db.close()
+
+    messages = []
+    for m in sent:
+        messages.append({
+            "direction": "out", "who": m["from_email"], "name": "",
+            "to": m["to_email"], "subject": m["subject"], "body": m["body"],
+            "at": m["sent_at"], "by": m["sent_by"], "attachments": "",
+        })
+    for m in replies:
+        messages.append({
+            "direction": "in", "who": m["from_email"], "name": m["from_name"],
+            "to": "", "subject": m["subject"], "body": m["body"],
+            "at": m["received_at"], "by": "", "attachments": m["attachments"],
+        })
+    messages.sort(key=lambda x: x["at"] or "")
+
+    return json_success({
+        "property_name": prop["property_name"],
+        "landlord": prop["landlord"] or "",
+        "messages": messages,
+    })
+
+
 # -- Contractors on the /compliance-test board ---------------------------------
 # Norbert, 2026-07-30: the board needs to know who does what, so the renewal
 # chaser can message the right trade's WhatsApp group 15 days before a
