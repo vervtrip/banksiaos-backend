@@ -7349,6 +7349,184 @@ def api_compliance_set_group(row_id):
                         % (row["property_name"], new_name or "its expiry-date section", cert))
     return json_success({"cert": cert, "group_id": group_id, "board_wide": True})
 
+# -- Contractors on the /compliance-test board ---------------------------------
+# Norbert, 2026-07-30: the board needs to know who does what, so the renewal
+# chaser can message the right trade's WhatsApp group 15 days before a
+# certificate expires. Full name, WhatsApp group id, and the certificates they
+# cover. This table is the single source of truth for that automation -- it used
+# to be a hard-coded map in the script, which meant every new contractor was a
+# code change.
+
+
+def _ensure_compliance_contractor_table():
+    """Created on demand so the board works on a database that predates it."""
+    db = get_dict_db()
+    try:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS compliance_contractors ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  name TEXT NOT NULL,"
+            "  group_id TEXT DEFAULT '',"
+            "  certs TEXT DEFAULT '',"
+            "  created TEXT DEFAULT (datetime('now')),"
+            "  updated TEXT DEFAULT (datetime('now'))"
+            ")"
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _clean_group_id(raw):
+    """Normalise a WhatsApp group id, or explain why it is not one.
+
+    Getting this wrong means messaging strangers, so a half-typed id is rejected
+    rather than stored. Both `1203...@g.us` and the bare digits are accepted --
+    people copy it either way -- and the suffix is added back on.
+    """
+    v = str(raw or "").strip()
+    if not v:
+        return "", None
+    if v.endswith("@g.us"):
+        digits = v[:-5]
+    else:
+        digits = v
+    if not digits.isdigit() or not (10 <= len(digits) <= 25):
+        return None, "That is not a WhatsApp group id - it should look like 120363260519419014@g.us"
+    return digits + "@g.us", None
+
+
+def _clean_certs(raw):
+    """Keep only certificates the board actually has, in the board's own order."""
+    if isinstance(raw, str):
+        items = [x.strip().lower() for x in raw.split(",")]
+    elif isinstance(raw, (list, tuple)):
+        items = [str(x).strip().lower() for x in raw]
+    else:
+        return ""
+    order = ["gas", "electric", "epc", "fire-alarm", "emergency-lighting", "fra", "floor-plan"]
+    keep = [k for k in order if k in items]
+    return ",".join(keep)
+
+
+def _contractor_row(db, cid):
+    return db.execute(
+        "SELECT id, name, group_id, certs FROM compliance_contractors WHERE id = ?", (cid,)
+    ).fetchone()
+
+
+@banksia_os_bp.route("/compliance/contractors", methods=["GET"])
+def api_compliance_contractors():
+    _ensure_compliance_contractor_table()
+    db = get_dict_db()
+    try:
+        rows = db.execute(
+            "SELECT id, name, group_id, certs FROM compliance_contractors ORDER BY name COLLATE NOCASE"
+        ).fetchall()
+    finally:
+        db.close()
+    return json_success(rows)
+
+
+@banksia_os_bp.route("/compliance/contractors", methods=["POST"])
+def api_compliance_contractor_create():
+    _ensure_compliance_contractor_table()
+    data = request.get_json(silent=True) or {}
+    name = " ".join(str(data.get("name", "")).split())
+    if not name:
+        return json_error("Give the contractor a name", 422)
+    if len(name) > 120:
+        return json_error("That name is too long (120 characters max)", 422)
+    group_id, err = _clean_group_id(data.get("group_id"))
+    if err:
+        return json_error(err, 422)
+    certs = _clean_certs(data.get("certs"))
+
+    db = get_dict_db()
+    try:
+        clash = db.execute(
+            "SELECT id FROM compliance_contractors WHERE LOWER(name) = LOWER(?)", (name,)
+        ).fetchone()
+        if clash:
+            return json_error("%s is already on the list" % name, 409)
+        cur = db.execute(
+            "INSERT INTO compliance_contractors (name, group_id, certs) VALUES (?, ?, ?)",
+            (name, group_id, certs)
+        )
+        db.commit()
+        cid = cur.lastrowid
+    finally:
+        db.close()
+    _log_activity("compliance", 0, "create", "contractor", "", name,
+                  notes="contractor %s added" % name)
+    return json_success({"id": cid, "name": name, "group_id": group_id, "certs": certs})
+
+
+@banksia_os_bp.route("/compliance/contractors/<int:cid>", methods=["PATCH"])
+def api_compliance_contractor_update(cid):
+    _ensure_compliance_contractor_table()
+    data = request.get_json(silent=True) or {}
+    db = get_dict_db()
+    try:
+        row = _contractor_row(db, cid)
+        if not row:
+            return json_error("Contractor not found", 404)
+
+        changes, notes = {}, []
+        if "name" in data:
+            name = " ".join(str(data.get("name", "")).split())
+            if not name:
+                return json_error("A contractor needs a name", 422)
+            if len(name) > 120:
+                return json_error("That name is too long (120 characters max)", 422)
+            changes["name"] = name
+            notes.append(("name", row["name"] or "", name))
+        if "group_id" in data:
+            group_id, err = _clean_group_id(data.get("group_id"))
+            if err:
+                return json_error(err, 422)
+            changes["group_id"] = group_id
+            notes.append(("group_id", row["group_id"] or "", group_id))
+        if "certs" in data:
+            certs = _clean_certs(data.get("certs"))
+            changes["certs"] = certs
+            notes.append(("certs", row["certs"] or "", certs))
+        if not changes:
+            return json_error("Nothing to change", 422)
+
+        sets = ", ".join("%s = ?" % k for k in changes)
+        db.execute(
+            "UPDATE compliance_contractors SET %s, updated = datetime('now') WHERE id = ?" % sets,
+            tuple(changes.values()) + (cid,)
+        )
+        db.commit()
+        after = dict(_contractor_row(db, cid))
+    finally:
+        db.close()
+
+    for field, old, new in notes:
+        _log_activity("compliance", 0, "update", "contractor_" + field, old, new,
+                      notes="contractor %s %s changed" % (after.get("name"), field))
+    return json_success(after)
+
+
+@banksia_os_bp.route("/compliance/contractors/<int:cid>", methods=["DELETE"])
+def api_compliance_contractor_delete(cid):
+    _ensure_compliance_contractor_table()
+    db = get_dict_db()
+    try:
+        row = _contractor_row(db, cid)
+        if not row:
+            return json_error("Contractor not found", 404)
+        db.execute("DELETE FROM compliance_contractors WHERE id = ?", (cid,))
+        db.commit()
+    finally:
+        db.close()
+    _log_activity("compliance", 0, "delete", "contractor", row["name"] or "", "",
+                  notes="contractor %s removed" % row["name"])
+    return json_success({"deleted": cid})
+
+
 # 11. POLYMORPHIC ENTITY DOCUMENTS (drag-and-drop file storage)
 # ═══════════════════════════════════════════════
 
