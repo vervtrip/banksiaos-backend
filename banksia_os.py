@@ -3113,6 +3113,23 @@ def api_restore_deposit(dep_id):
         db.close()
 
 
+@banksia_os_bp.route("/applicants/<int:aid>", methods=["DELETE"])
+def api_delete_applicant(aid):
+    db = get_dict_db()
+    try:
+        a = db.execute("SELECT * FROM applicants WHERE id=?", (aid,)).fetchone()
+        if not a:
+            return json_error("Applicant not found", 404)
+        name = (str(a.get("first_name", "")) + " " + str(a.get("last_name", ""))).strip() or "Applicant #%s" % aid
+        db.execute("DELETE FROM applicants WHERE id=?", (aid,))
+        db.commit()
+        _log_activity("applicant", aid, "deleted", notes="Applicant '%s' deleted" % name, db=db)
+        return json_success({"id": aid, "message": "Applicant deleted"})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
 @banksia_os_bp.route("/applicants/<int:aid>/archive", methods=["POST"])
 def api_archive_applicant(aid):
     db = get_dict_db()
@@ -6199,6 +6216,7 @@ def api_get_merge_fields():
             "TenantEmployer": {"label": "Tenant Employer", "description": "Primary tenant employer/company", "type": "text"},
             "TenantNI": {"label": "Tenant NI Number", "description": "National Insurance number", "type": "text"},
             "TenantPassport": {"label": "Tenant Passport", "description": "Passport number", "type": "text"},
+            "TenantSignatureBlock": {"label": "Tenant Signature(s)", "description": "Signature lines for every tenant (one line per tenant)", "type": "signature"},
         },
         "Guarantor": {
             "GuarantorName": {"label": "Guarantor Name", "description": "Guarantor full name", "type": "text"},
@@ -6711,6 +6729,626 @@ def api_delete_uploaded(doc_id):
 
 
 # ═══════════════════════════════════════════════
+
+@banksia_os_bp.route("/compliance", methods=["GET"])
+
+def api_compliance_list():
+    """Return all compliance records, optionally filtered by group."""
+    db = get_dict_db()
+    try:
+        group = request.args.get("group", "")
+        if group:
+            rows = db.execute(
+                "SELECT * FROM compliance WHERE monday_group = ? ORDER BY property_name",
+                [group]
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT * FROM compliance ORDER BY monday_group, property_name"
+            ).fetchall()
+        return jsonify({"success": True, "data": [dict(r) for r in rows]})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/compliance/groups", methods=["GET"])
+
+def api_compliance_groups():
+    """Return compliance group names and counts."""
+    db = get_dict_db()
+    try:
+        rows = db.execute(
+            "SELECT monday_group, COUNT(*) as cnt FROM compliance GROUP BY monday_group ORDER BY monday_group"
+        ).fetchall()
+        return jsonify({"success": True, "data": [dict(r) for r in rows]})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# Compliance certificates live on Monday as file assets; the board stores only the
+# asset id per certificate column. Files replaced from inside Banksia OS are stored
+# locally instead, referenced as "local:<filename>".
+_COMPLIANCE_DOC_FIELDS = {
+    "gas": "gas_doc",
+    "electric": "electrical_doc",
+    "epc": "epc_doc",
+    "fire-alarm": "fire_alarm_doc",
+    "emergency-lighting": "emergency_lighting_doc",
+    "fra": "fra_doc",
+    "floor-plan": "floor_plan_doc",
+}
+
+# Only the dated certificates have an expiry; Floor Plan is a Yes/No status.
+_COMPLIANCE_DATE_FIELDS = {
+    "gas": "gas_date",
+    "electric": "electrical_date",
+    "epc": "epc_date",
+    "fire-alarm": "fire_alarm_date",
+    "emergency-lighting": "emergency_lighting_date",
+    "fra": "fra_date",
+}
+
+COMPLIANCE_UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "media", "compliance")
+os.makedirs(COMPLIANCE_UPLOAD_DIR, exist_ok=True)
+
+_CERT_ALLOWED_EXT = {".pdf", ".jpg", ".jpeg", ".png", ".webp", ".heic", ".doc", ".docx"}
+_CERT_MAX_BYTES = 25 * 1024 * 1024
+
+
+def _compliance_row(row_id, field):
+    db = get_dict_db()
+    try:
+        return db.execute(
+            "SELECT id, property_name, %s AS ref FROM compliance WHERE id = ?" % field,
+            (row_id,)
+        ).fetchone()
+    finally:
+        db.close()
+
+
+def _safe_cert_filename(name):
+    name = os.path.basename(name or "").strip()
+    return re.sub(r"[^A-Za-z0-9._ -]", "_", name)[:120] or "certificate"
+
+
+@banksia_os_bp.route("/compliance/<int:row_id>/certificate/<cert>", methods=["GET"])
+def api_compliance_certificate(row_id, cert):
+    """Stream a property's compliance certificate so it opens in the browser.
+
+    Two storage shapes are served here: a file uploaded through Banksia OS
+    ("local:<filename>" on disk) and the original Monday asset id. Monday's signed
+    download url expires after an hour, so it is resolved per request and the bytes
+    are proxied — the viewer needs no Monday access of their own, only a Banksia OS
+    session (enforced by this blueprint's before_request).
+    """
+    import mimetypes, urllib.request
+    from flask import Response, send_file
+
+    field = _COMPLIANCE_DOC_FIELDS.get(cert)
+    if not field:
+        return json_error("Unknown certificate type", 404)
+
+    row = _compliance_row(row_id, field)
+    if not row:
+        return json_error("Compliance record not found", 404)
+
+    ref = (row["ref"] or "").strip()
+    if not ref:
+        return json_error("No certificate on record for this property", 404)
+
+    if ref.startswith("local:"):
+        path = os.path.join(COMPLIANCE_UPLOAD_DIR, ref[len("local:"):])
+        if not os.path.exists(path):
+            return json_error("Certificate file missing on disk", 404)
+        return send_file(path, as_attachment=False)
+
+    # Tolerate either a bare asset id or a full Monday resource url
+    m = re.search(r"/resources/(\d+)/", ref)
+    asset_id = m.group(1) if m else ref
+    if not asset_id.isdigit():
+        return json_error("Certificate reference is not a Monday asset", 422)
+
+    mtok = get_monday_token()
+    if not mtok:
+        return json_error("Monday credentials unavailable on this server", 502)
+
+    try:
+        data = _monday_graphql(mtok, "{assets(ids:[%s]){name file_extension public_url}}" % asset_id)
+        assets = ((data or {}).get("data") or {}).get("assets") or []
+        if not assets or not assets[0].get("public_url"):
+            return json_error("Certificate file no longer available on Monday", 404)
+        asset = assets[0]
+        with urllib.request.urlopen(asset["public_url"], timeout=45) as r:
+            payload = r.read()
+    except Exception as e:
+        return json_error(safe_error(e), 502)
+
+    filename = asset.get("name") or ("certificate" + (asset.get("file_extension") or ""))
+    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    resp = Response(payload, mimetype=mime)
+    # inline so PDFs and images open in a tab rather than downloading
+    resp.headers["Content-Disposition"] = 'inline; filename="%s"' % filename.replace('"', "")
+    resp.headers["Cache-Control"] = "private, max-age=300"
+    return resp
+
+
+@banksia_os_bp.route("/compliance/<int:row_id>/certificate/<cert>", methods=["POST"])
+def api_compliance_certificate_upload(row_id, cert):
+    """Replace a property's certificate with an uploaded file.
+
+    The new file is stored on this server; the Monday asset it replaces is only
+    dereferenced, never deleted, so the original stays recoverable on the board.
+    """
+    field = _COMPLIANCE_DOC_FIELDS.get(cert)
+    if not field:
+        return json_error("Unknown certificate type", 404)
+    if "file" not in request.files:
+        return json_error("No file provided (use field 'file')")
+
+    file = request.files["file"]
+    if not file.filename:
+        return json_error("Empty filename")
+
+    safe_name = _safe_cert_filename(file.filename)
+    ext = os.path.splitext(safe_name)[1].lower()
+    if ext not in _CERT_ALLOWED_EXT:
+        return json_error("Unsupported file type %s — allowed: %s" % (ext, ", ".join(sorted(_CERT_ALLOWED_EXT))), 415)
+
+    row = _compliance_row(row_id, field)
+    if not row:
+        return json_error("Compliance record not found", 404)
+
+    payload = file.read()
+    if not payload:
+        return json_error("Uploaded file is empty")
+    if len(payload) > _CERT_MAX_BYTES:
+        return json_error("File is larger than 25MB", 413)
+
+    stored = "%s_%s_%s" % (row_id, cert, safe_name)
+    with open(os.path.join(COMPLIANCE_UPLOAD_DIR, stored), "wb") as fh:
+        fh.write(payload)
+
+    old_ref = (row["ref"] or "").strip()
+    db = get_dict_db()
+    try:
+        db.execute(
+            "UPDATE compliance SET %s = ?, updated_at = datetime('now') WHERE id = ?" % field,
+            ("local:" + stored, row_id)
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    _log_activity("compliance", row_id, "update", field, old_ref, "local:" + stored,
+                  notes="%s certificate replaced for %s" % (cert, row["property_name"]))
+    return json_success({"certificate": stored, "filename": safe_name})
+
+
+@banksia_os_bp.route("/compliance/<int:row_id>/certificate/<cert>", methods=["DELETE"])
+def api_compliance_certificate_delete(row_id, cert):
+    """Remove the certificate reference from a property.
+
+    A locally uploaded file is deleted from disk; a Monday asset is only
+    dereferenced here — nothing is removed from the Monday board.
+    """
+    field = _COMPLIANCE_DOC_FIELDS.get(cert)
+    if not field:
+        return json_error("Unknown certificate type", 404)
+
+    row = _compliance_row(row_id, field)
+    if not row:
+        return json_error("Compliance record not found", 404)
+
+    old_ref = (row["ref"] or "").strip()
+    if not old_ref:
+        return json_error("No certificate on record for this property", 404)
+
+    if old_ref.startswith("local:"):
+        path = os.path.join(COMPLIANCE_UPLOAD_DIR, old_ref[len("local:"):])
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass  # reference still clears; a stray file is harmless
+
+    db = get_dict_db()
+    try:
+        db.execute(
+            "UPDATE compliance SET %s = '', updated_at = datetime('now') WHERE id = ?" % field,
+            (row_id,)
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    _log_activity("compliance", row_id, "update", field, old_ref, "",
+                  notes="%s certificate removed for %s" % (cert, row["property_name"]))
+    return json_success({"removed": True})
+
+
+@banksia_os_bp.route("/compliance/<int:row_id>", methods=["PATCH"])
+def api_compliance_update(row_id):
+    """Edit a compliance record — a certificate's expiry date, or the landlord.
+
+    Body: {"cert": "gas", "date": "2027-02-20"}  ("" clears the date)
+       or: {"landlord": "Jane Smith"}             ("" clears the name)
+    Changes are local to Banksia OS; they are not written back to the Monday board.
+    """
+    data = request.get_json(silent=True) or {}
+
+    if "property_name" in data:
+        # The address is the only human handle on a compliance row, so it is
+        # editable — but never blank, and never silently truncated.
+        name = " ".join(str(data.get("property_name", "")).split())
+        if not name:
+            return json_error("The property address cannot be empty", 422)
+        if len(name) > 200:
+            return json_error("Property address is too long (200 characters max)", 422)
+        row = _compliance_row(row_id, "property_name")
+        if not row:
+            return json_error("Compliance record not found", 404)
+        old_name = (row["property_name"] or "").strip()
+        db = get_dict_db()
+        try:
+            db.execute(
+                "UPDATE compliance SET property_name = ?, updated_at = datetime('now') WHERE id = ?",
+                (name, row_id)
+            )
+            db.commit()
+        finally:
+            db.close()
+        _log_activity("compliance", row_id, "update", "property_name", old_name, name,
+                      notes="property address changed from %s" % old_name)
+        return json_success({"property_name": name})
+
+    if "returned" in data:
+        # Handing a property back is a real business state, not a display choice:
+        # it exempts the row from every compliance calculation. The trigger on
+        # monday_group keeps automation_exempt in step either way.
+        row = _compliance_row(row_id, "monday_group")
+        if not row:
+            return json_error("Compliance record not found", 404)
+        old_group = (row["ref"] or "").strip()
+        new_group = COMPLIANCE_RETURNED_GROUP if data.get("returned") else COMPLIANCE_LIVE_GROUP
+        if old_group.upper() == new_group.upper():
+            return json_success({"monday_group": old_group})
+        db = get_dict_db()
+        try:
+            db.execute(
+                "UPDATE compliance SET monday_group = ?, updated_at = datetime('now') WHERE id = ?",
+                (new_group, row_id)
+            )
+            db.commit()
+        finally:
+            db.close()
+        _log_activity("compliance", row_id, "update", "monday_group", old_group, new_group,
+                      notes="%s moved to %s" % (row["property_name"], new_group))
+        return json_success({"monday_group": new_group})
+
+    if "landlord" in data:
+        name = str(data.get("landlord", "")).strip()
+        if len(name) > 120:
+            return json_error("Landlord name is too long (120 characters max)", 422)
+        row = _compliance_row(row_id, "landlord")
+        if not row:
+            return json_error("Compliance record not found", 404)
+        old_name = (row["ref"] or "").strip()
+        db = get_dict_db()
+        try:
+            db.execute(
+                "UPDATE compliance SET landlord = ?, updated_at = datetime('now') WHERE id = ?",
+                (name, row_id)
+            )
+            db.commit()
+        finally:
+            db.close()
+        _log_activity("compliance", row_id, "update", "landlord", old_name, name,
+                      notes="landlord changed for %s" % row["property_name"])
+        return json_success({"landlord": name})
+
+    cert = str(data.get("cert", "")).strip()
+    field = _COMPLIANCE_DATE_FIELDS.get(cert)
+    if not field:
+        return json_error("Unknown or undated certificate type", 422)
+
+    value = str(data.get("date", "")).strip()
+    if value:
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            return json_error("Date must be YYYY-MM-DD", 422)
+        # A partially typed year (0002, 0020...) is never a real certificate date.
+        # Rejecting it here means no client bug can quietly corrupt the record.
+        if not (1900 <= parsed.year <= 2100):
+            return json_error("Year %d is not a plausible certificate date" % parsed.year, 422)
+
+    row = _compliance_row(row_id, field)
+    if not row:
+        return json_error("Compliance record not found", 404)
+
+    old_value = (row["ref"] or "").strip()
+    db = get_dict_db()
+    try:
+        db.execute(
+            "UPDATE compliance SET %s = ?, updated_at = datetime('now') WHERE id = ?" % field,
+            (value, row_id)
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    _log_activity("compliance", row_id, "update", field, old_value, value,
+                  notes="%s expiry date changed for %s" % (cert, row["property_name"]))
+    return json_success({"cert": cert, "date": value})
+
+
+# ── Custom groups on the /compliance-test board ───────────────────────────────
+# The board's own sections (Expired, Due for Renew, Active, Not applicable) are
+# derived from each certificate's expiry date and cannot be assigned by hand — a
+# property sits in Expired because its date has passed, not because someone put it
+# there. Custom groups exist alongside them for states the date cannot express,
+# "To be arranged" being the first (Norbert, 2026-07-30). Membership is per
+# property and applies to the WHOLE board — putting a property in a group on the
+# Gas page puts it in that group on all seven certificates (Norbert, 2026-07-30).
+# It was per property per certificate for a few hours on the same day; he asked
+# for board-wide instead, so one drag is one decision about the property rather
+# than seven. The cert_key column is kept (one row per certificate) so the read
+# API and the board keep working unchanged, and so going back to per-certificate
+# is a change to the writer alone.
+
+COMPLIANCE_RETURNED_GROUP = "PROPERTY RETURNED"
+COMPLIANCE_LIVE_GROUP = "VERV COMPLIANCE CERTIFICATES"
+COMPLIANCE_CERT_KEYS = {
+    "gas", "electric", "epc", "fire-alarm", "emergency-lighting", "fra", "floor-plan",
+}
+
+
+def _ensure_compliance_group_tables():
+    """Created on demand so the board works on a database that predates it."""
+    db = get_dict_db()
+    try:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS compliance_groups ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  name TEXT NOT NULL,"
+            "  colour TEXT DEFAULT '#2563eb',"
+            "  position INTEGER DEFAULT 0,"
+            "  created TEXT DEFAULT (datetime('now'))"
+            ")"
+        )
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS compliance_group_members ("
+            "  group_id INTEGER NOT NULL,"
+            "  compliance_id INTEGER NOT NULL,"
+            "  cert_key TEXT NOT NULL,"
+            "  created TEXT DEFAULT (datetime('now')),"
+            "  PRIMARY KEY (compliance_id, cert_key)"
+            ")"
+        )
+        # The order the sections are shown in, set by hand on the board (Norbert,
+        # 2026-07-30). Stored as an ordered list of section keys per certificate
+        # kind rather than a number on each section, because the built-in sections
+        # (Expired, Active, ...) have no row of their own to carry a position.
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS compliance_section_order ("
+            "  kind TEXT PRIMARY KEY,"
+            "  keys TEXT NOT NULL,"
+            "  updated TEXT DEFAULT (datetime('now'))"
+            ")"
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+# Section keys are the board's own, not database ids: the built-in sections are
+# derived from dates and exist only in the UI. Custom groups key as "g:<id>".
+COMPLIANCE_SECTION_KEYS = {
+    "date": {"expired", "due", "active", "undated", "returned"},
+    "presence": {"present-no", "present-yes", "returned"},
+}
+
+
+def _compliance_section_order(db):
+    """{kind: [key, ...]} — empty lists when nothing has been reordered yet."""
+    out = {"date": [], "presence": []}
+    try:
+        for row in db.execute("SELECT kind, keys FROM compliance_section_order").fetchall():
+            if row["kind"] in out:
+                out[row["kind"]] = [k for k in str(row["keys"] or "").split(",") if k]
+    except Exception:
+        pass  # table predates this feature on an old database
+    return out
+
+
+@banksia_os_bp.route("/compliance/board-groups", methods=["GET"])
+def api_compliance_board_groups():
+    """Custom groups plus every property currently sitting in one."""
+    _ensure_compliance_group_tables()
+    db = get_dict_db()
+    try:
+        groups = db.execute(
+            "SELECT id, name, colour, position FROM compliance_groups ORDER BY position, id"
+        ).fetchall()
+        members = db.execute(
+            "SELECT group_id, compliance_id, cert_key FROM compliance_group_members"
+        ).fetchall()
+        order = _compliance_section_order(db)
+    finally:
+        db.close()
+    return json_success({"groups": groups, "members": members, "order": order})
+
+
+@banksia_os_bp.route("/compliance/section-order", methods=["PUT"])
+def api_compliance_section_order_save():
+    """Save the order the board's sections are shown in.
+
+    Body: {"kind": "date"|"presence", "keys": ["expired", "g:3", "due", ...]}
+
+    One order is kept per certificate kind, not per certificate: the sections mean
+    the same thing on every board (a group created on Gas exists on FRA too), so
+    ordering them separately would only let the seven boards drift apart.
+    """
+    _ensure_compliance_group_tables()
+    data = request.get_json(silent=True) or {}
+    kind = str(data.get("kind", "")).strip().lower()
+    if kind not in COMPLIANCE_SECTION_KEYS:
+        return json_error("Unknown board type", 422)
+    raw = data.get("keys")
+    if not isinstance(raw, list) or not raw:
+        return json_error("Give the order to save", 422)
+
+    db = get_dict_db()
+    try:
+        live = {"g:%d" % g["id"] for g in db.execute("SELECT id FROM compliance_groups").fetchall()}
+        allowed = COMPLIANCE_SECTION_KEYS[kind] | live
+        keys, seen = [], set()
+        for k in raw:
+            k = str(k).strip()
+            # Unknown or repeated keys are dropped rather than rejected: a group
+            # deleted in another tab must not wedge the whole board's order.
+            if k in allowed and k not in seen:
+                seen.add(k)
+                keys.append(k)
+        if not keys:
+            return json_error("None of those sections exist any more", 422)
+        before = ",".join(_compliance_section_order(db).get(kind, []))
+        db.execute(
+            "INSERT INTO compliance_section_order (kind, keys, updated)"
+            " VALUES (?, ?, datetime('now'))"
+            " ON CONFLICT(kind) DO UPDATE SET keys = excluded.keys, updated = excluded.updated",
+            (kind, ",".join(keys))
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    _log_activity("compliance", 0, "update", "section_order_" + kind, before, ",".join(keys),
+                  notes="compliance board section order changed")
+    return json_success({"kind": kind, "keys": keys})
+
+
+@banksia_os_bp.route("/compliance/board-groups", methods=["POST"])
+def api_compliance_board_group_create():
+    _ensure_compliance_group_tables()
+    data = request.get_json(silent=True) or {}
+    name = " ".join(str(data.get("name", "")).split())
+    if not name:
+        return json_error("Give the group a name", 422)
+    if len(name) > 60:
+        return json_error("Group name is too long (60 characters max)", 422)
+    colour = str(data.get("colour", "")).strip() or "#2563eb"
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", colour):
+        colour = "#2563eb"
+    db = get_dict_db()
+    try:
+        clash = db.execute(
+            "SELECT id FROM compliance_groups WHERE LOWER(name) = LOWER(?)", (name,)
+        ).fetchone()
+        if clash:
+            return json_error("A group called %s already exists" % name, 409)
+        nxt = db.execute("SELECT COALESCE(MAX(position), 0) + 1 AS p FROM compliance_groups").fetchone()
+        cur = db.execute(
+            "INSERT INTO compliance_groups (name, colour, position) VALUES (?, ?, ?)",
+            (name, colour, nxt["p"])
+        )
+        db.commit()
+        gid = cur.lastrowid
+    finally:
+        db.close()
+    _log_activity("compliance", 0, "create", "board_group", "", name,
+                  notes="compliance board group %s created" % name)
+    return json_success({"id": gid, "name": name, "colour": colour, "position": nxt["p"]})
+
+
+@banksia_os_bp.route("/compliance/board-groups/<int:group_id>", methods=["DELETE"])
+def api_compliance_board_group_delete(group_id):
+    """Delete a custom group. Its properties are not touched — they simply fall
+    back to the section their expiry date puts them in, so nothing is lost."""
+    _ensure_compliance_group_tables()
+    db = get_dict_db()
+    try:
+        row = db.execute("SELECT name FROM compliance_groups WHERE id = ?", (group_id,)).fetchone()
+        if not row:
+            return json_error("Group not found", 404)
+        # DISTINCT: membership is board-wide, so one property holds seven rows.
+        freed = db.execute(
+            "SELECT COUNT(DISTINCT compliance_id) AS n FROM compliance_group_members WHERE group_id = ?",
+            (group_id,)
+        ).fetchone()["n"]
+        db.execute("DELETE FROM compliance_group_members WHERE group_id = ?", (group_id,))
+        db.execute("DELETE FROM compliance_groups WHERE id = ?", (group_id,))
+        db.commit()
+    finally:
+        db.close()
+    _log_activity("compliance", 0, "delete", "board_group", row["name"], "",
+                  notes="compliance board group %s deleted (%d propert%s released)"
+                        % (row["name"], freed, "y" if freed == 1 else "ies"))
+    return json_success({"deleted": group_id, "released": freed})
+
+
+@banksia_os_bp.route("/compliance/<int:row_id>/group", methods=["PUT"])
+def api_compliance_set_group(row_id):
+    """Put one property into a custom group across the whole board, or take it out.
+
+    Body: {"cert": "gas", "group_id": 3}   group_id null/absent removes it.
+
+    The cert is what the user was looking at when they dragged; it names the board
+    in the audit note but does NOT scope the change. Membership is board-wide, so
+    the property joins or leaves the group on all seven certificates at once.
+    """
+    _ensure_compliance_group_tables()
+    data = request.get_json(silent=True) or {}
+    cert = str(data.get("cert", "")).strip().lower()
+    if cert not in COMPLIANCE_CERT_KEYS:
+        return json_error("Unknown certificate type", 422)
+    row = _compliance_row(row_id, "property_name")
+    if not row:
+        return json_error("Compliance record not found", 404)
+
+    raw = data.get("group_id")
+    group_id = None if raw in (None, "", 0) else int(raw)
+
+    db = get_dict_db()
+    try:
+        before = db.execute(
+            "SELECT g.name FROM compliance_group_members m JOIN compliance_groups g ON g.id = m.group_id"
+            " WHERE m.compliance_id = ? LIMIT 1", (row_id,)
+        ).fetchone()
+        old_name = before["name"] if before else ""
+        if group_id is None:
+            db.execute(
+                "DELETE FROM compliance_group_members WHERE compliance_id = ?", (row_id,)
+            )
+            new_name = ""
+        else:
+            grp = db.execute("SELECT name FROM compliance_groups WHERE id = ?", (group_id,)).fetchone()
+            if not grp:
+                return json_error("Group not found", 404)
+            # One row per certificate, all written together: the board reads
+            # membership per (property, certificate), so writing the full set is
+            # what makes one drag land on every certificate page.
+            for key in sorted(COMPLIANCE_CERT_KEYS):
+                db.execute(
+                    "INSERT INTO compliance_group_members (group_id, compliance_id, cert_key)"
+                    " VALUES (?, ?, ?)"
+                    " ON CONFLICT(compliance_id, cert_key) DO UPDATE SET group_id = excluded.group_id",
+                    (group_id, row_id, key)
+                )
+            new_name = grp["name"]
+        db.commit()
+    finally:
+        db.close()
+
+    _log_activity("compliance", row_id, "update", "board_group", old_name, new_name,
+                  notes="%s moved to %s on every certificate (dragged on the %s board)"
+                        % (row["property_name"], new_name or "its expiry-date section", cert))
+    return json_success({"cert": cert, "group_id": group_id, "board_wide": True})
+
 # 11. POLYMORPHIC ENTITY DOCUMENTS (drag-and-drop file storage)
 # ═══════════════════════════════════════════════
 
