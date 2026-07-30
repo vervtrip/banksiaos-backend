@@ -7461,13 +7461,19 @@ def _ensure_compliance_email_table():
             "  body TEXT DEFAULT '',"
             "  sent_by TEXT DEFAULT '',"
             "  sent_at TEXT DEFAULT (datetime('now')),"
-            "  from_email TEXT DEFAULT ''"
+            "  from_email TEXT DEFAULT '',"
+            "  conversation_id TEXT DEFAULT ''"
             ")"
         )
         # Added after the table shipped, so an existing database needs it bolting on.
         cols = {c["name"] for c in db.execute("PRAGMA table_info(compliance_emails)").fetchall()}
         if "from_email" not in cols:
             db.execute("ALTER TABLE compliance_emails ADD COLUMN from_email TEXT DEFAULT ''")
+        # Missive's thread id for this email. Stored from the first send onwards so a
+        # landlord's reply can be found later and shown against the right property --
+        # a thread that was never recorded cannot be matched back afterwards.
+        if "conversation_id" not in cols:
+            db.execute("ALTER TABLE compliance_emails ADD COLUMN conversation_id TEXT DEFAULT ''")
         db.execute(
             "CREATE INDEX IF NOT EXISTS idx_compliance_emails_row"
             " ON compliance_emails (compliance_id, cert_key)"
@@ -7533,6 +7539,8 @@ def _email_html(body_text):
 
 
 def _send_via_missive(to_email, subject, body_text, sender=None):
+    """Send it. Returns (ok, error, conversation_id) -- the thread id is what makes
+    a later reply findable, so it is carried back even though nothing reads it yet."""
     # Imported here rather than at module level to match _monday_graphql above,
     # the only other outbound HTTP call in this file. A module-level import was
     # skipped by the earlier patch because that local import already matched the
@@ -7541,7 +7549,7 @@ def _send_via_missive(to_email, subject, body_text, sender=None):
     import urllib.error
     token = _missive_token()
     if not token:
-        return False, "No Missive token on this server - email is not configured"
+        return False, "No Missive token on this server - email is not configured", ""
     sender = sender or COMPLIANCE_EMAIL_SENDERS[0]
     payload = {
         "drafts": {
@@ -7561,17 +7569,23 @@ def _send_via_missive(to_email, subject, body_text, sender=None):
         )
         with urllib.request.urlopen(req, timeout=25) as res:
             if 200 <= res.status < 300:
-                return True, None
-            return False, "Missive returned %s" % res.status
+                conv = ""
+                try:
+                    conv = str(((json.loads(res.read().decode("utf-8"))
+                                 or {}).get("drafts") or {}).get("conversation") or "")
+                except Exception:
+                    pass  # the email went; a missing thread id is not worth failing over
+                return True, None, conv
+            return False, "Missive returned %s" % res.status, ""
     except urllib.error.HTTPError as e:
         detail = ""
         try:
             detail = e.read().decode("utf-8", "replace")[:200]
         except Exception:
             pass
-        return False, "Missive rejected the email (%s) %s" % (e.code, detail)
+        return False, "Missive rejected the email (%s) %s" % (e.code, detail), ""
     except Exception as e:
-        return False, "Could not reach Missive: %s" % str(e)[:150]
+        return False, "Could not reach Missive: %s" % str(e)[:150], ""
 
 
 @banksia_os_bp.route("/compliance/emails", methods=["GET"])
@@ -7683,7 +7697,7 @@ def api_compliance_email_send(row_id):
         return json_error(
             "This reminder was already sent on %s. Send it again?" % prev["sent_at"], 409)
 
-    ok, err = _send_via_missive(to_email, subject, body, sender)
+    ok, err, conversation_id = _send_via_missive(to_email, subject, body, sender)
     if not ok:
         return json_error(err or "The email could not be sent", 502)
 
@@ -7692,8 +7706,10 @@ def api_compliance_email_send(row_id):
     try:
         db.execute(
             "INSERT INTO compliance_emails (compliance_id, cert_key, expiry_date, to_email,"
-            " from_email, subject, body, sent_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (row_id, cert, expiry, to_email, sender["address"], subject, body, actor)
+            " from_email, subject, body, sent_by, conversation_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (row_id, cert, expiry, to_email, sender["address"], subject, body, actor,
+             conversation_id)
         )
         db.commit()
     finally:
