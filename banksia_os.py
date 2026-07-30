@@ -7370,11 +7370,53 @@ def api_compliance_set_group(row_id):
 # stub -- empty username -- so SMTP is not a working path here.
 
 MISSIVE_DRAFTS_URL = "https://public.missiveapp.com/v1/drafts"
-# The only Banksia mailbox connected to Missive as a sender. compliance@ was the
-# obvious choice and is rejected with "does not match an available sender" --
-# connect that mailbox in Missive and this becomes a one-line change.
-COMPLIANCE_EMAIL_FROM = "finance@banksialondon.com"
-COMPLIANCE_EMAIL_FROM_NAME = "Banksia London"
+# Who the reminder comes from. Norbert, 2026-07-30: this is a choice, not a
+# constant -- some landlords are dealt with as Banksia and some as Verv, and the
+# person sending picks per email.
+#
+# Both addresses below were confirmed as live Missive senders by an actual send,
+# which is the only test that means anything: Missive validates from_field only
+# when send is true, so a draft probe returns 201 for any address at all.
+# compliance@, info@ and admin@banksialondon.com are NOT connected and are
+# rejected. Adding a sender here is safe; guessing one is not.
+COMPLIANCE_EMAIL_SENDERS = [
+    {"address": "team@banksialondon.com", "name": "Banksia London"},
+    {"address": "admin@vervrooms.com", "name": "Verv Rooms"},
+]
+COMPLIANCE_EMAIL_FROM = COMPLIANCE_EMAIL_SENDERS[0]["address"]
+COMPLIANCE_EMAIL_FROM_NAME = COMPLIANCE_EMAIL_SENDERS[0]["name"]
+
+
+def _sender_for(address):
+    """The chosen sender, or None if it is not one we are allowed to send as.
+
+    An allowlist rather than a free-text field on purpose. The From line decides
+    who the landlord thinks they are talking to, and it cannot be corrected after
+    the email has gone.
+    """
+    want = str(address or "").strip().lower()
+    if not want:
+        return COMPLIANCE_EMAIL_SENDERS[0]
+    for s in COMPLIANCE_EMAIL_SENDERS:
+        if s["address"].lower() == want:
+            return s
+    return None
+
+
+def _last_used_sender():
+    """The sender used on the most recent reminder, so the choice sticks between
+    emails instead of resetting to the top of the list every time."""
+    db = get_dict_db()
+    try:
+        row = db.execute(
+            "SELECT from_email FROM compliance_emails"
+            " WHERE from_email <> '' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    except Exception:
+        row = None
+    finally:
+        db.close()
+    return _sender_for(row["from_email"]) if row else None
 
 # A drafted email always carries this where the price goes. Sending is refused
 # while it is still there, because "[QUOTE]" landing in a landlord's inbox is
@@ -7418,9 +7460,14 @@ def _ensure_compliance_email_table():
             "  subject TEXT DEFAULT '',"
             "  body TEXT DEFAULT '',"
             "  sent_by TEXT DEFAULT '',"
-            "  sent_at TEXT DEFAULT (datetime('now'))"
+            "  sent_at TEXT DEFAULT (datetime('now')),"
+            "  from_email TEXT DEFAULT ''"
             ")"
         )
+        # Added after the table shipped, so an existing database needs it bolting on.
+        cols = {c["name"] for c in db.execute("PRAGMA table_info(compliance_emails)").fetchall()}
+        if "from_email" not in cols:
+            db.execute("ALTER TABLE compliance_emails ADD COLUMN from_email TEXT DEFAULT ''")
         db.execute(
             "CREATE INDEX IF NOT EXISTS idx_compliance_emails_row"
             " ON compliance_emails (compliance_id, cert_key)"
@@ -7438,7 +7485,7 @@ def _uk_date(value):
         return str(value or "")
 
 
-def _compliance_email_draft(row, cert):
+def _compliance_email_draft(row, cert, sender=None):
     """The email as it is first shown. Everything in it can be edited before sending."""
     label = COMPLIANCE_CERT_LABELS.get(cert, cert.replace("-", " "))
     prop = (row["property_name"] or "").strip()
@@ -7459,7 +7506,7 @@ def _compliance_email_draft(row, cert):
         "contractor and arrange access with the tenants where it is needed.",
         "",
         "Kind regards,",
-        "Banksia London",
+        (sender or COMPLIANCE_EMAIL_SENDERS[0])["name"],
     ]
     return {"subject": subject, "body": "\n".join(lines), "expiry_date": expiry}
 
@@ -7485,7 +7532,7 @@ def _email_html(body_text):
     ) % html
 
 
-def _send_via_missive(to_email, subject, body_text):
+def _send_via_missive(to_email, subject, body_text, sender=None):
     # Imported here rather than at module level to match _monday_graphql above,
     # the only other outbound HTTP call in this file. A module-level import was
     # skipped by the earlier patch because that local import already matched the
@@ -7495,12 +7542,13 @@ def _send_via_missive(to_email, subject, body_text):
     token = _missive_token()
     if not token:
         return False, "No Missive token on this server - email is not configured"
+    sender = sender or COMPLIANCE_EMAIL_SENDERS[0]
     payload = {
         "drafts": {
             "subject": subject,
             "body": _email_html(body_text),
             "to_fields": [{"address": to_email}],
-            "from_field": {"address": COMPLIANCE_EMAIL_FROM, "name": COMPLIANCE_EMAIL_FROM_NAME},
+            "from_field": {"address": sender["address"], "name": sender["name"]},
             "send": True,
         }
     }
@@ -7533,7 +7581,8 @@ def api_compliance_emails():
     db = get_dict_db()
     try:
         rows = db.execute(
-            "SELECT compliance_id, cert_key, expiry_date, to_email, sent_by, MAX(sent_at) AS sent_at"
+            "SELECT compliance_id, cert_key, expiry_date, to_email, from_email, sent_by,"
+            " MAX(sent_at) AS sent_at"
             " FROM compliance_emails GROUP BY compliance_id, cert_key, expiry_date"
         ).fetchall()
     finally:
@@ -7549,14 +7598,17 @@ def api_compliance_email_draft(row_id):
     if cert not in COMPLIANCE_CERT_KEYS:
         return json_error("Unknown certificate type", 422)
 
+    # Whatever went out last time, so the choice is not made again every email.
+    sender = _last_used_sender() or COMPLIANCE_EMAIL_SENDERS[0]
+
     db = get_dict_db()
     try:
         row = db.execute("SELECT * FROM compliance WHERE id = ?", (row_id,)).fetchone()
         if not row:
             return json_error("Compliance record not found", 404)
-        draft = _compliance_email_draft(row, cert)
+        draft = _compliance_email_draft(row, cert, sender)
         prev = db.execute(
-            "SELECT to_email, sent_at, sent_by FROM compliance_emails"
+            "SELECT to_email, from_email, sent_at, sent_by FROM compliance_emails"
             " WHERE compliance_id = ? AND cert_key = ? AND expiry_date = ?"
             " ORDER BY id DESC LIMIT 1",
             (row_id, cert, draft["expiry_date"])
@@ -7572,7 +7624,9 @@ def api_compliance_email_draft(row_id):
         "body": draft["body"],
         "expiry_date": draft["expiry_date"],
         "quote_token": COMPLIANCE_QUOTE_TOKEN,
-        "from": COMPLIANCE_EMAIL_FROM,
+        "from": sender["address"],
+        "senders": COMPLIANCE_EMAIL_SENDERS,
+        "sign_off": sender["name"],
         "already_sent": prev,
     })
 
@@ -7592,6 +7646,10 @@ def api_compliance_email_send(row_id):
     cert = str(data.get("cert", "")).strip().lower()
     if cert not in COMPLIANCE_CERT_KEYS:
         return json_error("Unknown certificate type", 422)
+
+    sender = _sender_for(data.get("from"))
+    if sender is None:
+        return json_error("That is not one of the addresses this board can send from", 422)
 
     to_email = str(data.get("to", "")).strip()
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", to_email):
@@ -7625,7 +7683,7 @@ def api_compliance_email_send(row_id):
         return json_error(
             "This reminder was already sent on %s. Send it again?" % prev["sent_at"], 409)
 
-    ok, err = _send_via_missive(to_email, subject, body)
+    ok, err = _send_via_missive(to_email, subject, body, sender)
     if not ok:
         return json_error(err or "The email could not be sent", 502)
 
@@ -7634,17 +7692,18 @@ def api_compliance_email_send(row_id):
     try:
         db.execute(
             "INSERT INTO compliance_emails (compliance_id, cert_key, expiry_date, to_email,"
-            " subject, body, sent_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (row_id, cert, expiry, to_email, subject, body, actor)
+            " from_email, subject, body, sent_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (row_id, cert, expiry, to_email, sender["address"], subject, body, actor)
         )
         db.commit()
     finally:
         db.close()
 
     _log_activity("compliance", row_id, "update", "renewal_email_" + cert, "", to_email,
-                  notes="%s renewal reminder emailed to %s for %s"
-                        % (cert, to_email, row["property_name"]))
-    return json_success({"cert": cert, "to": to_email, "resent": bool(prev)})
+                  notes="%s renewal reminder emailed to %s from %s for %s"
+                        % (cert, to_email, sender["address"], row["property_name"]))
+    return json_success({"cert": cert, "to": to_email, "from": sender["address"],
+                         "resent": bool(prev)})
 
 
 # -- Contractors on the /compliance-test board ---------------------------------
