@@ -7358,6 +7358,295 @@ def api_compliance_set_group(row_id):
                         % (row["property_name"], new_name or "its expiry-date section", cert))
     return json_success({"cert": cert, "group_id": group_id, "board_wide": True})
 
+# -- Landlord renewal emails ---------------------------------------------------
+# Step 1 of the renewal process (Norbert, 2026-07-30): fifteen days before a
+# certificate expires the landlord is emailed with the quote for the work. This is
+# the manual half -- a button on the row opens the drafted email, the address and
+# wording can be changed, and Send puts it out. Every send is logged so the board
+# can show "Emailed" on the row and nobody sends the same reminder twice.
+#
+# Transport is Missive's drafts API with send:true, the same one the Verv dashboard
+# already uses for notification mail. The Banksia backend's smtp_config.json is a
+# stub -- empty username -- so SMTP is not a working path here.
+
+MISSIVE_DRAFTS_URL = "https://public.missiveapp.com/v1/drafts"
+# The only Banksia mailbox connected to Missive as a sender. compliance@ was the
+# obvious choice and is rejected with "does not match an available sender" --
+# connect that mailbox in Missive and this becomes a one-line change.
+COMPLIANCE_EMAIL_FROM = "finance@banksialondon.com"
+COMPLIANCE_EMAIL_FROM_NAME = "Banksia London"
+
+# A drafted email always carries this where the price goes. Sending is refused
+# while it is still there, because "[QUOTE]" landing in a landlord's inbox is
+# worse than a blocked send.
+COMPLIANCE_QUOTE_TOKEN = "[QUOTE]"
+
+COMPLIANCE_CERT_LABELS = {
+    "gas": "gas safety certificate",
+    "electric": "electrical certificate (EICR)",
+    "epc": "EPC",
+    "fire-alarm": "fire alarm certificate",
+    "emergency-lighting": "emergency lighting certificate",
+    "fra": "fire risk assessment",
+    "floor-plan": "floor plan",
+    "fire-doors": "fire door inspection",
+    "fire-blanket": "fire blanket check",
+    "co2-alarm": "CO2 alarm check",
+}
+
+
+def _missive_token():
+    for path in ("/root/banksia-backend/missive.json", "/root/.hermes/secrets/missive.json"):
+        if os.path.exists(path):
+            try:
+                return (json.load(open(path)) or {}).get("token")
+            except Exception:
+                pass
+    return None
+
+
+def _ensure_compliance_email_table():
+    db = get_dict_db()
+    try:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS compliance_emails ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  compliance_id INTEGER NOT NULL,"
+            "  cert_key TEXT NOT NULL,"
+            "  expiry_date TEXT DEFAULT '',"
+            "  to_email TEXT NOT NULL,"
+            "  subject TEXT DEFAULT '',"
+            "  body TEXT DEFAULT '',"
+            "  sent_by TEXT DEFAULT '',"
+            "  sent_at TEXT DEFAULT (datetime('now'))"
+            ")"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_compliance_emails_row"
+            " ON compliance_emails (compliance_id, cert_key)"
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _uk_date(value):
+    """2026-08-14 -> 14 August 2026. Anything unparseable comes back untouched."""
+    try:
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d").strftime("%d %B %Y").lstrip("0")
+    except Exception:
+        return str(value or "")
+
+
+def _compliance_email_draft(row, cert):
+    """The email as it is first shown. Everything in it can be edited before sending."""
+    label = COMPLIANCE_CERT_LABELS.get(cert, cert.replace("-", " "))
+    prop = (row["property_name"] or "").strip()
+    landlord = (row["landlord"] or "").strip()
+    field = _COMPLIANCE_DATE_FIELDS.get(cert)
+    expiry = (row[field] or "").strip() if field else ""
+    greeting = landlord if landlord else "Sir or Madam"
+
+    subject = "%s due for renewal - %s" % (label[:1].upper() + label[1:], prop)
+    lines = [
+        "Dear %s," % greeting,
+        "",
+        "The %s for %s is due to expire on %s." % (label, prop, _uk_date(expiry) or "its recorded date"),
+        "",
+        "We can arrange the renewal on your behalf. Our quote for the work is %s." % COMPLIANCE_QUOTE_TOKEN,
+        "",
+        "If you are happy to go ahead, please reply to confirm and we will book the "
+        "contractor and arrange access with the tenants where it is needed.",
+        "",
+        "Kind regards,",
+        "Banksia London",
+    ]
+    return {"subject": subject, "body": "\n".join(lines), "expiry_date": expiry}
+
+
+def _email_html(body_text):
+    """Plain text in, email-safe HTML out. The editor is a plain textarea on purpose --
+    a landlord reminder is a short letter, and a rich editor would only invite
+    formatting that renders differently in every mail client."""
+    esc = (body_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+    paragraphs = [p.strip() for p in esc.split("\n\n")]
+    html = "".join(
+        "<p style=\"margin:0 0 14px;\">%s</p>" % p.replace("\n", "<br>")
+        for p in paragraphs if p
+    )
+    return (
+        "<!DOCTYPE html><html><body style=\"margin:0;padding:0;background:#f2f4f7;\">"
+        "<table role=\"presentation\" width=\"100%%\" cellpadding=\"0\" cellspacing=\"0\">"
+        "<tr><td align=\"center\" style=\"padding:26px 12px;\">"
+        "<table role=\"presentation\" width=\"100%%\" style=\"max-width:600px;background:#ffffff;"
+        "border-radius:10px;font-family:Arial,Helvetica,sans-serif;color:#1a2233;font-size:15px;"
+        "line-height:1.6;\"><tr><td style=\"padding:28px 32px;\">%s</td></tr></table>"
+        "</td></tr></table></body></html>"
+    ) % html
+
+
+def _send_via_missive(to_email, subject, body_text):
+    # Imported here rather than at module level to match _monday_graphql above,
+    # the only other outbound HTTP call in this file. A module-level import was
+    # skipped by the earlier patch because that local import already matched the
+    # 'is urllib imported' check.
+    import urllib.request
+    import urllib.error
+    token = _missive_token()
+    if not token:
+        return False, "No Missive token on this server - email is not configured"
+    payload = {
+        "drafts": {
+            "subject": subject,
+            "body": _email_html(body_text),
+            "to_fields": [{"address": to_email}],
+            "from_field": {"address": COMPLIANCE_EMAIL_FROM, "name": COMPLIANCE_EMAIL_FROM_NAME},
+            "send": True,
+        }
+    }
+    try:
+        req = urllib.request.Request(
+            MISSIVE_DRAFTS_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=25) as res:
+            if 200 <= res.status < 300:
+                return True, None
+            return False, "Missive returned %s" % res.status
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", "replace")[:200]
+        except Exception:
+            pass
+        return False, "Missive rejected the email (%s) %s" % (e.code, detail)
+    except Exception as e:
+        return False, "Could not reach Missive: %s" % str(e)[:150]
+
+
+@banksia_os_bp.route("/compliance/emails", methods=["GET"])
+def api_compliance_emails():
+    """Every reminder already sent, so the board can mark the rows."""
+    _ensure_compliance_email_table()
+    db = get_dict_db()
+    try:
+        rows = db.execute(
+            "SELECT compliance_id, cert_key, expiry_date, to_email, sent_by, MAX(sent_at) AS sent_at"
+            " FROM compliance_emails GROUP BY compliance_id, cert_key, expiry_date"
+        ).fetchall()
+    finally:
+        db.close()
+    return json_success(rows)
+
+
+@banksia_os_bp.route("/compliance/<int:row_id>/email", methods=["GET"])
+def api_compliance_email_draft(row_id):
+    """The drafted reminder for one property's certificate."""
+    _ensure_compliance_email_table()
+    cert = str(request.args.get("cert", "")).strip().lower()
+    if cert not in COMPLIANCE_CERT_KEYS:
+        return json_error("Unknown certificate type", 422)
+
+    db = get_dict_db()
+    try:
+        row = db.execute("SELECT * FROM compliance WHERE id = ?", (row_id,)).fetchone()
+        if not row:
+            return json_error("Compliance record not found", 404)
+        draft = _compliance_email_draft(row, cert)
+        prev = db.execute(
+            "SELECT to_email, sent_at, sent_by FROM compliance_emails"
+            " WHERE compliance_id = ? AND cert_key = ? AND expiry_date = ?"
+            " ORDER BY id DESC LIMIT 1",
+            (row_id, cert, draft["expiry_date"])
+        ).fetchone()
+    finally:
+        db.close()
+
+    return json_success({
+        "property_name": row["property_name"],
+        "landlord": row["landlord"] or "",
+        "to": (row["landlord_email"] or "").strip(),
+        "subject": draft["subject"],
+        "body": draft["body"],
+        "expiry_date": draft["expiry_date"],
+        "quote_token": COMPLIANCE_QUOTE_TOKEN,
+        "from": COMPLIANCE_EMAIL_FROM,
+        "already_sent": prev,
+    })
+
+
+@banksia_os_bp.route("/compliance/<int:row_id>/email", methods=["POST"])
+def api_compliance_email_send(row_id):
+    """Send the reminder and write it down.
+
+    Body: {"cert": "gas", "to": "...", "subject": "...", "body": "...", "confirm": true}
+
+    `confirm` is only needed to send a second time for the same expiry date -- the
+    first send is what the board marks as done, and a duplicate reminder to a
+    landlord is the thing Norbert asked to be protected from.
+    """
+    _ensure_compliance_email_table()
+    data = request.get_json(silent=True) or {}
+    cert = str(data.get("cert", "")).strip().lower()
+    if cert not in COMPLIANCE_CERT_KEYS:
+        return json_error("Unknown certificate type", 422)
+
+    to_email = str(data.get("to", "")).strip()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", to_email):
+        return json_error("That is not an email address", 422)
+    subject = " ".join(str(data.get("subject", "")).split())
+    if not subject:
+        return json_error("The email needs a subject", 422)
+    body = str(data.get("body", "")).strip()
+    if not body:
+        return json_error("The email is empty", 422)
+    if COMPLIANCE_QUOTE_TOKEN in body:
+        return json_error("Replace %s with the quote before sending" % COMPLIANCE_QUOTE_TOKEN, 422)
+
+    db = get_dict_db()
+    try:
+        row = db.execute("SELECT * FROM compliance WHERE id = ?", (row_id,)).fetchone()
+        if not row:
+            return json_error("Compliance record not found", 404)
+        field = _COMPLIANCE_DATE_FIELDS.get(cert)
+        expiry = (row[field] or "").strip() if field else ""
+        prev = db.execute(
+            "SELECT sent_at FROM compliance_emails"
+            " WHERE compliance_id = ? AND cert_key = ? AND expiry_date = ?"
+            " ORDER BY id DESC LIMIT 1",
+            (row_id, cert, expiry)
+        ).fetchone()
+    finally:
+        db.close()
+
+    if prev and not data.get("confirm"):
+        return json_error(
+            "This reminder was already sent on %s. Send it again?" % prev["sent_at"], 409)
+
+    ok, err = _send_via_missive(to_email, subject, body)
+    if not ok:
+        return json_error(err or "The email could not be sent", 502)
+
+    actor = _archive_actor()
+    db = get_dict_db()
+    try:
+        db.execute(
+            "INSERT INTO compliance_emails (compliance_id, cert_key, expiry_date, to_email,"
+            " subject, body, sent_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (row_id, cert, expiry, to_email, subject, body, actor)
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    _log_activity("compliance", row_id, "update", "renewal_email_" + cert, "", to_email,
+                  notes="%s renewal reminder emailed to %s for %s"
+                        % (cert, to_email, row["property_name"]))
+    return json_success({"cert": cert, "to": to_email, "resent": bool(prev)})
+
+
 # -- Contractors on the /compliance-test board ---------------------------------
 # Norbert, 2026-07-30: the board needs to know who does what, so the renewal
 # chaser can message the right trade's WhatsApp group 15 days before a
