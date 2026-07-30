@@ -96,6 +96,11 @@ _ROLE_POLICY = {
 def _require_banksia_auth():
     """All routes in this blueprint require a logged-in session or valid API key."""
     # Public routes that don't need auth
+    # Missive posts here with an HMAC signature instead of a session, so this one
+    # route verifies itself (see api_missive_hook). Matched on the full path
+    # because request.path carries the blueprint prefix.
+    if request.path == _MISSIVE_HOOK_PATH:
+        return None
     public_prefixes = ("/submissions/public", "/applicants/public", "/tenancies/public")
     if request.path.startswith(public_prefixes):
         return None
@@ -7821,8 +7826,85 @@ def _html_to_text(html):
     return "\n".join(out).strip()
 
 
+# A reply usually carries the whole message it is answering underneath it. The
+# board already shows what we sent directly above, so the quoted copy is pure
+# repetition -- it is cut here rather than in the page, so the stored body is
+# clean for anything else that reads it later.
+_QUOTE_CUTS = (
+    # Some clients put the quoted body on the same line as the attribution
+    # ("...wrote:Dear Norbert"), so this searches rather than matching a line.
+    re.compile(r"On .{0,200}?wrote:", re.I),
+    re.compile(r"-{2,}\s*Original Message\s*-{2,}", re.I),
+    re.compile(r"^_{5,}$", re.M),
+    re.compile(r"^From: .+$", re.I | re.M),
+    re.compile(r"^Sent from my .*$", re.I | re.M),
+    re.compile(r"^>", re.M),
+)
+
+
+def _strip_quoted_reply(text):
+    v = str(text or "")
+    cut = None
+    for rx in _QUOTE_CUTS:
+        m = rx.search(v)
+        if m and (cut is None or m.start() < cut):
+            cut = m.start()
+    if cut is None:
+        return v.strip()
+    head = v[:cut].strip()
+    # A reply that is nothing but a quote is better shown whole than shown blank.
+    return head or v.strip()
+
+
 def _our_addresses():
     return {x["address"].lower() for x in COMPLIANCE_EMAIL_SENDERS}
+
+
+def _ingest_thread(thread, known, ours):
+    """Read one Missive conversation and store anything on it that is not ours.
+
+    Pulled out of the sweep so the webhook can do a single thread rather than all
+    of them. `known` is mutated so one run never stores a message twice; the
+    UNIQUE on message_id is the backstop for two runs racing (a webhook and a
+    board load can land in the same second).
+    """
+    data = _missive_get("/conversations/%s/messages" % thread["conversation_id"])
+    if not data:
+        return 0
+    found = 0
+    for m in (data.get("messages") or []):
+        mid = str(m.get("id") or "")
+        frm = ((m.get("from_field") or {}).get("address") or "").lower()
+        # Ours went out; anything else on the thread is the answer.
+        if not mid or mid in known or frm in ours:
+            continue
+        full = _missive_get("/messages/%s" % mid) or {}
+        full = full.get("messages") or {}
+        body = _strip_quoted_reply(_html_to_text(full.get("body") or m.get("preview") or ""))
+        atts = [a.get("filename") or a.get("name") or "attachment"
+                for a in (full.get("attachments") or [])]
+        stamp = full.get("delivered_at") or m.get("delivered_at") or m.get("created_at")
+        try:
+            stamp = datetime.fromtimestamp(int(stamp), timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            stamp = ""
+        db = get_dict_db()
+        try:
+            db.execute(
+                "INSERT OR IGNORE INTO compliance_email_replies (compliance_id, cert_key,"
+                " conversation_id, message_id, from_email, from_name, subject, body,"
+                " attachments, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (thread["compliance_id"], thread["cert_key"], thread["conversation_id"], mid, frm,
+                 (m.get("from_field") or {}).get("name") or "",
+                 full.get("subject") or m.get("subject") or "", body,
+                 ", ".join(atts), stamp)
+            )
+            db.commit()
+        finally:
+            db.close()
+        known.add(mid)
+        found += 1
+    return found
 
 
 def _refresh_compliance_replies(force=False):
@@ -7848,42 +7930,88 @@ def _refresh_compliance_replies(force=False):
     ours = _our_addresses()
     found = 0
     for t in threads:
-        data = _missive_get("/conversations/%s/messages" % t["conversation_id"])
-        if not data:
-            continue
-        for m in (data.get("messages") or []):
-            mid = str(m.get("id") or "")
-            frm = ((m.get("from_field") or {}).get("address") or "").lower()
-            # Ours went out; anything else on the thread is the answer.
-            if not mid or mid in known or frm in ours:
-                continue
-            full = _missive_get("/messages/%s" % mid) or {}
-            full = full.get("messages") or {}
-            body = _html_to_text(full.get("body") or m.get("preview") or "")
-            atts = [a.get("filename") or a.get("name") or "attachment"
-                    for a in (full.get("attachments") or [])]
-            stamp = full.get("delivered_at") or m.get("delivered_at") or m.get("created_at")
-            try:
-                stamp = datetime.fromtimestamp(int(stamp), timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-            except Exception:
-                stamp = ""
-            db = get_dict_db()
-            try:
-                db.execute(
-                    "INSERT OR IGNORE INTO compliance_email_replies (compliance_id, cert_key,"
-                    " conversation_id, message_id, from_email, from_name, subject, body,"
-                    " attachments, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (t["compliance_id"], t["cert_key"], t["conversation_id"], mid, frm,
-                     (m.get("from_field") or {}).get("name") or "",
-                     full.get("subject") or m.get("subject") or "", body,
-                     ", ".join(atts), stamp)
-                )
-                db.commit()
-            finally:
-                db.close()
-            known.add(mid)
-            found += 1
+        found += _ingest_thread(t, known, ours)
     return found
+
+
+# -- Missive webhook -----------------------------------------------------------
+# Sami and Norbert, 2026-07-30: "We have to add a webhook into Missive". Missive
+# has no API that creates one, so the rule is added by hand in Missive under
+# Settings > Rules with a Webhook action pointed at this route. This end is the
+# half that can be built, and it is built.
+#
+# The posted body is deliberately NOT trusted as the reply. A valid signature
+# only tells us something happened on a thread; the message is then read back
+# from Missive's own API exactly as a board load reads it. So the worst a forged
+# or replayed post can do is make us re-read a conversation we already own.
+_MISSIVE_HOOK_PATH = "/api/banksia-os/hooks/missive"
+_MISSIVE_HOOK_SECRET_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                         "missive_hook_secret")
+
+
+def _missive_hook_secret():
+    try:
+        with open(_MISSIVE_HOOK_SECRET_FILE) as fh:
+            return fh.read().strip()
+    except Exception:
+        return ""
+
+
+@banksia_os_bp.route("/hooks/missive", methods=["POST"])
+def api_missive_hook():
+    """Missive tells us a thread moved; we go and read it.
+
+    Unsigned posts are accepted and ignored, because Missive pings the endpoint
+    to validate it before the rule can be saved and that ping carries no
+    signature. Ignoring costs nothing -- nothing is read and nothing is written.
+    A signature that is present but wrong is refused outright.
+    """
+    import hashlib
+    import hmac as _hmac
+
+    raw = request.get_data() or b""
+    sent = request.headers.get("X-Hook-Signature", "")
+    if not sent:
+        return json_success({"signed": False, "matched": False, "new": 0})
+
+    secret = _missive_hook_secret()
+    if not secret:
+        return json_error("Webhook secret not configured on this server", 503)
+    mine = "sha256=" + _hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).hexdigest()
+    if not _hmac.compare_digest(sent, mine):
+        return json_error("Bad signature", 401)
+
+    payload = request.get_json(silent=True) or {}
+    conv = str((payload.get("conversation") or {}).get("id") or "")
+
+    _ensure_compliance_email_table()
+    _ensure_compliance_reply_table()
+    db = get_dict_db()
+    try:
+        if conv:
+            threads = db.execute(
+                "SELECT DISTINCT conversation_id, compliance_id, cert_key FROM compliance_emails"
+                " WHERE conversation_id = ?", (conv,)).fetchall()
+        else:
+            threads = db.execute(
+                "SELECT DISTINCT conversation_id, compliance_id, cert_key FROM compliance_emails"
+                " WHERE conversation_id <> ''").fetchall()
+        known = {r["message_id"] for r in
+                 db.execute("SELECT message_id FROM compliance_email_replies").fetchall()}
+    finally:
+        db.close()
+
+    # A hook for a conversation this board never started is the normal case --
+    # the rule watches a whole mailbox, most of which is nothing to do with
+    # compliance. Do nothing, quietly.
+    if not threads:
+        return json_success({"signed": True, "matched": False, "new": 0})
+
+    ours = _our_addresses()
+    found = 0
+    for t in threads:
+        found += _ingest_thread(t, known, ours)
+    return json_success({"signed": True, "matched": True, "new": found})
 
 
 @banksia_os_bp.route("/compliance/emails/refresh", methods=["POST"])

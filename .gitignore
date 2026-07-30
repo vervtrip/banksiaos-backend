@@ -50,3 +50,4 @@ media/
 *.pre-*
 *.bak-*
 missive.json
+missive_hook_secret
