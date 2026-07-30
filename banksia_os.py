@@ -6780,6 +6780,9 @@ _COMPLIANCE_DOC_FIELDS = {
     "emergency-lighting": "emergency_lighting_doc",
     "fra": "fra_doc",
     "floor-plan": "floor_plan_doc",
+    "fire-doors": "fire_doors_doc",
+    "fire-blanket": "fire_blanket_doc",
+    "co2-alarm": "co2_alarm_doc",
 }
 
 # Only the dated certificates have an expiry; Floor Plan is a Yes/No status.
@@ -6790,6 +6793,9 @@ _COMPLIANCE_DATE_FIELDS = {
     "fire-alarm": "fire_alarm_date",
     "emergency-lighting": "emergency_lighting_date",
     "fra": "fra_date",
+    "fire-doors": "fire_doors_date",
+    "fire-blanket": "fire_blanket_date",
+    "co2-alarm": "co2_alarm_date",
 }
 
 COMPLIANCE_UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "media", "compliance")
@@ -7104,6 +7110,9 @@ COMPLIANCE_RETURNED_GROUP = "PROPERTY RETURNED"
 COMPLIANCE_LIVE_GROUP = "VERV COMPLIANCE CERTIFICATES"
 COMPLIANCE_CERT_KEYS = {
     "gas", "electric", "epc", "fire-alarm", "emergency-lighting", "fra", "floor-plan",
+    # Added by Norbert 2026-07-30. Unlike the seven above these come from nobody --
+    # there is no Monday column behind them, so they start undated on every property.
+    "fire-doors", "fire-blanket", "co2-alarm",
 }
 
 
@@ -7404,7 +7413,8 @@ def _clean_certs(raw):
         items = [str(x).strip().lower() for x in raw]
     else:
         return ""
-    order = ["gas", "electric", "epc", "fire-alarm", "emergency-lighting", "fra", "floor-plan"]
+    order = ["gas", "electric", "epc", "fire-alarm", "emergency-lighting", "fra",
+             "fire-doors", "fire-blanket", "co2-alarm", "floor-plan"]
     keep = [k for k in order if k in items]
     return ",".join(keep)
 
