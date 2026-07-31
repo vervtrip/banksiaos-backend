@@ -58,3 +58,13 @@ documents/uploads/
 compliance.json
 compliance_import.sql
 deleted_test_applicants_*.sql
+
+# ---------------------------------------------------------------------------
+# Tenant PII & confidential documents — NEVER commit. (Sami, 31 Jul 2026)
+# These live on the VPS only; restore from /root/backups, never from git.
+# ---------------------------------------------------------------------------
+documents/
+.flask_secret_key
+regression_backup_*.db
+*.db
+verv_os_db
