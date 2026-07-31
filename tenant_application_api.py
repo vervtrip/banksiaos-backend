@@ -169,7 +169,7 @@ _PUBLIC_KEYS = [
     "holding_deposit_paid", "holding_deposit_confirmed",
     "a1_full_name", "a1_dob", "a1_email", "a1_gender", "a1_guarantor_email", "a1_guarantor_mobile",
     "a2_full_name", "a2_dob", "a2_email", "a2_gender", "a2_guarantor_email", "a2_guarantor_mobile",
-    "declaration_confirmed", "signature_data", "signature_date", "num_applicants", "num_applicants", "created_at",
+    "declaration_confirmed", "signature_data", "signature_date", "num_applicants", "num_applicants", "created_at", "first_opened_at",
 ]
 
 
@@ -241,6 +241,7 @@ def generate_tenant_application():
             "id": new_id,
             "form_token": token,
             "link": "%s/portal?ta=%s" % (PUBLIC_BASE_URL, token),
+            "email": data.get("email") or "",
             "property_id": property_id,
             "unit_id": unit_id,
             "property_address": addr,
@@ -269,6 +270,10 @@ def get_tenant_application(token):
         r = db.execute("SELECT * FROM tenant_applications WHERE form_token = ?", [token]).fetchone()
         if not r:
             return json_error("Application not found", 404)
+        if r["status"] == "draft" and not r.get("first_opened_at"):
+            db.execute("UPDATE tenant_applications SET first_opened_at = datetime('now') WHERE id = ?", [r["id"]])
+            db.commit()
+            r["first_opened_at"] = db.execute("SELECT first_opened_at FROM tenant_applications WHERE id = ?", [r["id"]]).fetchone()["first_opened_at"]
         return json_success(_row_public(r))
     finally:
         db.close()
@@ -280,6 +285,11 @@ def get_tenant_application(token):
 # accepted from the client.
 _APPLICANT_FIELDS = [
     "a1_full_name", "a1_dob", "a1_email", "a1_gender", "a1_guarantor_email", "a1_guarantor_mobile",
+    "a1_phone", "a1_nationality", "a1_employment", "a1_employer_name",
+    "a1_annual_income", "a1_residential_status", "a1_current_address",
+    "a1_current_landlord", "a1_current_landlord_phone", "a1_current_landlord_email",
+    "a1_current_from", "a1_current_to", "a1_reason_for_leaving",
+    "a1_previous_address", "a1_previous_landlord", "a1_previous_landlord_phone",
     "a2_full_name", "a2_dob", "a2_email", "a2_gender", "a2_guarantor_email", "a2_guarantor_mobile",
     "check_in_date", "bills_included", "holding_deposit_confirmed",
     "declaration_confirmed", "signature_data", "signature_date", "num_applicants",
@@ -476,6 +486,38 @@ def _generate_application_pdf(db, r):
     if a1_gender: pdf.cell(0, 6, f"Gender: {a1_gender}", new_x="LMARGIN", new_y="NEXT")
     if a1_guar_email: pdf.cell(0, 6, f"Guarantor Email: {a1_guar_email}", new_x="LMARGIN", new_y="NEXT")
     if a1_guar_mob: pdf.cell(0, 6, f"Guarantor Mobile: {a1_guar_mob}", new_x="LMARGIN", new_y="NEXT")
+    a1_phone = r.get("a1_phone") or ""
+    a1_nationality = r.get("a1_nationality") or ""
+    a1_employment = r.get("a1_employment") or ""
+    a1_employer = r.get("a1_employer_name") or ""
+    a1_income = r.get("a1_annual_income") or ""
+    a1_res_status = r.get("a1_residential_status") or ""
+    a1_cur_addr = r.get("a1_current_address") or ""
+    a1_cur_ll = r.get("a1_current_landlord") or ""
+    a1_cur_ll_phone = r.get("a1_current_landlord_phone") or ""
+    a1_cur_ll_email = r.get("a1_current_landlord_email") or ""
+    a1_cur_from = r.get("a1_current_from") or ""
+    a1_cur_to = r.get("a1_current_to") or ""
+    a1_reason = r.get("a1_reason_for_leaving") or ""
+    a1_prev_addr = r.get("a1_previous_address") or ""
+    a1_prev_ll = r.get("a1_previous_landlord") or ""
+    a1_prev_ll_phone = r.get("a1_previous_landlord_phone") or ""
+    if a1_phone: pdf.cell(0, 6, f"Phone: {a1_phone}", new_x="LMARGIN", new_y="NEXT")
+    if a1_nationality: pdf.cell(0, 6, f"Nationality: {a1_nationality}", new_x="LMARGIN", new_y="NEXT")
+    if a1_employment: pdf.cell(0, 6, f"Employment Status: {a1_employment}", new_x="LMARGIN", new_y="NEXT")
+    if a1_employer: pdf.cell(0, 6, f"Employer: {a1_employer}", new_x="LMARGIN", new_y="NEXT")
+    if a1_income: pdf.cell(0, 6, f"Annual Income: GBP {a1_income}", new_x="LMARGIN", new_y="NEXT")
+    if a1_res_status: pdf.cell(0, 6, f"Residential Status: {a1_res_status}", new_x="LMARGIN", new_y="NEXT")
+    if a1_cur_addr: pdf.cell(0, 6, f"Current Address: {a1_cur_addr}", new_x="LMARGIN", new_y="NEXT")
+    if a1_cur_ll: pdf.cell(0, 6, f"Current Landlord: {a1_cur_ll}", new_x="LMARGIN", new_y="NEXT")
+    if a1_cur_ll_phone: pdf.cell(0, 6, f"Landlord Phone: {a1_cur_ll_phone}", new_x="LMARGIN", new_y="NEXT")
+    if a1_cur_ll_email: pdf.cell(0, 6, f"Landlord Email: {a1_cur_ll_email}", new_x="LMARGIN", new_y="NEXT")
+    if a1_cur_from: pdf.cell(0, 6, f"Current Tenancy From: {a1_cur_from}", new_x="LMARGIN", new_y="NEXT")
+    if a1_cur_to: pdf.cell(0, 6, f"Current Tenancy To: {a1_cur_to}", new_x="LMARGIN", new_y="NEXT")
+    if a1_reason: pdf.cell(0, 6, f"Reason for Leaving: {a1_reason}", new_x="LMARGIN", new_y="NEXT")
+    if a1_prev_addr: pdf.cell(0, 6, f"Previous Address: {a1_prev_addr}", new_x="LMARGIN", new_y="NEXT")
+    if a1_prev_ll: pdf.cell(0, 6, f"Previous Landlord: {a1_prev_ll}", new_x="LMARGIN", new_y="NEXT")
+    if a1_prev_ll_phone: pdf.cell(0, 6, f"Previous Landlord Phone: {a1_prev_ll_phone}", new_x="LMARGIN", new_y="NEXT")
 
     pdf.ln(3)
 
@@ -509,6 +551,56 @@ def _generate_application_pdf(db, r):
     pdf.cell(0, 6, f"Signature: {sig}", new_x="LMARGIN", new_y="NEXT")
     if sig_date:
         pdf.cell(0, 6, f"Date: {sig_date}", new_x="LMARGIN", new_y="NEXT")
+
+    # Terms and Conditions
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, "Standard Terms and Conditions", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.ln(4)
+
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 7, "Holding Deposit Declaration", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 9)
+    terms_lines = [
+        "I confirm that I have transferred the above sum as a Holding Deposit to",
+        "reserve the specified accommodation unit provided by the Landlord, which will",
+        "go toward my deposit.",
+        "",
+        "Applicant Declaration",
+        "",
+        "I/We confirm that the information provided in this application is true and",
+        "accurate to the best of my/our knowledge.",
+        "",
+        "I/We confirm that I/we have the legal Right to Rent in the UK for the",
+        "duration of the proposed tenancy.",
+        "",
+        "I/We understand that providing false or misleading information may result in",
+        "rejection of this application or termination of any agreement entered into.",
+        "",
+        "I/We acknowledge that submission of this application does not guarantee",
+        "acceptance and that final approval is subject to satisfactory referencing,",
+        "affordability assessment, and Landlord approval.",
+        "",
+        "I/We authorise the Landlord and/or its appointed referencing agency to conduct",
+        "credit and identity checks and to obtain relevant information from employers,",
+        "previous landlords and other necessary sources for the purpose of assessing",
+        "this application.",
+        "", ""]
+    pdf.set_x(pdf.l_margin)
+    for line in terms_lines:
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(0, 5, line, new_x="LMARGIN", new_y="NEXT")
+        if line == "":
+            pdf.ln(2)
+
+    pdf.ln(6)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 7, "Signature Confirmation", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.multi_cell(0, 6, f"I, {a1_name}, confirm that I have read and agree to the Terms and Conditions set out above.")
+    if sig_date:
+        pdf.cell(0, 6, f"Date acknowledged: {sig_date}", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
 
     submitted_at = r.get("submitted_at") or ""
     if submitted_at:
@@ -571,6 +663,39 @@ def _generate_application_pdf(db, r):
     print(f"[tenant_application] PDF generated: {safe_name} (doc_id={doc_id}, {related_to}={related_id}, applicant_id={applicant_id})")
     return doc_id
 
+
+@tenant_app_bp.route("/<token>/send-link", methods=["POST"])
+def send_tenant_application_link(token):
+    """Send TA link to client email via Missive."""
+    from referencing_api import send_email
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip()
+    name = (data.get("name") or "").strip()
+    link = data.get("link", "")
+    if not email:
+        return json_error("email is required")
+    if not link:
+        return json_error("link is required")
+    subject = "Your Tenant Application - Banksia"
+    salutation = name or "there"
+    # Append email to the TA link so the page can pre-fill it
+    link_with_email = link + "&email=" + email
+    html = """<div style="font-family:sans-serif;max-width:520px;margin:0 auto">
+    <h2 style="color:#f16232">Tenant Application</h2>
+    <p>Hi %s,</p>
+    <p>Please fill up your tenant application. Click the button below.</p>
+    <p style="color:#666;font-size:12px">(To proceed you will need to register first)</p>
+    <p style="text-align:center;margin:20px 0">
+      <a href="%s" style="display:inline-block;padding:10px 24px;background:#f16232;color:#fff;text-decoration:none;border-radius:6px">Open Application</a>
+    </p>
+    <p style="color:#666;font-size:12px">Link expires 24h after first open.</p>
+    <hr style="border:none;border-top:1px solid #eee">
+    <p style="color:#999;font-size:11px">Banksia</p>
+  </div>""" % (salutation, link_with_email)
+    ok, detail = send_email(email, name, subject, html)
+    if not ok:
+        return json_error("Failed to send email: " + str(detail), 502)
+    return json_success({"sent_to": email})
 
 @tenant_app_bp.route("/<token>/submit", methods=["POST"])
 def submit_tenant_application(token):

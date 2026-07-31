@@ -1272,6 +1272,7 @@ async function renderDashboard() {
         <div class="table-toolbar"><span class="ttl">Quick Links</span></div>
         <div style="padding:16px 20px;display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn btn-primary btn-sm" onclick="showNewApplicantForm()">+ Add Applicant</button>
+          <button class="btn btn-primary btn-sm" onclick="showGenerateTA()">📄 Generate TA</button>
           <button class="btn btn-primary btn-sm" onclick="showNewTenancyForm()">+ New Tenancy</button>
           <button class="btn btn-success btn-sm" onclick="navigate('finance')">Record Payment</button>
           <button class="btn btn-ghost btn-sm" onclick="showUploadDocumentForm()">Upload Doc</button>
@@ -1464,6 +1465,7 @@ async function renderModernDashboard() {
               <button class="md-quick-btn" onclick="navigate('finance')">Record Payment</button>
               <button class="md-quick-btn" onclick="window.showUploadDocumentForm?showUploadDocumentForm():navigate('documents')">Upload Doc</button>
               <button class="md-quick-btn" onclick="navigate('maintenance')">Maintenance</button>
+              <button class="md-quick-btn" onclick="window.showGenerateTA?showGenerateTA()">📄 Generate TA</button>
               <button class="md-quick-btn" onclick="navigate('messages')">Messages</button>
             </div>
           </div>
@@ -2005,6 +2007,76 @@ async function showTenancy(id) {
   }
 }
 
+// ── Generate Tenant Application Link ──
+async function showGenerateTA() {
+  let props=[];
+  try{const r=await api('/properties?per_page=100');props=r.data||[];}catch(e){}
+  const propOpts=props.map(p=>'<option value="'+escHtml(p.id)+'">'+escHtml(p.name||p.ref||p.id)+'</option>').join('');
+  openModal('<div style="min-width:460px">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
+    '<h2 style="margin:0">Generate Tenant Application</h2>'+
+    '<button onclick="closeModal(event)" style="border:none;background:none;font-size:20px;cursor:pointer;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;color:#666">✖</button></div>'+
+    '<p class="muted" style="font-size:13px;margin:0 0 16px">Select the property and unit this application is for, then generate a secure link to send to the client. '+
+    'The client fills the Tenant Application form (separate from referencing), pre-filled with the property and room.</p>'+
+    '<div class="form-group"><label>PROPERTY</label><select id="ta-prop" onchange="loadTAUnits()">'+propOpts+'</select></div>'+
+    '<div class="form-group"><label>UNIT / ROOM</label><select id="ta-unit"><option value="">Select a property first</option></select></div>'+
+    '<div id="ta-link-box" style="display:none;background:#e6f7e6;border-radius:8px;padding:14px;margin:14px 0">'+
+    '<div style="font-size:11px;font-weight:600;text-transform:uppercase;color:#2e7d32;letter-spacing:.5px;margin-bottom:6px">APPLICATION LINK READY</div>'+
+    '<div id="ta-link-name" style="font-size:13px;font-weight:500;margin-bottom:6px"></div>'+
+    '<div style="display:flex;gap:6px;margin-bottom:6px">'+
+    '<input id="ta-link-url" readonly style="flex:1;font-size:12px;padding:6px 8px;border:1px solid #c8e6c9;border-radius:4px;background:#fff">'+
+    '<button class="btn btn-ghost btn-sm" onclick="copyTALink()" style="white-space:nowrap">📋 Copy</button>'+
+    '<button class="btn btn-ghost btn-sm" onclick="window.open(document.getElementById(\'ta-link-url\').value,\'_blank\')" style="white-space:nowrap">↗ Open</button></div>'+
+    '<p class="muted" style="font-size:11px;margin:0;color:#555">Send this link to the client. Their submission lands under Applicants automatically.</p>'+
+    '</div>'+
+    '<div class="form-group"><label>CLIENT EMAIL</label><input type="email" id="ta-email" placeholder="client@example.com"></div>'+
+    '<div class="form-group"><label>CLIENT NAME</label><input type="text" id="ta-name" placeholder="e.g. John Smith"></div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'+
+    '<button class="btn btn-cancel" onclick="closeModal(event)">Close</button>'+
+    '<button class="btn btn-primary" onclick="genAndSendTA()" id="ta-send-btn">Generate & Send</button></div></div>');
+  window._taToken = null;
+}
+async function loadTAUnits() {
+  const pid=document.getElementById('ta-prop').value;
+  if(!pid){document.getElementById('ta-unit').innerHTML='<option>Select property first</option>';return;}
+  try{
+    const r=await api('/properties/'+pid+'/units?per_page=100');
+    const units=r.data||[];
+    document.getElementById('ta-unit').innerHTML=units.map(u=>'<option value="'+escHtml(u.id)+'">'+escHtml(u.unit_ref||'Unit #'+u.id)+'</option>').join('');
+  }catch(e){document.getElementById('ta-unit').innerHTML='<option>No units loaded</option>';}
+}
+function copyTALink() {
+  const el=document.getElementById('ta-link-url');
+  if(!el)return;
+  el.select(); navigator.clipboard.writeText(el.value).then(()=>{ showToast('Link copied'); });
+}
+async function genAndSendTA() {
+  const pid=document.getElementById('ta-prop').value;
+  const uid=document.getElementById('ta-unit').value;
+  const email=document.getElementById('ta-email').value.trim();
+  const name=document.getElementById('ta-name').value.trim();
+  if(!pid||!uid){showToast('Select property and room','error');return;}
+  if(!email){showToast('Enter client email','error');return;}
+  const btn=document.getElementById('ta-send-btn');
+  btn.disabled=true; btn.textContent='Generating...';
+  try{
+    const gr=await fetch('/api/tenant-application/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({property_id:parseInt(pid),unit_id:parseInt(uid)})});
+    const r=await gr.json();
+    if(!r.success)throw new Error(r.error||'Failed');
+    const link=r.data.link;
+    const token=r.data…ken;
+    document.getElementById('ta-link-box').style.display='block';
+    document.getElementById('ta-link-name').textContent=r.data.property_address+' — Room '+(r.data.unit_ref||'');
+    document.getElementById('ta-link-url').value=link;
+    btn.textContent='Sending email...';
+    const sr=await fetch('/api/tenant-application/'+token+'/send-link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,name:name,link:link})});
+    const sj=await sr.json();
+    if(!sj.success)throw new Error(sj.error||'Send failed');
+    btn.textContent='✓ Sent';
+    showToast('TA link sent to '+email);
+  }catch(e){showToast('Failed: '+e.message,'error');btn.disabled=false;btn.textContent='Generate & Send';}
+}
+
 // ── NEW TENANCY FORM ──
 async function showNewTenancyForm() {
   let props = [];
@@ -2215,6 +2287,19 @@ async function showTenant(id) {
 // APPLICANTS — Table view
 // ══════════════════════════════════════════
 let appState = { page:1, perPage:20, total:0, search:'', statusFilter:'', sourceFilter:'', assignedFilter:'' };
+async function deleteApplicant(aid, name) {
+  if(!confirm('Delete applicant "' + name + '"? This cannot be undone.')) return;
+  try {
+    const r = await fetch('/api/banksia-os/applicants/'+aid, { method:'DELETE' });
+    const j = await r.json();
+    if(!j.success) throw new Error(j.error||'Delete failed');
+    showToast('Deleted: ' + name);
+    renderApplicants();
+  } catch(e) {
+    showToast('Failed to delete: ' + e.message, 'error');
+  }
+}
+
 async function renderApplicants() {
   const el = document.getElementById('page-content');
   el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading applicants...</div>';
@@ -2241,7 +2326,7 @@ async function renderApplicants() {
     </select>`;
     html += ` <select onchange="appState.sourceFilter=this.value;appState.page=1;renderApplicants()" style="width:130px"><option value="">All Sources</option>${sources.map(s => `<option value="${escHtml(s)}" ${sourceFilter===s?'selected':''}>${escHtml(s)}</option>`).join('')}</select>`;
     html += ` <select onchange="appState.assignedFilter=this.value;appState.page=1;renderApplicants()" style="width:140px"><option value="">All Assignees</option>${assignedTos.map(s => `<option value="${escHtml(s)}" ${assignedFilter===s?'selected':''}>${escHtml(s)}</option>`).join('')}</select>`;
-    html += '</div><div class="right"><button class="btn btn-primary btn-sm" onclick="showNewApplicantForm()">+ New Applicant</button></div></div>';
+    html += '</div><div class="right"><button class="btn btn-primary btn-sm" onclick="showNewApplicantForm()">+ New Applicant</button> <button class="btn btn-primary btn-sm" onclick="showGenerateTA()">📄 Generate TA</button></div></div>';
     if (items.length===0) {
       html += '<div class="empty-state"><div class="icon">○</div><h3>No applicants found</h3></div>';
     } else {
@@ -2257,6 +2342,7 @@ async function renderApplicants() {
           <td>
             <button class="btn btn-sm btn-success" onclick="event.stopPropagation();createTenancyFromApplicant(${a.id})" style="font-size:9px;padding:3px 6px">→ Tenancy</button>
             <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();showCreditReport(${a.id})" style="font-size:9px;padding:3px 6px">Credit</button>
+            <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteApplicant(${a.id},'${escHtml((a.first_name||'')+' '+(a.last_name||''))}')" style="font-size:9px;padding:3px 6px">Delete</button>
           </td>
         </tr>`;
       });

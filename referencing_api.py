@@ -1608,7 +1608,7 @@ def api_get_document(doc_id):
         if dl:
             if "user" not in flask_session:
                 return json_error("Not authenticated", 401)
-            return send_file(doc["file_path"], as_attachment=True, download_name=doc["original_filename"])
+            return send_file(doc["file_path"], as_attachment=True, download_name=doc["original_filename"], mimetype="application/pdf")
 
         return json_success(doc)
     finally:
@@ -3337,20 +3337,12 @@ def _compute_roadmap(db, applicant_id, user_id):
         except Exception:
             pass
 
-    # Step 4: Payment
-    if applicant_id:
-        try:
-            ta_pay = db.execute(
-                "SELECT holding_deposit_paid, check_in_installment FROM tenant_applications "
-                "WHERE applicant_id = ? AND status='submitted' ORDER BY id DESC LIMIT 1",
-                [applicant_id]
-            ).fetchone()
-            if ta_pay and ta_pay.get("holding_deposit_paid"):
-                pd = str(ta_pay["holding_deposit_paid"]).strip()
-                if pd and float(pd) > 0:
-                    steps[3]["status"] = "completed"
-        except Exception:
-            pass
+    # Step 4: Payment — only active when contract (step 3) is completed
+    # Payment is tracked separately, not auto-completed from TA holding_deposit_paid
+    if applicant_id and steps[2]["status"] == "completed":
+        steps[3]["status"] = "active"
+    else:
+        steps[3]["status"] = "locked"
 
     return steps
 
@@ -3523,7 +3515,7 @@ def api_portal_download_entity_document(doc_id):
         ).fetchone()
         if not doc:
             return json_error("Document not found or not authorised", 404)
-        return send_file(doc["file_path"], as_attachment=True, download_name=doc["original_filename"])
+        return send_file(doc["file_path"], as_attachment=True, download_name=doc["original_filename"], mimetype="application/pdf")
     finally:
         db.close()
 
@@ -3686,7 +3678,7 @@ def api_portal_download_document(doc_id):
         ).fetchone()
         if not doc:
             return json_error("Document not found or not authorised", 404)
-        return send_file(doc["file_path"], as_attachment=True, download_name=doc["original_filename"])
+        return send_file(doc["file_path"], as_attachment=True, download_name=doc["original_filename"], mimetype="application/pdf")
     finally:
         db.close()
 

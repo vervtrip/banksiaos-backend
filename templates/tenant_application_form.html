@@ -15,6 +15,8 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#fdf3ee;color:#0f17
 .status-badge{font-size:12px;font-weight:600;padding:6px 14px;border-radius:20px}
 .status-badge.draft{background:#fef3c7;color:#92400e}
 .status-badge.submitted{background:#dbeafe;color:#1e40af}
+.countdown{font-size:11px;font-weight:600;color:#dc2626;text-align:right;white-space:nowrap}
+.countdown span{font-size:17px;font-weight:800}
 .banner{max-width:960px;margin:24px auto 0;padding:0 40px}
 .banner .box{background:#fff2eb;border:1px solid #f8af97;border-radius:14px;padding:16px 22px}
 .banner .box .l{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#f16232}
@@ -52,7 +54,9 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#fdf3ee;color:#0f17
 .toast.show{display:block}
 .locked-banner{background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:14px;padding:16px 22px;font-size:13.5px;font-weight:600;margin-bottom:22px}
 .loading{max-width:960px;margin:80px auto;text-align:center;color:#94a3b8;font-size:14px}
-</style>
+
+      .date-range-note { display:block; margin-top:2px; font-size:11px; color:#6b7280; }
+    </style>
 </head>
 <body>
 <div class="top-bar">
@@ -61,6 +65,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#fdf3ee;color:#0f17
     <div style="text-align:right">
       <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;font-weight:600">Date of Application</div>
       <div id="appDate" style="font-size:15px;font-weight:700;color:#0f172a">—</div>
+      <div id="countdown" class="countdown" style="display:none">⏱ <span id="countdownDisplay"></span></div>
     </div>
     <span id="statusBadge" class="status-badge draft">Draft</span>
   </div>
@@ -93,9 +98,28 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#fdf3ee;color:#0f17
       </div>
     </div>
 
+    <!-- Number of Applicants -->
+    <div class="section-card">
+      <div class="section-header"><span class="num">2</span><span class="section-title">Number of Applicants</span></div>
+      <div class="section-body">
+        <div class="form-grid">
+          <div class="form-group full" style="display:flex;flex-direction:row;gap:24px;padding:8px 0">
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500;cursor:pointer">
+              <input type="radio" name="num_applicants" value="1" checked onchange="toggleNumApplicants(1)">
+              1 Applicant
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500;cursor:pointer">
+              <input type="radio" name="num_applicants" value="2" onchange="toggleNumApplicants(2)">
+              2 Applicants
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 1st Applicant -->
     <div class="section-card">
-      <div class="section-header"><span class="num">2</span><span class="section-title">Applicant Information — 1st Applicant</span></div>
+      <div class="section-header"><span class="num">3</span><span class="section-title">Applicant Information — 1st Applicant</span></div>
       <div class="section-body">
         <div class="form-grid">
           <div class="form-group"><label>Full Name<span class="required">*</span></label><input id="a1_full_name"></div>
@@ -109,13 +133,13 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#fdf3ee;color:#0f17
     </div>
 
     <!-- 2nd Applicant -->
-    <div class="section-card">
-      <div class="section-header"><span class="num">3</span><span class="section-title">Applicant Information — 2nd Applicant</span><span class="opt">optional</span></div>
+    <div class="section-card" id="a2-section" style="display:none">
+      <div class="section-header"><span class="num">4</span><span class="section-title">Applicant Information — 2nd Applicant</span></div>
       <div class="section-body">
         <div class="form-grid">
-          <div class="form-group"><label>Full Name</label><input id="a2_full_name"></div>
-          <div class="form-group"><label>Date of Birth</label><input id="a2_dob" type="date"></div>
-          <div class="form-group"><label>Email</label><input id="a2_email" type="email"></div>
+          <div class="form-group"><label id="a2_full_name-lbl">Full Name</label><input id="a2_full_name"></div>
+          <div class="form-group"><label id="a2_dob-lbl">Date of Birth</label><input id="a2_dob" type="date"></div>
+          <div class="form-group"><label id="a2_email-lbl">Email</label><input id="a2_email" type="email"></div>
           <div class="form-group"><label>Gender</label><select id="a2_gender"><option value="">Select…</option><option>Male</option><option>Female</option></select></div>
           <div class="form-group"><label>Guarantor Email</label><input id="a2_guarantor_email" type="email"></div>
           <div class="form-group"><label>Guarantor Mobile</label><input id="a2_guarantor_mobile"></div>
@@ -125,26 +149,27 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#fdf3ee;color:#0f17
 
     <!-- Terms Agreed -->
     <div class="section-card">
-      <div class="section-header"><span class="num">4</span><span class="section-title">Terms Agreed</span></div>
+      <div class="section-header"><span class="num">5</span><span class="section-title">Terms Agreed</span></div>
       <div class="section-body">
         <div class="form-grid">
-          <div class="form-group"><label>Monthly Rent (£)</label><input id="monthly_rent" disabled></div>
-          <div class="form-group"><label>Deposit (£)</label><input id="deposit" disabled></div>
+          <div class="form-group"><label>Monthly Rent</label><input id="monthly_rent" disabled></div>
+          <div class="form-group"><label>Deposit</label><input id="deposit" disabled></div>
           <div class="form-group"><label>Check-In Date</label><input id="check_in_date" type="date"></div>
           <div class="form-group"><label>Bills</label><select id="bills_included"><option value="0">Not Included</option><option value="1">Included</option></select></div>
-          <div class="form-group"><label>Pro-Rata (£)</label><input id="pro_rata" disabled></div>
+          <div class="form-group"><label>Pro-Rata</label><input id="pro_rata" disabled>
+          <small id="pro_rata_dates" class="date-range-note"></small></div>
           <div class="form-group"><label>Check-In Installment (Pro-Rata + Deposit − Holding Deposit)</label><input id="check_in_installment" disabled></div>
-          <div class="form-group"><label>Holding Deposit (£)</label><input id="holding_deposit" disabled></div>
+          <div class="form-group"><label>Holding Deposit</label><input id="holding_deposit" disabled></div>
         </div>
       </div>
     </div>
 
     <!-- Holding Deposit confirmation -->
     <div class="section-card">
-      <div class="section-header"><span class="num">5</span><span class="section-title">Holding Deposit</span></div>
+      <div class="section-header"><span class="num">6</span><span class="section-title">Holding Deposit</span></div>
       <div class="section-body">
         <div class="form-grid">
-          <div class="form-group"><label>Amount Transferred (£)</label><input id="holding_deposit_paid" disabled></div>
+          <div class="form-group"><label>Amount Transferred</label><input id="holding_deposit_paid" disabled></div>
           <div class="form-group full">
             <div class="checkbox-row"><input type="checkbox" id="holding_deposit_confirmed">
               <label for="holding_deposit_confirmed">I confirm that I have transferred the above sum as a Holding Deposit to reserve the specified accommodation unit provided by the Landlord, which will go toward my deposit.<span class="required">*</span></label></div>
@@ -155,7 +180,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#fdf3ee;color:#0f17
 
     <!-- Declaration -->
     <div class="section-card">
-      <div class="section-header"><span class="num">6</span><span class="section-title">Applicant Declaration</span></div>
+      <div class="section-header"><span class="num">7</span><span class="section-title">Applicant Declaration</span></div>
       <div class="section-body">
         <div class="decl-text">
           <ul>
@@ -171,7 +196,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#fdf3ee;color:#0f17
             <label for="declaration_confirmed">I/We have read and agree to the Applicant Declaration above.<span class="required">*</span></label></div>
         </div>
         <div class="form-grid" style="margin-top:12px">
-          <div class="form-group"><label>Signature (type your full name)</label><input id="signature_data"></div>
+          <div class="form-group"><label>Signature (type your full name)<span class="required">*</span></label><input id="signature_data"></div>
           <div class="form-group"><label>Date</label><input id="signature_date" type="date"></div>
         </div>
       </div>
@@ -208,14 +233,88 @@ async function load(){
     const d=json.data;
     document.getElementById('propBanner').textContent =
       (d.property_address||'') + (d.room_number? '  —  Room '+d.room_number : '');
-    TEXT_FIELDS.forEach(f=>setVal(f, d[f]));
+    // Store raw money values for dynamic recalculation
+    var RAW = { monthly_rent: parseFloat(d.monthly_rent)||0, deposit: parseFloat(d.deposit)||0, holding_deposit: parseFloat(d.holding_deposit)||0 };
+    var MONEY_FIELDS=["monthly_rent","deposit","holding_deposit","holding_deposit_paid"];
+    // Pro-rata and check-in-installment are calculated dynamically (not pre-formatted)
+    TEXT_FIELDS.forEach(f=>{
+      if(MONEY_FIELDS.includes(f) && d[f]!=null && d[f]!==''){
+        setVal(f, '£'+Number(d[f]).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}));
+      }else if(f!=='pro_rata' && f!=='check_in_installment'){
+        setVal(f, d[f]);
+      }
+    });
+    function fmtMoney(n){ return '£'+Number(n).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+    function recalcProRata(dateStr){
+      if(!dateStr || !dateStr.trim()){
+        setVal('pro_rata','');
+        setVal('check_in_installment','');
+        document.getElementById('pro_rata_dates').textContent='';
+        return;
+      }
+      var c = new Date(dateStr);
+      if(isNaN(c.getTime())) return;
+      var lm = new Date(c.getFullYear(), c.getMonth()+1, 0);
+      var days = lm.getDate() - c.getDate();
+      // Pro-rata period end: if < 10 days left, extend to end of next month
+      var pm = days < 10 ? new Date(lm.getFullYear(), lm.getMonth()+2, 0) : lm;
+      // Date range display
+      var fmt = function(dt){ return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); };
+      var el = document.getElementById('pro_rata_dates');
+      if(el) el.textContent = fmt(c) + '  -  ' + fmt(pm);
+      // Financial calculation (same formula as server-side _compute_prorata)
+      var holding = RAW.holding_deposit;
+      var monthlyRent = RAW.monthly_rent;
+      var deposit = RAW.deposit;
+      var dailyRate = holding / 7;
+      var proRata = days * dailyRate;
+      if(days < 10) proRata += monthlyRent;
+      var checkInInstall = proRata + deposit - holding;
+      setVal('pro_rata', fmtMoney(proRata));
+      setVal('check_in_installment', fmtMoney(checkInInstall));
+    }
+    recalcProRata(d.check_in_date);
+    var checkInInput = document.getElementById('check_in_date');
+    if(checkInInput){
+      checkInInput.addEventListener('change', function(){ recalcProRata(this.value); });
+      checkInInput.addEventListener('input', function(){ recalcProRata(this.value); });
+    }
     if(d.created_at){ try{ document.getElementById('appDate').textContent = new Date(d.created_at).toLocaleDateString('en-GB'); }catch(e){} }
+    // Countdown timer: 24h from first_opened_at
+    if(d.first_opened_at && d.status === 'draft'){
+      var deadline = new Date(new Date(d.first_opened_at).getTime() + 24*3600000);
+      (function(deadline){
+        var cd = document.getElementById('countdown'), dis = document.getElementById('countdownDisplay');
+        if(cd && dis){
+          cd.style.display = 'block';
+          function tick(){
+            var diff = deadline.getTime() - new Date().getTime();
+            if(diff <= 0){ diff = 0; if(cd) cd.classList.add('urgent'); }
+            var h = Math.floor(diff / 3600000), m = Math.floor((diff % 3600000) / 60000), s = Math.floor((diff % 60000) / 1000);
+            dis.textContent = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+            if(h < 1) cd.classList.add('urgent');
+          }
+          tick();
+          setInterval(tick, 1000);
+        }
+      })(deadline);
+    }
     document.getElementById('bills_included').value = String(d.bills_included||0);
     document.getElementById('holding_deposit_confirmed').checked = !!d.holding_deposit_confirmed;
     document.getElementById('declaration_confirmed').checked = !!d.declaration_confirmed;
+    // Restore number of applicants
+    var numApps = parseInt(d.num_applicants) || 1;
+    var numRadios = document.querySelectorAll('input[name="num_applicants"]');
+    if(numRadios.length) {
+      for(var ri=0;ri<numRadios.length;ri++){
+        if(parseInt(numRadios[ri].value)===numApps){ numRadios[ri].checked=true; break; }
+      }
+      toggleNumApplicants(numApps);
+    }
+    if(d.signature_data) document.getElementById('signature_data').value = d.signature_data;
 
     if(String(d.status)==='submitted' || String(d.status)==='under_review' || String(d.status)==='approved'){
-      SUBMITTED=true; lockForm();
+      SUBMITTED=true; lockForm(); return;
     }
     document.getElementById('loading').style.display='none';
     document.getElementById('app').style.display='block';
@@ -223,16 +322,54 @@ async function load(){
 }
 
 function lockForm(){
-  document.getElementById('statusBadge').className='status-badge submitted';
-  document.getElementById('statusBadge').textContent='Submitted';
-  document.getElementById('lockedBanner').style.display='block';
-  document.querySelectorAll('#app input, #app select, #app textarea').forEach(el=>el.disabled=true);
-  const b=document.getElementById('submitBtn'); b.disabled=true; b.textContent='Submitted';
+  // Replace page with centered portal button
+  document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fdf3ee;font-family:Inter,-apple-system,sans-serif"><div style="text-align:center;padding:40px"><div style="font-size:52px;margin-bottom:16px">\u2705</div><h2 style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:8px">Application submitted!</h2><p style="color:#64748b;font-size:15px;margin-bottom:32px">Your tenant application has been received successfully.</p><a href="/portal" style="display:inline-block;padding:15px 40px;background:#1e293b;color:#fff;border-radius:10px;font-size:16px;font-weight:700;text-decoration:none;box-shadow:0 4px 14px rgba(0,0,0,.15)">Go to my portal</a></div></div>';
+}
+
+function toggleNumApplicants(n){
+  var section = document.getElementById('a2-section');
+  if(section) section.style.display = n === 2 ? 'block' : 'none';
+  ['a2_full_name','a2_dob','a2_email'].forEach(function(id){
+    var lbl = document.getElementById(id + '-lbl');
+    if(!lbl) return;
+    if(n === 2) {
+      if(!lbl.querySelector('.required')) lbl.innerHTML += '<span class="required">*</span>';
+    } else {
+      lbl.innerHTML = lbl.innerHTML.replace('<span class="required">*</span>', '');
+    }
+  });
+  // Renumber visible sections sequentially
+  var num = 0;
+  var sections = document.querySelectorAll('.section-card');
+  for(var si=0;si<sections.length;si++){
+    if(sections[si].style.display === 'none') continue;
+    var numSpan = sections[si].querySelector('.num');
+    if(numSpan) { num++; numSpan.textContent = num; }
+  }
+}
+
+function isValidEmail(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
+
+function calcAge(dobStr){
+  if(!dobStr) return -1;
+  var p = dobStr.split('-');
+  if(p.length !== 3) return -1;
+  var bd = new Date(parseInt(p[0]), parseInt(p[1])-1, parseInt(p[2]));
+  var t = new Date();
+  var age = t.getFullYear() - bd.getFullYear();
+  var m = t.getMonth() - bd.getMonth();
+  if(m < 0 || (m === 0 && t.getDate() < bd.getDate())) age--;
+  return age;
 }
 
 async function submit(){
   const payload={};
-  TEXT_FIELDS.forEach(f=>{ if(f!=='property_address'&&f!=='post_code'&&f!=='room_number') payload[f]=document.getElementById(f).value; });
+  TEXT_FIELDS.forEach(f=>{
+      if(f!=='property_address'&&f!=='post_code'&&f!=='room_number'){
+        var v = document.getElementById(f).value;
+        payload[f] = v.replace(/^£/,'').replace(/,/g,'');
+      }
+    });
   payload.bills_included = document.getElementById('bills_included').value;
   payload.holding_deposit_confirmed = document.getElementById('holding_deposit_confirmed').checked;
   payload.declaration_confirmed = document.getElementById('declaration_confirmed').checked;
@@ -240,9 +377,21 @@ async function submit(){
   if(!payload.a1_full_name.trim()){ toast('Please enter the 1st applicant full name.'); return; }
   if(!payload.a1_dob.trim()){ toast('Please enter the 1st applicant date of birth.'); return; }
   if(!payload.a1_email.trim()){ toast('Please enter the 1st applicant email.'); return; }
+  if(!isValidEmail(payload.a1_email)){ toast('First applicant email address is not valid.'); return; }
   if(!payload.a1_guarantor_email.trim()){ toast('Please enter the 1st applicant guarantor email.'); return; }
+  if(!isValidEmail(payload.a1_guarantor_email)){ toast('First applicant guarantor email address is not valid.'); return; }
+  if(payload.a1_email.toLowerCase()===payload.a1_guarantor_email.toLowerCase()){ toast('First applicant email and guarantor email must be different.'); return; }
   if(!payload.a1_guarantor_mobile.trim()){ toast('Please enter the 1st applicant guarantor phone number.'); return; }
+  if(payload.a1_dob && calcAge(payload.a1_dob) < 18){ toast('First applicant must be at least 18 years old.'); return; }
+  var numApps = parseInt(document.querySelector('input[name="num_applicants"]:checked').value);
+  if(numApps === 2){
+    if(!payload.a2_full_name.trim()){ toast('Please enter the 2nd applicant full name.'); return; }
+    if(!payload.a2_dob.trim()){ toast('Please enter the 2nd applicant date of birth.'); return; }
+    if(!payload.a2_email.trim()){ toast('Please enter the 2nd applicant email.'); return; }
+    if(payload.a2_email && !isValidEmail(payload.a2_email)){ toast('Second applicant email address is not valid.'); return; }
+  }
   if(!payload.holding_deposit_confirmed){ toast('Please confirm the holding deposit transfer to submit.'); return; }
+  if(!payload.signature_data.trim()){ toast('Please enter your signature.'); return; }
   if(!payload.declaration_confirmed){ toast('Please confirm the Applicant Declaration to submit.'); return; }
 
   const b=document.getElementById('submitBtn'); b.disabled=true; b.textContent='Submitting…';
@@ -254,6 +403,10 @@ async function submit(){
     SUBMITTED=true; lockForm();
     toast('Application submitted. Thank you!', true);
     window.scrollTo({top:0,behavior:'smooth'});
+    // Add portal button after submission
+    var pb=document.createElement('div'); pb.style.cssText='text-align:center;margin-top:24px';
+    pb.innerHTML='<a href="/portal" style="display:inline-block;padding:12px 28px;background:#1e293b;color:#fff;border-radius:10px;font-size:14px;font-weight:700;text-decoration:none">Go to my portal dashboard</a>';
+    document.querySelector('.form-container')?.appendChild(pb);
   }catch(e){ toast('Submission failed. Please try again.'); b.disabled=false; b.textContent='Submit Application'; }
 }
 

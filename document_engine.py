@@ -17,6 +17,18 @@ os.makedirs(TEMPLATES_DIR, exist_ok=True)
 os.makedirs(GENERATED_DIR, exist_ok=True)
 
 # ── Merge data field map ──
+
+def _make_signature_block(tenants):
+    """Build a formatted signature block with one line per tenant."""
+    if not tenants:
+        return ""
+    lines = []
+    for t in tenants:
+        name = f"{t.get('first_name','')} {t.get('last_name','')}".strip()
+        if name:
+            lines.append("_________________________\n" + name)
+    return "\n\n".join(lines)
+
 def get_merge_data(tenancy_id):
     """Fetch tenancy data and build a flat dict of merge fields."""
     db = get_dict_db()
@@ -71,6 +83,7 @@ def get_merge_data(tenancy_id):
             "TenantEmployer": main_tenant.get("employment_company", ""),
             "TenantNI": main_tenant.get("ni_number", ""),
             "TenantPassport": main_tenant.get("passport_number", ""),
+            "TenantSignatureBlock": _make_signature_block(tenants),
             "GuarantorName": f"{main_tenant.get('guarantor_first_name','')} {main_tenant.get('guarantor_last_name','')}".strip(),
             "GuarantorEmail": main_tenant.get("guarantor_email", ""),
 
