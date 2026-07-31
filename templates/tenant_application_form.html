@@ -56,6 +56,24 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#fdf3ee;color:#0f17
 .loading{max-width:960px;margin:80px auto;text-align:center;color:#94a3b8;font-size:14px}
 
       .date-range-note { display:block; margin-top:2px; font-size:11px; color:#6b7280; }
+
+/* Drawn signature */
+.sig-wrap{grid-column:1/-1}
+.sig-pad{position:relative;border:2px dashed #cbd5e1;border-radius:12px;background:#fff;
+  height:170px;touch-action:none;cursor:crosshair;overflow:hidden}
+.sig-pad.signed{border-style:solid;border-color:#f16232;background:#fffaf7}
+.sig-pad canvas{display:block;width:100%;height:100%}
+.sig-hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:#94a3b8;font-size:13px;pointer-events:none;text-align:center;padding:0 20px}
+.sig-pad.signed .sig-hint{display:none}
+.sig-baseline{position:absolute;left:24px;right:24px;bottom:42px;border-bottom:1px solid #e2e8f0;
+  pointer-events:none}
+.sig-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px;
+  flex-wrap:wrap}
+.sig-note{font-size:11.5px;color:#6b7280;line-height:1.5}
+.sig-clear{background:#fff;border:1px solid #cbd5e1;color:#475569;border-radius:9px;
+  padding:7px 16px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
+.sig-clear:hover{background:#f8fafc;border-color:#94a3b8}
     </style>
 </head>
 <body>
@@ -196,7 +214,18 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#fdf3ee;color:#0f17
             <label for="declaration_confirmed">I/We have read and agree to the Applicant Declaration above.<span class="required">*</span></label></div>
         </div>
         <div class="form-grid" style="margin-top:12px">
-          <div class="form-group"><label>Signature (type your full name)<span class="required">*</span></label><input id="signature_data"></div>
+          <div class="form-group sig-wrap">
+            <label>Signature<span class="required">*</span></label>
+            <div class="sig-pad" id="sigPad">
+              <canvas id="sigCanvas"></canvas>
+              <div class="sig-baseline"></div>
+              <div class="sig-hint" id="sigHint">Sign here using your mouse, finger or stylus</div>
+            </div>
+            <div class="sig-bar">
+              <span class="sig-note" id="sigName">Signing as the first applicant named above.</span>
+              <button type="button" class="sig-clear" id="sigClear">Clear signature</button>
+            </div>
+          </div>
           <div class="form-group"><label>Date</label><input id="signature_date" type="date"></div>
         </div>
       </div>
@@ -215,7 +244,7 @@ const TOKEN = "{{ url_token }}";
 const TEXT_FIELDS = ["a1_full_name","a1_dob","a1_email","a1_gender","a1_guarantor_email","a1_guarantor_mobile",
   "a2_full_name","a2_dob","a2_email","a2_gender","a2_guarantor_email","a2_guarantor_mobile",
   "monthly_rent","deposit","check_in_date","pro_rata","check_in_installment","holding_deposit",
-  "holding_deposit_paid","signature_data","signature_date","property_address","post_code","room_number"];
+  "holding_deposit_paid","signature_date","property_address","post_code","room_number"];
 let SUBMITTED = false;
 
 function toast(msg, ok){
@@ -311,19 +340,29 @@ async function load(){
       }
       toggleNumApplicants(numApps);
     }
-    if(d.signature_data) document.getElementById('signature_data').value = d.signature_data;
-
     if(String(d.status)==='submitted' || String(d.status)==='under_review' || String(d.status)==='approved'){
       SUBMITTED=true; lockForm(); return;
     }
     document.getElementById('loading').style.display='none';
     document.getElementById('app').style.display='block';
+    // The pad is measured from its rendered size, so it can only be sized once
+    // the form is actually on screen.
+    Signature.fit();
+    Signature.restore(d.signature_image);
+    var nm=(d.a1_full_name||'').trim();
+    if(nm) document.getElementById('sigName').textContent = 'Signing as ' + nm + '.';
   }catch(e){ document.getElementById('loading').textContent='Could not load the application. Please refresh.'; }
 }
 
-function lockForm(){
-  // Replace page with centered portal button
-  document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fdf3ee;font-family:Inter,-apple-system,sans-serif"><div style="text-align:center;padding:40px"><div style="font-size:52px;margin-bottom:16px">\u2705</div><h2 style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:8px">Application submitted!</h2><p style="color:#64748b;font-size:15px;margin-bottom:32px">Your tenant application has been received successfully.</p><a href="/portal" style="display:inline-block;padding:15px 40px;background:#1e293b;color:#fff;border-radius:10px;font-size:16px;font-weight:700;text-decoration:none;box-shadow:0 4px 14px rgba(0,0,0,.15)">Go to my portal</a></div></div>';
+function lockForm(referencingUrl){
+  // Replace the page with a confirmation that names what happens next. Getting
+  // the application in is only step one, so the referencing form is the primary
+  // button and the portal is the way back to everything else.
+  var next = referencingUrl
+    ? '<a href="'+referencingUrl+'" style="display:inline-block;padding:15px 40px;background:#f16232;color:#fff;border-radius:10px;font-size:16px;font-weight:700;text-decoration:none;box-shadow:0 4px 14px rgba(241,98,50,.28)">Start referencing</a>'
+      + '<div style="margin-top:16px"><a href="/portal" style="color:#64748b;font-size:14px;font-weight:600;text-decoration:none">Or go to my portal</a></div>'
+    : '<a href="/portal" style="display:inline-block;padding:15px 40px;background:#1e293b;color:#fff;border-radius:10px;font-size:16px;font-weight:700;text-decoration:none;box-shadow:0 4px 14px rgba(0,0,0,.15)">Go to my portal</a>';
+  document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fdf3ee;font-family:Inter,-apple-system,sans-serif"><div style="text-align:center;padding:40px;max-width:440px"><div style="font-size:52px;margin-bottom:16px">\u2705</div><h2 style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:8px">Application submitted</h2><p style="color:#64748b;font-size:15px;margin-bottom:10px">Thank you. Your tenant application has been received and a copy has been saved to the Docs section of your portal.</p><p style="color:#64748b;font-size:15px;margin-bottom:32px">The next step is referencing.</p>'+next+'</div></div>';
 }
 
 function toggleNumApplicants(n){
@@ -391,7 +430,13 @@ async function submit(){
     if(payload.a2_email && !isValidEmail(payload.a2_email)){ toast('Second applicant email address is not valid.'); return; }
   }
   if(!payload.holding_deposit_confirmed){ toast('Please confirm the holding deposit transfer to submit.'); return; }
-  if(!payload.signature_data.trim()){ toast('Please enter your signature.'); return; }
+  if(!Signature.hasSigned()){
+    toast('Please sign in the signature box before submitting.');
+    document.getElementById('sigPad').scrollIntoView({behavior:'smooth',block:'center'});
+    return;
+  }
+  payload.signature_image = Signature.toDataURL();
+  payload.signature_data = payload.a1_full_name.trim();
   if(!payload.declaration_confirmed){ toast('Please confirm the Applicant Declaration to submit.'); return; }
 
   const b=document.getElementById('submitBtn'); b.disabled=true; b.textContent='Submitting…';
@@ -400,15 +445,83 @@ async function submit(){
       method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
     const json=await res.json();
     if(!json.success){ toast(json.error||'Submission failed.'); b.disabled=false; b.textContent='Submit Application'; return; }
-    SUBMITTED=true; lockForm();
-    toast('Application submitted. Thank you!', true);
+    SUBMITTED=true;
+    lockForm((json.data||{}).referencing_url);
     window.scrollTo({top:0,behavior:'smooth'});
-    // Add portal button after submission
-    var pb=document.createElement('div'); pb.style.cssText='text-align:center;margin-top:24px';
-    pb.innerHTML='<a href="/portal" style="display:inline-block;padding:12px 28px;background:#1e293b;color:#fff;border-radius:10px;font-size:14px;font-weight:700;text-decoration:none">Go to my portal dashboard</a>';
-    document.querySelector('.form-container')?.appendChild(pb);
   }catch(e){ toast('Submission failed. Please try again.'); b.disabled=false; b.textContent='Submit Application'; }
 }
+
+/* ── Drawn signature ──
+   A canvas the applicant signs on with a mouse, finger or stylus. Backed at its
+   own device pixel ratio so it is not a blurry line on a phone, and re-fitted on
+   resize/orientation change. Exported as a PNG data URL on submit. */
+var Signature = (function(){
+  var pad=document.getElementById('sigPad');
+  var canvas=document.getElementById('sigCanvas');
+  if(!pad||!canvas) return {hasSigned:function(){return false},toDataURL:function(){return ''},restore:function(){}};
+  var ctx=canvas.getContext('2d');
+  var drawing=false, signed=false, last=null;
+
+  function fit(){
+    var prev = signed ? canvas.toDataURL('image/png') : null;
+    var ratio = window.devicePixelRatio || 1;
+    var w = pad.clientWidth, h = pad.clientHeight;
+    canvas.width = Math.round(w*ratio); canvas.height = Math.round(h*ratio);
+    ctx.setTransform(ratio,0,0,ratio,0,0);
+    ctx.lineWidth=2.2; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#0f172a';
+    if(prev){ var img=new Image(); img.onload=function(){ ctx.drawImage(img,0,0,w,h); }; img.src=prev; }
+  }
+  function pos(e){
+    var r=canvas.getBoundingClientRect();
+    var p=(e.touches&&e.touches[0])?e.touches[0]:e;
+    return {x:p.clientX-r.left, y:p.clientY-r.top};
+  }
+  function start(e){ e.preventDefault(); drawing=true; last=pos(e); mark(); }
+  function move(e){
+    if(!drawing) return; e.preventDefault();
+    var p=pos(e);
+    ctx.beginPath(); ctx.moveTo(last.x,last.y); ctx.lineTo(p.x,p.y); ctx.stroke();
+    last=p;
+  }
+  function end(){ drawing=false; last=null; }
+  function mark(){ if(!signed){ signed=true; pad.classList.add('signed'); } }
+
+  canvas.addEventListener('mousedown',start); canvas.addEventListener('mousemove',move);
+  window.addEventListener('mouseup',end);
+  canvas.addEventListener('touchstart',start,{passive:false});
+  canvas.addEventListener('touchmove',move,{passive:false});
+  canvas.addEventListener('touchend',end);
+  window.addEventListener('resize',fit);
+
+  document.getElementById('sigClear').addEventListener('click',function(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    signed=false; pad.classList.remove('signed');
+  });
+
+  fit();
+  return {
+    fit:fit,
+    hasSigned:function(){ return signed; },
+    toDataURL:function(){ return canvas.toDataURL('image/png'); },
+    restore:function(dataUrl){
+      if(!dataUrl) return;
+      var img=new Image();
+      img.onload=function(){ ctx.drawImage(img,0,0,pad.clientWidth,pad.clientHeight); mark(); };
+      img.src=dataUrl;
+    }
+  };
+})();
+
+/* Keep the "signing as" line in step with the name typed above, so it is obvious
+   whose signature this is meant to be. */
+(function(){
+  var nameEl=document.getElementById('a1_full_name'), noteEl=document.getElementById('sigName');
+  if(!nameEl||!noteEl) return;
+  nameEl.addEventListener('input',function(){
+    var v=nameEl.value.trim();
+    noteEl.textContent = v ? ('Signing as ' + v + '.') : 'Signing as the first applicant named above.';
+  });
+})();
 
 try{ document.getElementById('appDate').textContent = new Date().toLocaleDateString('en-GB'); }catch(e){}
 document.getElementById('submitBtn').addEventListener('click', submit);

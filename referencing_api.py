@@ -232,6 +232,10 @@ PUBLIC_BASE_URL = os.environ.get("BANKSIA_PUBLIC_URL", "https://ops.srv1744186.h
 # Banksia referencing correspondence goes out from the Banksia inbox, never the Verv one.
 BANKSIA_FROM_EMAIL = "team@banksialondon.com"
 BANKSIA_FROM_NAME = "Banksia Lettings"
+
+# Missive refuses a from_field that is not a connected sender on the account,
+# with this message and a 400, before the message is dispatched.
+SENDER_NOT_AVAILABLE = "does not match an available sender"
 _MISSIVE_TOKEN_PATH = "/root/.hermes/secrets/missive_token.txt"
 
 
@@ -243,11 +247,17 @@ def _missive_token():
         return None
 
 
-def send_email(to_email, to_name, subject, html_body, send=True):
+def send_email(to_email, to_name, subject, html_body, send=True,
+               from_email=None, from_name=None, reply_to=None):
     """Deliver an email via Missive from the Banksia inbox.
 
     Returns (ok: bool, detail: str). When send=False a draft is created but
     not delivered — used for wiring checks so we don't spam real inboxes.
+
+    `from_email`/`from_name` override the default Banksia sender. Missive only
+    accepts an address that is a connected sender on the account; anything else
+    is refused with a 400 before the message leaves, so callers that pass an
+    override should be prepared to fall back (see SENDER_NOT_AVAILABLE).
     """
     import urllib.request, urllib.error
 
@@ -260,15 +270,19 @@ def send_email(to_email, to_name, subject, html_body, send=True):
     if not token:
         return False, "no missive token"
 
-    payload = {
-        "drafts": {
-            "subject": subject,
-            "body": html_body,
-            "to_fields": [{"address": to_email, "name": to_name or to_email}],
-            "from_field": {"address": BANKSIA_FROM_EMAIL, "name": BANKSIA_FROM_NAME},
-            "send": bool(send),
-        }
+    draft = {
+        "subject": subject,
+        "body": html_body,
+        "to_fields": [{"address": to_email, "name": to_name or to_email}],
+        "from_field": {
+            "address": from_email or BANKSIA_FROM_EMAIL,
+            "name": from_name or BANKSIA_FROM_NAME,
+        },
+        "send": bool(send),
     }
+    if reply_to:
+        draft["reply_to"] = [{"address": reply_to}]
+    payload = {"drafts": draft}
     req = urllib.request.Request(
         "https://public.missiveapp.com/v1/drafts",
         data=json.dumps(payload).encode(),
@@ -282,6 +296,30 @@ def send_email(to_email, to_name, subject, html_body, send=True):
         return False, f"missive http {e.code}: {e.read().decode('utf-8', 'ignore')[:200]}"
     except Exception as e:
         return False, f"missive error: {e}"
+
+
+def send_email_from(preferred_email, preferred_name, to_email, to_name, subject,
+                    html_body, reply_to=None):
+    """Send as `preferred_email`, falling back to the default Banksia sender if
+    that mailbox is not connected in Missive.
+
+    Returns (ok, detail, from_email_used). Keeping the fallback means a mailbox
+    that has not been connected yet cannot silently stop applicants receiving
+    their form — the mail still goes, from the address that does work, and the
+    caller can report which one was used.
+    """
+    ok, detail = send_email(to_email, to_name, subject, html_body,
+                            from_email=preferred_email, from_name=preferred_name,
+                            reply_to=reply_to)
+    if ok:
+        return True, detail, preferred_email
+    if SENDER_NOT_AVAILABLE not in (detail or ""):
+        return False, detail, preferred_email
+    print("[email] sender %s is not connected in Missive - falling back to %s"
+          % (preferred_email, BANKSIA_FROM_EMAIL))
+    ok, detail = send_email(to_email, to_name, subject, html_body,
+                            reply_to=reply_to)
+    return ok, detail, BANKSIA_FROM_EMAIL
 
 
 def _email_shell(title, intro, button_label, button_url, footer=""):
@@ -3142,7 +3180,8 @@ def api_portal_me():
         profile = {
             "email": pu["email"], "first_name": pu["first_name"],
             "last_name": pu["last_name"], "portal_type": pu["portal_type"],
-            "applicant_id": pu.get("applicant_id"),
+            "applicant_id": resolve_portal_applicant_id(
+                db, pu["pu_id"], pu.get("email"), pu.get("applicant_id")),
         }
 
         # Any referencing forms tied to this portal user (by portal_user_id or email)
@@ -3254,12 +3293,113 @@ def api_portal_roadmap():
     pu = request.portal_user
     db = get_dict_db()
     try:
-        applicant_id = pu.get("applicant_id")
         user_id = pu["pu_id"]
+        applicant_id = resolve_portal_applicant_id(db, user_id, pu.get("email"),
+                                                   pu.get("applicant_id"))
         steps = _compute_roadmap(db, applicant_id, user_id)
         return json_success({"steps": steps})
     finally:
         db.close()
+
+
+def resolve_portal_applicant_id(db, user_id, email, applicant_id=None):
+    """Return the applicant this portal account belongs to, linking the two if
+    they are not linked yet.
+
+    A tenant application links the portal account at submit time, but people
+    routinely register *after* submitting — those accounts were left with a null
+    applicant_id, so their roadmap showed the application as still outstanding
+    even though it was in. Resolving by email here closes that gap for accounts
+    created in either order, and persists the link so it is only done once.
+    """
+    if applicant_id:
+        return applicant_id
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    row = db.execute(
+        "SELECT applicant_id FROM tenant_applications "
+        "WHERE lower(a1_email) = ? AND applicant_id IS NOT NULL "
+        "ORDER BY (status = 'submitted') DESC, id DESC LIMIT 1",
+        [email]
+    ).fetchone()
+    if not row:
+        row = db.execute(
+            "SELECT id AS applicant_id FROM applicants WHERE lower(email) = ? "
+            "ORDER BY id DESC LIMIT 1", [email]
+        ).fetchone()
+    applicant_id = row.get("applicant_id") if row else None
+    if applicant_id:
+        try:
+            db.execute("UPDATE portal_users SET applicant_id = ? WHERE id = ? "
+                       "AND applicant_id IS NULL", [applicant_id, user_id])
+            db.commit()
+        except Exception as link_err:
+            print("[portal] could not link portal user %s to applicant %s: %s"
+                  % (user_id, applicant_id, link_err))
+    return applicant_id
+
+
+_REFERENCING_SECTIONS = ['personal', 'contact', 'residential', 'employment',
+                         'self_employed', 'student', 'guarantor', 'housing_benefit',
+                         'kin', 'bank', 'landlord', 'additional', 'declaration']
+
+
+def ensure_referencing_form_for_applicant(db, applicant_id, commit=True):
+    """Return the applicant's referencing form, creating a draft if they have
+    none.
+
+    Step 2 of the portal roadmap is only actionable if a form exists to open —
+    without one the step went 'active' with nowhere to go, so the applicant was
+    told referencing was their next step and then given a dead button. The draft
+    is seeded from the applicant record and their tenant application so the
+    property and room carry over rather than being re-asked.
+    """
+    if not applicant_id:
+        return None
+    existing = db.execute(
+        "SELECT * FROM referencing_forms WHERE applicant_id = ? "
+        "AND status NOT IN ('cancelled') ORDER BY id DESC LIMIT 1",
+        [applicant_id]
+    ).fetchone()
+    if existing:
+        return existing
+
+    a = db.execute(
+        "SELECT first_name, last_name, email, date_of_birth FROM applicants WHERE id = ?",
+        [applicant_id]
+    ).fetchone() or {}
+    ta = db.execute(
+        "SELECT property_id, unit_id, a1_full_name, a1_email, a1_dob "
+        "FROM tenant_applications WHERE applicant_id = ? ORDER BY id DESC LIMIT 1",
+        [applicant_id]
+    ).fetchone() or {}
+
+    first = (a.get("first_name") or "").strip()
+    last = (a.get("last_name") or "").strip()
+    if not (first or last):
+        parts = (ta.get("a1_full_name") or "").strip().split()
+        first = parts[0] if parts else ""
+        last = " ".join(parts[1:]) if len(parts) > 1 else ""
+    email = (a.get("email") or ta.get("a1_email") or "").strip()
+    dob = a.get("date_of_birth") or ta.get("a1_dob") or "1900-01-01"
+
+    form_token = generate_form_token()
+    db.execute(
+        "INSERT INTO referencing_forms (form_token, status, first_name, last_name, "
+        "email, date_of_birth, applicant_id, property_id, unit_id, submitted_at) "
+        "VALUES (?, 'draft', ?, ?, ?, ?, ?, ?, ?, NULL)",
+        [form_token, first, last, email, dob, applicant_id,
+         ta.get("property_id"), ta.get("unit_id")]
+    )
+    form_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
+    for section in _REFERENCING_SECTIONS:
+        db.execute("INSERT INTO form_sections (form_id, section_key) VALUES (?, ?)",
+                   [form_id, section])
+    if commit:
+        db.commit()
+    print("[referencing] created draft form %s for applicant %s" % (form_id, applicant_id))
+    return db.execute("SELECT * FROM referencing_forms WHERE id = ?", [form_id]).fetchone()
 
 
 def _compute_roadmap(db, applicant_id, user_id):
@@ -3272,14 +3412,17 @@ def _compute_roadmap(db, applicant_id, user_id):
     ]
 
     # Step 1: Tenant Application
+    ta_submitted = False
     if applicant_id:
         ta = db.execute(
             "SELECT status, form_token, check_in_installment FROM tenant_applications "
-            "WHERE applicant_id = ? ORDER BY id DESC LIMIT 1",
+            "WHERE applicant_id = ? ORDER BY (status = 'submitted') DESC, id DESC LIMIT 1",
             [applicant_id]
         ).fetchone()
         if ta and str(ta.get("status")) == "submitted":
+            ta_submitted = True
             steps[0]["status"] = "completed"
+            steps[0]["submitted"] = True
             steps[1]["status"] = "active"
         elif ta and str(ta.get("status")) == "draft":
             steps[0]["status"] = "active"
@@ -3293,9 +3436,18 @@ def _compute_roadmap(db, applicant_id, user_id):
     if applicant_id:
         ref = db.execute(
             "SELECT f.id, f.form_token, f.status FROM referencing_forms f "
-            "WHERE f.applicant_id = ? ORDER BY f.id DESC LIMIT 1",
+            "WHERE f.applicant_id = ? AND f.status NOT IN ('cancelled') "
+            "ORDER BY f.id DESC LIMIT 1",
             [applicant_id]
         ).fetchone()
+        if not ref and ta_submitted:
+            # Application is in and referencing is now their live step — make
+            # sure there is a form behind the button.
+            try:
+                ref = ensure_referencing_form_for_applicant(db, applicant_id)
+            except Exception as ref_err:
+                print("[portal] could not create referencing form for applicant %s: %s"
+                      % (applicant_id, ref_err))
         if ref:
             ref_status = str(ref.get("status", ""))
             if ref_status in ("approved",):
@@ -3450,9 +3602,10 @@ def api_portal_documents():
             [email]
         ).fetchall()
 
-                # Tenant application PDFs (from entity_documents linked to applicant)
+        # Tenant application PDFs (from entity_documents linked to applicant)
         ta_pdfs = []
-        applicant_id = pu.get("applicant_id")
+        applicant_id = resolve_portal_applicant_id(db, pu["pu_id"], pu.get("email"),
+                                                   pu.get("applicant_id"))
         if applicant_id:
             ta_pdfs = db.execute(
                 "SELECT id, original_filename, file_path, file_type, file_size, category, created "

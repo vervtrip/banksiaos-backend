@@ -68,3 +68,4 @@ documents/
 regression_backup_*.db
 *.db
 verv_os_db
+sync_log.txt

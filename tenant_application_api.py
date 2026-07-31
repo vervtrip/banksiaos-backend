@@ -26,6 +26,14 @@ from referencing_api import (
 
 tenant_app_bp = Blueprint("tenant_application", __name__, url_prefix="/api/tenant-application")
 
+# Applicant-facing referencing correspondence goes out from the references inbox.
+# If that mailbox is not connected in Missive the send falls back to the default
+# Banksia sender rather than failing (see referencing_api.send_email_from).
+TA_FROM_EMAIL = "references@banksialondon.com"
+TA_FROM_NAME = "Banksia Reference"
+TA_REPLY_TO = "references@banksialondon.com"
+TA_WEBSITE = "https://www.banksialondon.com"
+
 # Properties where bills are NOT included (everywhere else bills are included).
 # Matched loosely against the property address / name (case + spacing insensitive).
 _NO_BILLS_PROPERTIES = ["22 carrol close", "10 beach street"]
@@ -158,6 +166,12 @@ def _ensure_schema():
             "submitted_at TEXT"
             ")"
         )
+        have = {r["name"] for r in db.execute("PRAGMA table_info(tenant_applications)")}
+        # signature_image holds the drawn signature as a PNG data URL. The older
+        # signature_data column stays as the printed name so applications
+        # submitted before signing was introduced still render.
+        if "signature_image" not in have:
+            db.execute("ALTER TABLE tenant_applications ADD COLUMN signature_image TEXT")
         db.commit()
     finally:
         db.close()
@@ -169,7 +183,8 @@ _PUBLIC_KEYS = [
     "holding_deposit_paid", "holding_deposit_confirmed",
     "a1_full_name", "a1_dob", "a1_email", "a1_gender", "a1_guarantor_email", "a1_guarantor_mobile",
     "a2_full_name", "a2_dob", "a2_email", "a2_gender", "a2_guarantor_email", "a2_guarantor_mobile",
-    "declaration_confirmed", "signature_data", "signature_date", "num_applicants", "num_applicants", "created_at", "first_opened_at",
+    "declaration_confirmed", "signature_data", "signature_image", "signature_date",
+    "num_applicants", "created_at", "first_opened_at",
 ]
 
 
@@ -292,7 +307,8 @@ _APPLICANT_FIELDS = [
     "a1_previous_address", "a1_previous_landlord", "a1_previous_landlord_phone",
     "a2_full_name", "a2_dob", "a2_email", "a2_gender", "a2_guarantor_email", "a2_guarantor_mobile",
     "check_in_date", "bills_included", "holding_deposit_confirmed",
-    "declaration_confirmed", "signature_data", "signature_date", "num_applicants",
+    "declaration_confirmed", "signature_data", "signature_image", "signature_date",
+    "num_applicants",
 ]
 _BOOL_FIELDS = ("bills_included", "holding_deposit_confirmed", "declaration_confirmed")
 
@@ -303,8 +319,12 @@ _REQUIRED = [
     ("a1_email", "First applicant email is required."),
     ("a1_guarantor_email", "First applicant guarantor email is required."),
     ("a1_guarantor_mobile", "First applicant guarantor phone number is required."),
-    ("signature_data", "Signature is required."),
 ]
+
+# A drawn signature arrives as a PNG data URL. Anything larger than this is not a
+# signature, and a base64 blob that big has no business going into the row.
+_SIGNATURE_MAX_BYTES = 400_000
+_SIGNATURE_PREFIX = "data:image/png;base64,"
 
 _REQUIRED_A2 = [
     ("a2_full_name", "Second applicant full name is required."),
@@ -318,6 +338,31 @@ _EMAIL_RE = _re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 _DATE_RE = _re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
 
+def _validate_signature(data):
+    """The declaration must carry a drawn signature, not a typed name.
+
+    Checked server-side as well as in the browser: the signature is the part of
+    the application that makes it a declaration, so it cannot be something a
+    caller can skip by posting straight at the endpoint.
+    """
+    sig = str(data.get("signature_image") or "").strip()
+    if not sig:
+        return json_error("Please sign in the signature box before submitting.")
+    if not sig.startswith(_SIGNATURE_PREFIX):
+        return json_error("Signature was not captured correctly. Please clear it and sign again.")
+    b64 = sig[len(_SIGNATURE_PREFIX):]
+    if len(b64) > _SIGNATURE_MAX_BYTES:
+        return json_error("Signature image is too large. Please clear it and sign again.")
+    import base64 as _b64
+    try:
+        raw = _b64.b64decode(b64, validate=True)
+    except Exception:
+        return json_error("Signature was not captured correctly. Please clear it and sign again.")
+    if not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return json_error("Signature was not captured correctly. Please clear it and sign again.")
+    return None
+
+
 def _validate_application_data(data, r):
     """Run extended validation on tenant application submit data.
     Returns None if OK, or (error_message, status_code) tuple."""
@@ -326,6 +371,10 @@ def _validate_application_data(data, r):
     for key, msg in _REQUIRED:
         if not str(data.get(key) or "").strip():
             return json_error(msg)
+
+    sig_err = _validate_signature(data)
+    if sig_err:
+        return sig_err
 
     # Non-standard email/age checks
     a1_email = (data.get("a1_email") or "").strip()
@@ -417,6 +466,42 @@ def _create_or_update_applicant(db, r):
     return db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
 
 
+def _draw_signature(pdf, sig_image, printed_name, sig_date):
+    """Put the applicant's signature on the page as an image, with the printed
+    name and date beneath it the way a signed page reads.
+
+    Applications submitted before signing was introduced carry a typed name and
+    no image; those fall back to the printed line so old PDFs still regenerate.
+    """
+    drawn = False
+    sig_image = (sig_image or "").strip()
+    if sig_image.startswith("data:image/"):
+        try:
+            import base64 as _b64
+            from io import BytesIO
+            raw = _b64.b64decode(sig_image.split(",", 1)[1])
+            if pdf.get_y() > 225:          # keep the signature block off a page break
+                pdf.add_page()
+            pdf.ln(2)
+            top = pdf.get_y()
+            pdf.image(BytesIO(raw), x=pdf.l_margin, y=top, h=20)
+            pdf.set_y(top + 21)
+            pdf.set_draw_color(120, 120, 120)
+            pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + 70, pdf.get_y())
+            pdf.ln(1)
+            drawn = True
+        except Exception as sig_err:
+            print("[tenant_application] could not render signature image:", sig_err)
+
+    pdf.set_font("Helvetica", "", 10)
+    if drawn:
+        pdf.cell(0, 6, f"Signed by: {printed_name}", new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.cell(0, 6, f"Signature: {printed_name}", new_x="LMARGIN", new_y="NEXT")
+    if sig_date:
+        pdf.cell(0, 6, f"Date: {sig_date}", new_x="LMARGIN", new_y="NEXT")
+
+
 def _generate_application_pdf(db, r):
     """Generate a PDF document from a submitted tenant application
     and save it linked to the matching tenancy or applicant."""
@@ -461,12 +546,20 @@ def _generate_application_pdf(db, r):
     pdf.cell(0, 6, f"Holding Deposit: GBP {holding}", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 6, f"Pro-Rata: GBP {prorata}", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 6, f"Check-In Installment: GBP {checkin_inst}", new_x="LMARGIN", new_y="NEXT")
+    holding_paid = r.get("holding_deposit_paid") or ""
+    if holding_paid:
+        pdf.cell(0, 6, f"Holding Deposit Paid: GBP {holding_paid}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, "Holding Deposit Transfer Confirmed: %s"
+             % ("Yes" if r.get("holding_deposit_confirmed") else "No"),
+             new_x="LMARGIN", new_y="NEXT")
 
     checkin_date = r.get("check_in_date") or ""
     bills = "Yes" if r.get("bills_included") else "No"
     if checkin_date:
         pdf.cell(0, 6, f"Check-In Date: {checkin_date}", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 6, f"Bills Included: {bills}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, "Number of Applicants: %s" % (r.get("num_applicants") or 1),
+             new_x="LMARGIN", new_y="NEXT")
 
     pdf.ln(3)
 
@@ -548,9 +641,7 @@ def _generate_application_pdf(db, r):
     pdf.set_font("Helvetica", "", 10)
     declared = "Confirmed" if r.get("declaration_confirmed") else "Not confirmed"
     pdf.cell(0, 6, f"Declaration: {declared}", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"Signature: {sig}", new_x="LMARGIN", new_y="NEXT")
-    if sig_date:
-        pdf.cell(0, 6, f"Date: {sig_date}", new_x="LMARGIN", new_y="NEXT")
+    _draw_signature(pdf, r.get("signature_image"), sig or a1_name, sig_date)
 
     # Terms and Conditions
     pdf.add_page()
@@ -598,8 +689,7 @@ def _generate_application_pdf(db, r):
     pdf.cell(0, 7, "Signature Confirmation", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 10)
     pdf.multi_cell(0, 6, f"I, {a1_name}, confirm that I have read and agree to the Terms and Conditions set out above.")
-    if sig_date:
-        pdf.cell(0, 6, f"Date acknowledged: {sig_date}", new_x="LMARGIN", new_y="NEXT")
+    _draw_signature(pdf, r.get("signature_image"), sig or a1_name, sig_date)
     pdf.ln(3)
 
     submitted_at = r.get("submitted_at") or ""
@@ -664,10 +754,65 @@ def _generate_application_pdf(db, r):
     return doc_id
 
 
+def _application_email_html(salutation, link):
+    """The applicant's invitation to fill in their tenant application.
+
+    Written for the inbox as much as for the reader. Spam filters mark down mail
+    that is mostly one big button and little else, that hides where a link goes,
+    that carries no preview text and no way to identify or reach the sender, so
+    this carries real prose, the destination spelled out in full, a preheader,
+    and a signed-off footer. The remaining half of deliverability is DNS
+    (SPF, DKIM and DMARC on banksialondon.com), which is not set from here.
+    """
+    return """\
+<div style="display:none;max-height:0;overflow:hidden;opacity:0">Your tenant \
+application form is ready to complete - it takes about ten minutes.</div>
+<div style="font-family:-apple-system,Segoe UI,Inter,Arial,sans-serif;max-width:560px;
+     margin:0 auto;color:#1e293b;font-size:15px;line-height:1.6">
+  <p style="margin:0 0 16px">Hi %(who)s,</p>
+  <p style="margin:0 0 16px">Thank you for your interest in renting with Banksia. Before we can
+     move your application forward, we need you to complete your tenant application form.</p>
+  <p style="margin:0 0 16px">It takes about ten minutes. You will be asked for your personal
+     and contact details, your employment and income, your current and previous addresses,
+     and your guarantor's details. You will also be asked to sign the applicant declaration
+     at the end, so please have those details to hand before you start.</p>
+  <p style="margin:0 0 8px">You will be asked to register an account first. That account is
+     also your tenant portal, where you can track the progress of your application and find
+     your documents later on.</p>
+  <p style="text-align:center;margin:26px 0">
+    <a href="%(link)s" style="display:inline-block;padding:13px 26px;background:#f16232;
+       color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700">Open my application</a>
+  </p>
+  <p style="margin:0 0 16px;font-size:13px;color:#475569">If the button does not work, copy
+     and paste this address into your browser:<br>
+     <span style="word-break:break-all;color:#334155">%(link)s</span></p>
+  <p style="margin:0 0 16px;font-size:13px;color:#475569">Please note the link expires 24 hours
+     after you first open it. If it expires before you finish, reply to this email and we will
+     send you a new one.</p>
+  <p style="margin:0 0 4px">If anything is unclear, just reply to this email and a member of
+     the team will help.</p>
+  <p style="margin:0 0 24px">Kind regards,<br>The Referencing Team<br>Banksia</p>
+  <hr style="border:none;border-top:1px solid #e2e8f0;margin:0 0 12px">
+  <p style="margin:0;font-size:12px;color:#94a3b8">
+    Banksia &middot; <a href="%(site)s" style="color:#94a3b8">banksialondon.com</a>
+    &middot; <a href="mailto:%(from)s" style="color:#94a3b8">%(from)s</a><br>
+    You have received this because you enquired about a property with us and we are
+    processing your application.</p>
+</div>""" % {"who": salutation, "link": link, "site": TA_WEBSITE, "from": TA_FROM_EMAIL}
+
+
 @tenant_app_bp.route("/<token>/send-link", methods=["POST"])
+@require_team_auth
+@require_csrf
 def send_tenant_application_link(token):
-    """Send TA link to client email via Missive."""
-    from referencing_api import send_email
+    """Send TA link to client email via Missive.
+
+    Team-only. This endpoint sends mail from a Banksia address to a recipient
+    and with a link both taken from the request body, so leaving it open let
+    anyone who knew the URL send a Banksia-branded email pointing anywhere.
+    The matching /generate endpoint is gated the same way.
+    """
+    from referencing_api import send_email_from
     data = request.get_json() or {}
     email = (data.get("email") or "").strip()
     name = (data.get("name") or "").strip()
@@ -676,26 +821,23 @@ def send_tenant_application_link(token):
         return json_error("email is required")
     if not link:
         return json_error("link is required")
-    subject = "Your Tenant Application - Banksia"
-    salutation = name or "there"
+    from html import escape as _esc
+    from urllib.parse import quote as _q
+    subject = "Your tenant application for %s" % (data.get("property_address") or "your new home")
+    salutation = name.split()[0] if name else "there"
     # Append email to the TA link so the page can pre-fill it
-    link_with_email = link + "&email=" + email
-    html = """<div style="font-family:sans-serif;max-width:520px;margin:0 auto">
-    <h2 style="color:#f16232">Tenant Application</h2>
-    <p>Hi %s,</p>
-    <p>Please fill up your tenant application. Click the button below.</p>
-    <p style="color:#666;font-size:12px">(To proceed you will need to register first)</p>
-    <p style="text-align:center;margin:20px 0">
-      <a href="%s" style="display:inline-block;padding:10px 24px;background:#f16232;color:#fff;text-decoration:none;border-radius:6px">Open Application</a>
-    </p>
-    <p style="color:#666;font-size:12px">Link expires 24h after first open.</p>
-    <hr style="border:none;border-top:1px solid #eee">
-    <p style="color:#999;font-size:11px">Banksia</p>
-  </div>""" % (salutation, link_with_email)
-    ok, detail = send_email(email, name, subject, html)
+    link_with_email = link + "&email=" + _q(email, safe="@")
+    html = _application_email_html(_esc(salutation), _esc(link_with_email, quote=True))
+    ok, detail, used_from = send_email_from(
+        TA_FROM_EMAIL, TA_FROM_NAME, email, name, subject, html,
+        reply_to=TA_REPLY_TO)
     if not ok:
         return json_error("Failed to send email: " + str(detail), 502)
-    return json_success({"sent_to": email})
+    return json_success({
+        "sent_to": email,
+        "sent_from": used_from,
+        "preferred_sender_available": used_from == TA_FROM_EMAIL,
+    })
 
 @tenant_app_bp.route("/<token>/submit", methods=["POST"])
 def submit_tenant_application(token):
@@ -717,6 +859,10 @@ def submit_tenant_application(token):
             return json_error("You must confirm the declaration to submit.")
         if not data.get("holding_deposit_confirmed"):
             return json_error("You must confirm the holding deposit transfer to submit.")
+
+        # The signature is now drawn, so the printed name on the declaration is
+        # taken from the applicant's own name rather than asked for twice.
+        data.setdefault("signature_data", (data.get("a1_full_name") or "").strip())
 
         sets, params = [], []
         for f in _APPLICANT_FIELDS:
@@ -760,6 +906,17 @@ def submit_tenant_application(token):
                        [applicant_id, a1_email.strip().lower()])
         db.commit()
 
+        # Referencing is the applicant's next step, so open it now rather than
+        # leaving the portal pointing at a step with nothing behind it.
+        referencing_token = None
+        try:
+            from referencing_api import ensure_referencing_form_for_applicant
+            ref = ensure_referencing_form_for_applicant(db, applicant_id)
+            referencing_token = (ref or {}).get("form_token")
+        except Exception as ref_err:
+            print("[tenant_application] could not open referencing for applicant %s: %s"
+                  % (applicant_id, ref_err))
+
         # Generate PDF of the submitted application (fire-and-forget: don't fail the response)
         try:
             r3 = db.execute("SELECT * FROM tenant_applications WHERE form_token = ?", [token]).fetchone()
@@ -769,7 +926,12 @@ def submit_tenant_application(token):
             print("[tenant_application] PDF generation failed after successful submit:", pdf_err)
             traceback.print_exc()
 
-        return json_success({"submitted": True, "applicant_id": applicant_id})
+        return json_success({
+            "submitted": True,
+            "applicant_id": applicant_id,
+            "next_step": "referencing",
+            "referencing_url": ("/apply/" + referencing_token) if referencing_token else None,
+        })
     except Exception as e:
         db.rollback()
         return json_error(safe_error(e), 500)
