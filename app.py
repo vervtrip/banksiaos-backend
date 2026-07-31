@@ -3047,6 +3047,248 @@ def api_thread_attachment(thread_id):
         db.close()
 
 
+# ──────────────────────────────────────────────
+# Weekend Pricing Dashboard
+# ──────────────────────────────────────────────
+
+LISTING_NAMES = {
+    333491: "Highbury 2-Bed Condo", 333493: "The Canary Hub", 333495: "Cosy Angel Hub",
+    333496: "Angel x Kings X", 333497: "Kings X & Angel Haven", 333498: "Kings X St Pancras",
+    333499: "Brick Lane Deluxe", 333501: "The Lake Hub", 333508: "Central London Hub",
+    333521: "Central Quad", 333768: "Zenith Point", 333796: "Highbury Studio",
+    333955: "Central Single Biz", 333962: "Central High-end", 333968: "Central Luxury",
+    333972: "Central Cosy Double", 333987: "Double Islington", 333988: "Islington Quarter",
+    334007: "Cosy Double Islington", 358940: "Zen 2BR Oasis", 359282: "Angel Terrace",
+    359283: "Angel Room", 414183: "Canary Premium Hub", 464952: "West Hampstead",
+    504781: "Studio Retreat Islington", 511718: "Zenith Hub", 557387: "Spacious Studio Angel",
+    558633: "The Islington Retreat", 558642: "The Islington Hub", 561156: "Vibrant Double",
+    565537: "Verv by the River", 567367: "Camden Hub",
+}
+
+HOSTAWAY_TOKEN_PATH = os.path.expanduser("~/.hermes/state/hostaway_token.json")
+
+
+def _get_hostaway_token():
+    if os.path.exists(HOSTAWAY_TOKEN_PATH):
+        with open(HOSTAWAY_TOKEN_PATH) as f:
+            cached = json.load(f)
+            token = cached.get("access_token")
+            if token:
+                return token
+    return None
+
+
+def _fetch_calendar(lid, start_date, end_date):
+    """Fetch calendar prices for a single listing from Hostaway API."""
+    token = _get_hostaway_token()
+    if not token:
+        return {"error": "No Hostaway token"}
+    url = f"https://api.hostaway.com/v1/listings/{lid}/calendar?startDate={start_date}&endDate={end_date}"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}", "Cache-Control": "no-cache"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read())
+            if data.get("status") == "success":
+                return {d["date"]: d for d in data["result"]}
+            return {"error": f"API error: {data.get('message', 'unknown')}"}
+    except Exception as e:
+        return {"error": str(e)[:120]}
+
+
+@app.route("/api/pricing/weekend")
+def api_weekend_pricing():
+    """Return weekend pricing data as JSON."""
+    from datetime import date, timedelta
+    today = date.today()
+    # Find next Friday
+    days_ahead = 4 - today.weekday()
+    if days_ahead <= 0:
+        days_ahead += 7
+    next_fri = today + timedelta(days=days_ahead)
+    next_sat = next_fri + timedelta(days=1)
+    next_sun = next_fri + timedelta(days=2)
+    next_wed = next_fri - timedelta(days=2)
+
+    start = next_wed.isoformat()
+    end = next_sun.isoformat()
+
+    results = []
+    errors = []
+    for lid, name in sorted(LISTING_NAMES.items(), key=lambda x: x[1]):
+        prices = _fetch_calendar(lid, start, end)
+        if "error" in prices:
+            errors.append({"lid": lid, "name": name, "error": prices["error"]})
+            continue
+        wed = prices.get(start)
+        fri = prices.get(next_fri.isoformat())
+        sat = prices.get(next_sat.isoformat())
+
+        wed_p = wed["price"] if wed else None
+        fri_p = fri["price"] if fri else None
+        sat_p = sat["price"] if sat else None
+
+        def markup(p, base):
+            if isinstance(p, (int, float)) and isinstance(base, (int, float)) and base > 0:
+                return round((p - base) / base * 100)
+            return None
+
+        results.append({
+            "listing_id": lid,
+            "name": name,
+            "wed_price": wed_p,
+            "fri_price": fri_p,
+            "sat_price": sat_p,
+            "fri_markup": markup(fri_p, wed_p),
+            "sat_markup": markup(sat_p, wed_p),
+            "wed_available": bool(wed and wed.get("isAvailable")),
+            "fri_available": bool(fri and fri.get("isAvailable")),
+            "sat_available": bool(sat and sat.get("isAvailable")),
+        })
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "week_start": start,
+            "week_end": end,
+            "next_fri": next_fri.isoformat(),
+            "next_sat": next_sat.isoformat(),
+            "listings": results,
+            "errors": errors,
+        }
+    })
+
+
+@app.route("/pricing/weekend")
+def weekend_pricing_page():
+    """Render the weekend pricing dashboard page."""
+    return render_template("weekend_pricing.html")
+
+
+# ──────────────────────────────────────────────
+# LunaRooms STR Live Pricing (Read + Write)
+# ──────────────────────────────────────────────
+
+@app.route("/api/luna-rooms/str/pricing/weekend", methods=["GET", "PUT"])
+def api_luna_str_pricing():
+    """Live pricing dashboard for STR — read prices & write updates to Hostaway."""
+    from datetime import date, timedelta
+    import urllib.request, urllib.error
+    today = date.today()
+    lookahead = 90
+    start = today.isoformat()
+    end = (today + timedelta(days=lookahead)).isoformat()
+
+    config_path = os.path.expanduser("~/.hermes/state/str_pricing_config.json")
+    floors = {}
+    event_dates_str = set()
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            try:
+                cfg = json.load(f)
+                floors = cfg.get("floors", {})
+                for e in cfg.get("event_dates", []):
+                    event_dates_str.add(e["date"])
+            except Exception:
+                pass
+
+    if request.method == "PUT":
+        data = request.get_json(silent=True) or {}
+        lid = data.get("listing_id")
+        date_str = data.get("date")
+        new_price = data.get("price")
+        new_min_stay = data.get("minimumStay")
+        if not lid or not date_str:
+            return jsonify({"success": False, "error": "listing_id and date required"}), 400
+        token = _get_hostaway_token()
+        if not token:
+            return jsonify({"success": False, "error": "No Hostaway token"}), 500
+        cal = _fetch_calendar(lid, date_str, date_str)
+        is_avail = 1
+        min_stay = 1
+        if "error" not in cal and cal.get(date_str):
+            is_avail = cal[date_str].get("isAvailable", 1)
+            min_stay = cal[date_str].get("minimumStay", 1)
+        payload = {"startDate": date_str, "endDate": date_str, "isAvailable": is_avail, "isProcessed": 1}
+        if new_price is not None:
+            payload["price"] = int(new_price)
+        if new_min_stay is not None:
+            payload["minimumStay"] = int(new_min_stay)
+        else:
+            payload["minimumStay"] = min_stay
+        url = f"https://api.hostaway.com/v1/listings/{lid}/calendar"
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={
+            "Authorization": f"Bearer {token}", "Content-Type": "application/json",
+        }, method="PUT")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                result = json.loads(r.read())
+            return jsonify({"success": True, "data": result})
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode()
+            return jsonify({"success": False, "error": f"Hostaway {e.code}: {err_body[:200]}"}), 502
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)[:200]}), 500
+
+    results = []
+    errors = []
+    for lid, name in sorted(LISTING_NAMES.items(), key=lambda x: x[1]):
+        cal = _fetch_calendar(lid, start, end)
+        if "error" in cal:
+            errors.append({"lid": lid, "name": name, "error": cal["error"]})
+            continue
+        floor_info = floors.get(str(lid), {})
+        floor = floor_info.get("floor")
+        weekend_floor = floor_info.get("weekend_floor")
+        entries = []
+        total_dates = 0
+        booked_dates = 0
+        weekday_prices = []
+        weekend_prices = []
+        for ds in sorted(cal.keys()):
+            entry = cal[ds]
+            d = date.fromisoformat(ds)
+            if d < today:
+                continue
+            total_dates += 1
+            if entry.get("isAvailable") == 0:
+                booked_dates += 1
+            price = entry.get("price")
+            is_wknd = d.weekday() in (4, 5)
+            is_evt = ds in event_dates_str
+            if price and entry.get("isAvailable") == 1:
+                if is_wknd:
+                    weekend_prices.append(price)
+                else:
+                    weekday_prices.append(price)
+            entries.append({
+                "date": ds, "day": d.strftime("%a"),
+                "price": price, "isAvailable": entry.get("isAvailable"),
+                "minimumStay": entry.get("minimumStay", 1),
+                "isWeekend": is_wknd, "isEvent": is_evt,
+            })
+        occ_rate = round(booked_dates / total_dates * 100, 1) if total_dates > 0 else 0
+        wk_avg = round(sum(weekend_prices) / len(weekend_prices)) if weekend_prices else None
+        wd_avg = round(sum(weekday_prices) / len(weekday_prices)) if weekday_prices else None
+        markup = round((wk_avg - wd_avg) / wd_avg * 100) if wk_avg and wd_avg and wd_avg > 0 else None
+        results.append({
+            "listing_id": lid, "name": name,
+            "floor": floor, "weekend_floor": weekend_floor,
+            "occupancy_pct": occ_rate,
+            "weekday_avg": wd_avg, "weekend_avg": wk_avg, "markup_pct": markup,
+            "entries": entries,
+        })
+    return jsonify({
+        "success": True,
+        "data": {
+            "period": {"start": start, "end": end},
+            "total_listings": len(results),
+            "listings": results, "errors": errors,
+            "event_dates": sorted(event_dates_str),
+        }
+    })
+
+
 if __name__ == "__main__":
     # Production: use gunicorn -w 4 -k gthread --threads 4 app:app
     # This fallback is for development only
