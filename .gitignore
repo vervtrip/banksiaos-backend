@@ -51,3 +51,10 @@ media/
 *.bak-*
 missive.json
 missive_hook_secret
+
+# Tenant-uploaded application PDFs — runtime data / PII, never commit
+documents/uploads/
+# One-off data dumps
+compliance.json
+compliance_import.sql
+deleted_test_applicants_*.sql
