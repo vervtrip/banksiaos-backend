@@ -3005,6 +3005,19 @@ def api_form_by_token():
             _unit = db.execute("SELECT unit_ref FROM units WHERE id = ?", [form["unit_id"]]).fetchone()
             if _unit:
                 form["unit_ref"] = _unit.get("unit_ref") or ""
+
+        # This is the applicant opening their referencing form, so it is the
+        # moment the 48 hour window starts. Only on a form still to be filled in
+        # — reopening a submitted one must not restart anything.
+        try:
+            from referencing_api import start_referencing_clock, seconds_left
+            if str(form.get("status", "")).lower() in ("draft", "sent", "viewed", "in_progress"):
+                opened, deadline = start_referencing_clock(db, form)
+                form["first_opened_at"], form["deadline_at"] = opened, deadline
+            form["seconds_left"] = seconds_left(form.get("deadline_at"))
+        except Exception as clock_err:
+            app.logger.warning("referencing clock: %s", clock_err)
+
         return jsonify({
             "success": True, "data": {
                 "form": form,

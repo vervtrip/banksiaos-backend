@@ -3345,6 +3345,69 @@ _REFERENCING_SECTIONS = ['personal', 'contact', 'residential', 'employment',
                          'kin', 'bank', 'landlord', 'additional', 'declaration']
 
 
+def _ensure_referencing_clock_schema(db):
+    """first_opened_at records when the applicant actually opened their form."""
+    try:
+        have = {r["name"] for r in db.execute("PRAGMA table_info(referencing_forms)")}
+        if "first_opened_at" not in have:
+            db.execute("ALTER TABLE referencing_forms ADD COLUMN first_opened_at TEXT")
+            db.commit()
+    except Exception as e:
+        print("[referencing] clock schema check failed:", e)
+
+
+def start_referencing_clock(db, form, commit=True):
+    """Start the 48 hour referencing window the first time the applicant opens
+    their form, and return (first_opened_at, deadline_at).
+
+    The clock starts on first open rather than on creation, deliberately. A form
+    can sit unopened for days while we chase someone, and counting that against
+    them would mean the window was half gone before they ever saw it. Both
+    timestamps are written once and never moved after, so refreshing the page
+    cannot buy anyone more time.
+
+    The deadline is informational: it is shown and counted down, but it does not
+    lock anyone out of their own application. Slamming the door on a part-filled
+    application on a timer is not a decision to take unasked in code.
+    """
+    if not form:
+        return None, None
+    _ensure_referencing_clock_schema(db)
+    opened = form.get("first_opened_at")
+    deadline = form.get("deadline_at")
+    if opened and deadline:
+        return opened, deadline
+    now = datetime.now(timezone.utc)
+    opened = opened or now.isoformat()
+    # Recomputed from first open even where a deadline was stamped at creation
+    # by one of the signup paths - those were set before anyone saw the form.
+    try:
+        deadline = (datetime.fromisoformat(opened)
+                    + timedelta(hours=REFERENCING_DEADLINE_HOURS)).isoformat()
+        db.execute("UPDATE referencing_forms SET first_opened_at = ?, deadline_at = ? WHERE id = ?",
+                   [opened, deadline, form["id"]])
+        if commit:
+            db.commit()
+        print("[referencing] form %s opened, %sh window ends %s"
+              % (form["id"], REFERENCING_DEADLINE_HOURS, deadline))
+    except Exception as e:
+        print("[referencing] could not start clock on form %s: %s" % (form.get("id"), e))
+    return opened, deadline
+
+
+def seconds_left(deadline_at):
+    """Seconds remaining until deadline_at, negative once passed, None if unset."""
+    if not deadline_at:
+        return None
+    try:
+        d = datetime.fromisoformat(str(deadline_at))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return int((d - datetime.now(timezone.utc)).total_seconds())
+    except Exception:
+        return None
+
+
 def ensure_referencing_form_for_applicant(db, applicant_id, commit=True):
     """Return the applicant's referencing form, creating a draft if they have
     none.
@@ -3434,8 +3497,10 @@ def _compute_roadmap(db, applicant_id, user_id):
 
     # Step 2: Referencing Form
     if applicant_id:
+        _ensure_referencing_clock_schema(db)
         ref = db.execute(
-            "SELECT f.id, f.form_token, f.status FROM referencing_forms f "
+            "SELECT f.id, f.form_token, f.status, f.deadline_at, f.first_opened_at "
+            "FROM referencing_forms f "
             "WHERE f.applicant_id = ? AND f.status NOT IN ('cancelled') "
             "ORDER BY f.id DESC LIMIT 1",
             [applicant_id]
@@ -3449,50 +3514,69 @@ def _compute_roadmap(db, applicant_id, user_id):
                 print("[portal] could not create referencing form for applicant %s: %s"
                       % (applicant_id, ref_err))
         if ref:
-            ref_status = str(ref.get("status", ""))
-            if ref_status in ("approved",):
+            # The applicant's part of referencing is done the moment they submit.
+            # Waiting for our review to finish before ticking the step made the
+            # portal read as though they still had work outstanding when they
+            # did not.
+            ref_status = str(ref.get("status", "")).lower()
+            if ref_status in ("submitted", "under_review", "approved", "referencing",
+                              "completed", "tenant", "tenancy_created"):
                 steps[1]["status"] = "completed"
+                steps[1]["submitted"] = True
                 steps[2]["status"] = "active"
             else:
                 steps[1]["status"] = "active"
                 if ref.get("form_token"):
                     steps[1]["url"] = "/apply/" + ref["form_token"]
+                # Surface the 48 hour window if they have already opened it.
+                left = seconds_left(ref.get("deadline_at"))
+                if ref.get("first_opened_at") and left is not None:
+                    steps[1]["deadline_at"] = ref.get("deadline_at")
+                    steps[1]["seconds_left"] = left
         else:
             steps[1]["status"] = "active"
 
     # Step 3: Contract signing
     if applicant_id:
         try:
-            ref_form = db.execute(
-                "SELECT id FROM referencing_forms WHERE applicant_id = ? ORDER BY id DESC LIMIT 1",
+            signed = db.execute(
+                "SELECT e.id FROM esignature_requests e JOIN referencing_forms rf ON e.form_id = rf.id "
+                "WHERE rf.applicant_id = ? AND e.signed_at IS NOT NULL LIMIT 1",
                 [applicant_id]
             ).fetchone()
-            form_id = ref_form["id"] if ref_form else None
-            if form_id:
-                signed = db.execute(
-                    "SELECT e.id FROM esignature_requests e JOIN referencing_forms rf ON e.form_id = rf.id "
-                    "WHERE rf.applicant_id = ? AND e.signed_at IS NOT NULL LIMIT 1",
+            if signed:
+                steps[2]["status"] = "completed"
+                steps[3]["status"] = "active"
+            elif steps[2]["status"] == "active":
+                pending = db.execute(
+                    "SELECT e.id, e.signer_token FROM esignature_requests e "
+                    "JOIN referencing_forms rf ON e.form_id = rf.id "
+                    "WHERE rf.applicant_id = ? AND e.signed_at IS NULL LIMIT 1",
                     [applicant_id]
                 ).fetchone()
-                if signed:
-                    steps[2]["status"] = "completed"
-                    steps[3]["status"] = "active"
+                if pending:
+                    steps[2]["url"] = "/sign/" + pending["signer_token"]
                 else:
-                    pending = db.execute(
-                        "SELECT e.id, e.signer_token FROM esignature_requests e "
-                        "JOIN referencing_forms rf ON e.form_id = rf.id "
-                        "WHERE rf.applicant_id = ? AND e.signed_at IS NULL LIMIT 1",
-                        [applicant_id]
-                    ).fetchone()
-                    if pending:
-                        steps[2]["url"] = "/sign/" + pending["signer_token"]
-        except Exception:
-            pass
+                    # Their referencing is in but we have not issued a contract
+                    # yet. The step is live, but there is nothing for them to do,
+                    # so say so rather than offering a button that goes nowhere.
+                    steps[2]["waiting"] = True
+                    steps[2]["waiting_note"] = (
+                        "We are reviewing your referencing. Your contract will "
+                        "appear here to sign once it is ready.")
+        except Exception as e:
+            print("[portal] contract step failed for applicant %s: %s" % (applicant_id, e))
 
     # Step 4: Payment — only active when contract (step 3) is completed
     # Payment is tracked separately, not auto-completed from TA holding_deposit_paid
     if applicant_id and steps[2]["status"] == "completed":
         steps[3]["status"] = "active"
+        # Nothing is paid through the portal today, so this step is a marker of
+        # where they are, not a button.
+        steps[3]["waiting"] = True
+        steps[3]["waiting_note"] = (
+            "Your contract is signed. We will be in touch about your first "
+            "payment and move-in date.")
     else:
         steps[3]["status"] = "locked"
 

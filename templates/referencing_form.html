@@ -161,10 +161,14 @@ body{font-family:'Inter',-apple-system,sans-serif;background:#f8fafc;color:#0f17
   </div>
 </div>
 
-<!-- 3-Day Deadline Banner -->
-<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:16px 24px;margin:0 auto 24px;max-width:960px;display:flex;align-items:center;gap:12px;font-size:14px;color:#92400e;line-height:1.5">
-  <span style="font-size:24px">⏰</span>
-  <span>Please complete and return this form within <strong>3 days</strong>. Providing comprehensive and accurate information will help increase the likelihood of a successful referencing outcome.</span>
+<!-- 48-hour countdown, starts the first time this form is opened -->
+<div id="deadlineBanner" style="display:none;border-radius:12px;padding:16px 24px;margin:0 auto 24px;max-width:960px;align-items:center;gap:14px;font-size:14px;line-height:1.5">
+  <span style="font-size:24px" id="deadlineIcon">⏰</span>
+  <div style="flex:1">
+    <div id="deadlineHeadline" style="font-weight:700;margin-bottom:2px"></div>
+    <div id="deadlineSub" style="font-size:12.5px;opacity:.85"></div>
+  </div>
+  <div id="deadlineClock" style="font-variant-numeric:tabular-nums;font-weight:800;font-size:22px;white-space:nowrap"></div>
 </div>
 
 <!-- Form Container -->
@@ -484,6 +488,7 @@ async function init() {
       renderPropertyBanner();
       renderForm();
       updateProgress();
+      startDeadlineCountdown(formData);
       if (LOCKED) applyLockedMode();
     } else {
       // First visit — no account yet, show a clean landing state
@@ -502,6 +507,57 @@ async function init() {
   } catch (e) {
     showFatalError('Application Not Found', 'This link may have expired or already been completed. Please contact the Banksia team for assistance.');
   }
+}
+
+// ── 48-hour countdown ──
+// The window starts server-side the first time this form is opened, so the
+// figure below is only a rendering of the server's deadline. Nothing here can
+// extend it: reloading re-reads the same stored deadline.
+function startDeadlineCountdown(form) {
+  const banner = document.getElementById('deadlineBanner');
+  if (!banner) return;
+  const status = String(form.status || '').toLowerCase();
+  if (['submitted','under_review','approved','rejected','completed','referencing','tenant'].includes(status)) {
+    banner.style.display = 'none';
+    return;
+  }
+  const deadline = form.deadline_at ? new Date(form.deadline_at) : null;
+  if (!deadline || isNaN(deadline)) { banner.style.display = 'none'; return; }
+
+  const clock = document.getElementById('deadlineClock');
+  const head = document.getElementById('deadlineHeadline');
+  const sub = document.getElementById('deadlineSub');
+  const icon = document.getElementById('deadlineIcon');
+  banner.style.display = 'flex';
+
+  const pretty = deadline.toLocaleString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+
+  function tick() {
+    const ms = deadline - new Date();
+    if (ms <= 0) {
+      banner.style.background = '#fef2f2'; banner.style.border = '1px solid #fecaca';
+      banner.style.color = '#b91c1c'; icon.textContent = '⚠️';
+      head.textContent = 'Your 48 hours are up';
+      sub.textContent = 'You can still finish and submit this form. Please do so as soon as you can, or contact us if you need longer.';
+      clock.textContent = '00:00:00';
+      return;
+    }
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor(ms / 60000) % 60;
+    const s = Math.floor(ms / 1000) % 60;
+    clock.textContent = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+    const urgent = ms < 6 * 3600000;
+    banner.style.background = urgent ? '#fef2f2' : '#fffbeb';
+    banner.style.border = '1px solid ' + (urgent ? '#fecaca' : '#fde68a');
+    banner.style.color = urgent ? '#b91c1c' : '#92400e';
+    icon.textContent = urgent ? '⚠️' : '⏰';
+    head.textContent = 'You have 48 hours to complete your referencing';
+    sub.textContent = 'Your form needs to be submitted by ' + pretty +
+      '. Your answers save as you go, so you can come back to it.';
+  }
+  tick();
+  setInterval(tick, 1000);
 }
 
 // ── Render Form ──
