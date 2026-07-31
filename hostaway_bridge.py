@@ -1047,4 +1047,4 @@ def bridge_raw_request():
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5053
     print(f"Hostaway Bridge starting on port {port} (all interfaces)")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="127.0.0.1", port=port, debug=False)
