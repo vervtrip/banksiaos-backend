@@ -837,8 +837,11 @@ def api_forgot_password():
         _reset_tokens_table(db)
         # Any earlier outstanding token for this account is dead the moment a
         # new one is issued.
-        db.execute("UPDATE password_resets SET used_at = ? WHERE email = ? AND used_at IS NULL",
-                   [datetime.now(timezone.utc).isoformat(), email])
+        # Keyed on the account, not on the address: when an account email is
+        # corrected while a link is outstanding, the old link must still die.
+        db.execute("UPDATE password_resets SET used_at = ? "
+                   "WHERE (username = ? OR email = ?) AND used_at IS NULL",
+                   [datetime.now(timezone.utc).isoformat(), found, email])
         db.execute(
             "INSERT INTO password_resets (email, username, token_hash, expires_at, requested_ip, created) "
             "VALUES (?, ?, ?, ?, ?, ?)",
