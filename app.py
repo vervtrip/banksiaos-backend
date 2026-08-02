@@ -575,7 +575,7 @@ def login_page():
 def dashboard_redirect():
     return redirect("/banksia-os")
 
-# ── Login captcha (Google reCAPTCHA v2 checkbox — same widget Arthur Online uses) ──
+# ── Login captcha (Cloudflare Turnstile) ──
 # Keys live in captcha_config.json, which is gitignored: the secret key must never
 # reach the repo. With no keys configured the check is inert and login behaves
 # exactly as it did before, so deploying this cannot lock the team out.
@@ -599,18 +599,25 @@ def _captcha_config():
 
 
 def _verify_captcha(token, ip):
-    """Verify a reCAPTCHA response server-side.
+    """Verify a Turnstile response server-side.
 
     Returns True when the challenge passes, and True when no keys are
-    configured. A verdict of "not a human" from Google fails closed; Google
-    being unreachable fails open, because an outbound network fault must not
-    lock every user out of an internal operations dashboard. The per-IP login
-    rate limit still applies either way.
+    configured. A verdict of "not a human" from Cloudflare fails closed;
+    Cloudflare being unreachable fails open, because an outbound network fault
+    must not lock every user out of an internal operations dashboard. The
+    per-IP login rate limit still applies either way.
     """
     cfg = _captcha_config()
     if not cfg:
         return True
     if not token:
+        # In test mode the widget is decorative (Cloudflare's test keys accept
+        # anyone), so a browser that cannot reach challenges.cloudflare.com must
+        # not be locked out by a check that is protecting nothing. With real
+        # keys (mode live) a missing token is refused.
+        if cfg.get("mode") == "test":
+            log_info("captcha: test mode, allowing attempt with no token")
+            return True
         return False
     import urllib.parse
     body = urllib.parse.urlencode({
@@ -620,14 +627,14 @@ def _verify_captcha(token, ip):
     }).encode()
     try:
         req = urllib.request.Request(
-            "https://www.google.com/recaptcha/api/siteverify",
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
             data=body,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         with urllib.request.urlopen(req, timeout=10) as r:
             result = json.loads(r.read())
     except Exception as e:
-        log_error(f"captcha: siteverify unreachable, allowing login attempt: {e}")
+        log_error(f"captcha: turnstile siteverify unreachable, allowing attempt: {e}")
         return True
     if not result.get("success"):
         log_info(f"captcha: rejected from {ip} ({result.get('error-codes')})")
@@ -643,7 +650,8 @@ def api_auth_captcha_config():
     cfg = _captcha_config()
     return jsonify({
         "enabled": bool(cfg),
-        "provider": cfg.get("provider", "recaptcha_v2"),
+        "provider": cfg.get("provider", "turnstile"),
+        "mode": cfg.get("mode", "live"),
         "site_key": cfg.get("site_key", ""),
     })
 
@@ -662,7 +670,7 @@ def api_auth_login():
     # A failed captcha deliberately does NOT count towards the lockout counter:
     # tokens expire after two minutes, and a slow human should not burn their
     # attempts on an expired tick-box.
-    if not _verify_captcha(data.get("captcha_token") or data.get("recaptcha_token"), ip):
+    if not _verify_captcha(data.get("captcha_token"), ip):
         log_auth_event("login_captcha_failed", username, "Captcha check failed", ip)
         return jsonify({"error": "Please complete the \"I'm not a robot\" check and try again."}), 400
     user = _authenticate(username, password)
@@ -795,7 +803,7 @@ def api_forgot_password():
     data = request.get_json() or {}
     # Same "I am not a robot" gate as the sign-in form, so the reset form cannot
     # be driven by a script. Inert until captcha keys are configured.
-    if not _verify_captcha(data.get("captcha_token") or data.get("recaptcha_token"), ip):
+    if not _verify_captcha(data.get("captcha_token"), ip):
         return jsonify({"error": "Please complete the \"I am not a robot\" check and try again."}), 400
     email = data.get("email", "").strip().lower()
     if not email:

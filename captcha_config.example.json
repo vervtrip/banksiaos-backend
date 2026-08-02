@@ -1,7 +1,8 @@
 {
-  "_note": "Google reCAPTCHA v2 checkbox keys for the Banksia OS login page. Create at https://www.google.com/recaptcha/admin/create -> type: reCAPTCHA v2 -> I am not a robot Checkbox -> domains: ops.srv1744186.hstgr.cloud. Paste both keys here, set enabled true, then: systemctl restart banksia-backend. No rebuild needed.",
-  "provider": "recaptcha_v2",
+  "_note": "Cloudflare Turnstile keys for the Banksia OS login and password-reset pages. Create at dash.cloudflare.com -> Turnstile -> Add widget -> hostname ops.srv1744186.hstgr.cloud -> Managed. Copy the Site Key and Secret Key here, set enabled true and mode live, then: systemctl restart banksia-backend. No frontend rebuild needed.",
+  "provider": "turnstile",
   "enabled": false,
+  "mode": "live",
   "site_key": "",
   "secret_key": ""
 }
