@@ -638,7 +638,28 @@ def favicon():
 _start_time = time.time()
 
 # ── Password Reset ──
-RESET_TOKENS = {}  # {email: {"token": str, "expires": timestamp}}
+# Reset tokens live in the database, not in process memory. Gunicorn runs four
+# workers, so an in-memory dict meant the worker that issued a token usually was
+# not the worker that received the reset, and the flow failed most of the time.
+# Only a hash of the token is stored, so the table is not a list of live keys to
+# every account.
+
+def _reset_tokens_table(db):
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS password_resets ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "email TEXT NOT NULL,"
+        "username TEXT NOT NULL,"
+        "token_hash TEXT NOT NULL,"
+        "expires_at TEXT NOT NULL,"
+        "used_at TEXT,"
+        "requested_ip TEXT,"
+        "created TEXT NOT NULL)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_password_resets_email ON password_resets(email)")
+
+
+def _hash_reset_token(token):
+    return hashlib.sha256(token.encode()).hexdigest()
 
 @app.route("/api/auth/forgot-password", methods=["POST"])
 def api_forgot_password():
@@ -666,48 +687,103 @@ def api_forgot_password():
             found = uname
             break
     
+    generic = {"success": True,
+               "message": "If this email is registered, a reset link has been sent to it."}
     if not found:
         # Don't reveal whether email exists - always return success
-        return jsonify({"success": True, "message": "If this email is registered, a reset link has been sent."})
-    
+        return jsonify(generic)
+
     # Generate reset token
-    token = uuid.uuid4().hex[:32]
-    RESET_TOKENS[email] = {"token": token, "expires": time.time() + 3600, "username": found}
+    token = secrets.token_urlsafe(32)
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    db = get_db()
+    try:
+        _reset_tokens_table(db)
+        # Any earlier outstanding token for this account is dead the moment a
+        # new one is issued.
+        db.execute("UPDATE password_resets SET used_at = ? WHERE email = ? AND used_at IS NULL",
+                   [datetime.now(timezone.utc).isoformat(), email])
+        db.execute(
+            "INSERT INTO password_resets (email, username, token_hash, expires_at, requested_ip, created) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [email, found, _hash_reset_token(token), expires_at, ip,
+             datetime.now(timezone.utc).isoformat()])
+        db.commit()
+    except Exception as e:
+        log_error("password reset: could not store token: %s" % e)
+        return jsonify(generic)
     base_url = os.environ.get("BANKSIA_OS_BASE_URL", "https://ops.srv1744186.hstgr.cloud")
     reset_url = f"{base_url}/reset-password?token={token}&email={email}"
-    
-    # Try sending email via SMTP
-    import smtplib
-    from email.mime.text import MIMEText
-    smtp_sent = False
-    smtp_config_path = os.path.join(os.path.dirname(__file__), "smtp_config.json")
-    if os.path.exists(smtp_config_path):
-        try:
+
+    # Deliver via Missive, which is the path that actually works on this box.
+    # The SMTP block below is kept as a fallback but its config has never had
+    # credentials, so it has never sent anything.
+    try:
+        from referencing_api import send_email
+        ok, detail = send_email(
+            email, found, "Banksia OS - reset your password",
+            f"""<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:520px;
+                 margin:0 auto;color:#1e293b;font-size:15px;line-height:1.6">
+              <p>Hello {found},</p>
+              <p>Someone asked to reset the password on your Banksia OS account. If that
+                 was you, use the link below. It expires in one hour and can only be
+                 used once.</p>
+              <p style="margin:24px 0"><a href="{reset_url}"
+                 style="display:inline-block;padding:12px 24px;background:#1e293b;color:#fff;
+                 text-decoration:none;border-radius:8px;font-weight:700">Reset my password</a></p>
+              <p style="font-size:13px;color:#475569">If the button does not work, paste this
+                 into your browser:<br><span style="word-break:break-all">{reset_url}</span></p>
+              <p style="font-size:13px;color:#475569">If this was not you, ignore this email
+                 and tell the team. Your password has not changed.</p>
+            </div>""")
+        if ok:
+            log_info(f"password reset link sent to {email} ({found})")
+            return jsonify(generic)
+        log_error(f"password reset: Missive send failed: {detail}")
+    except Exception as e:
+        log_error("password reset: Missive send errored: %s" % e)
+
+    # Fallback: SMTP. smtp_config.json has never carried credentials on this
+    # box, so in practice this does nothing and is kept only so a working SMTP
+    # setup would be picked up.
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        smtp_config_path = os.path.join(os.path.dirname(__file__), "smtp_config.json")
+        if os.path.exists(smtp_config_path):
             smtp = json.load(open(smtp_config_path))
-            msg = MIMEText(f"Hello {found},\n\nYou requested a password reset for Banksia OS.\n\nClick the link below to reset your password:\n{reset_url}\n\nThis link expires in 1 hour.\n\nIf you didn't request this, please ignore this email.\n\n— Banksia OS")
-            msg["Subject"] = "Banksia OS — Password Reset"
-            msg["From"] = smtp.get("from_email", "noreply@vervrooms.com")
-            msg["To"] = email
-            with smtplib.SMTP(smtp["host"], smtp["port"], timeout=10) as s:
-                if smtp.get("tls", True):
-                    s.starttls()
-                if smtp.get("username"):
+            if smtp.get("username") and smtp.get("password"):
+                msg = MIMEText(
+                    f"Hello {found},\n\nYou requested a password reset for Banksia OS.\n\n"
+                    f"Click the link below to reset your password:\n{reset_url}\n\n"
+                    "This link expires in 1 hour.\n\n"
+                    "If you didn't request this, please ignore this email.\n\n- Banksia OS")
+                msg["Subject"] = "Banksia OS - Password Reset"
+                msg["From"] = smtp.get("from_email", "noreply@vervrooms.com")
+                msg["To"] = email
+                with smtplib.SMTP(smtp["host"], smtp["port"], timeout=10) as s:
+                    if smtp.get("tls", True):
+                        s.starttls()
                     s.login(smtp["username"], smtp["password"])
-                s.send_message(msg)
-            smtp_sent = True
-            print(f"[PASSWORD RESET] Email sent to {email}")
-        except Exception as e:
-            print(f"[PASSWORD RESET] SMTP failed: {e}")
-    
-    if not smtp_sent:
-        print(f"[PASSWORD RESET] Token for {email} ({found}): {token}")
-        print(f"[PASSWORD RESET] Reset URL: {reset_url}")
-    
-    msg = "A password reset link has been sent to your email."
-    if not smtp_sent:
-        msg = f"Reset link generated. Please contact Neo for your reset link."
-    
-    return jsonify({"success": True, "message": msg, "debug_token": token if not smtp_sent else None})
+                    s.send_message(msg)
+                log_info(f"password reset link sent by SMTP to {email}")
+                return jsonify(generic)
+    except Exception as e:
+        log_error("password reset: SMTP fallback failed: %s" % e)
+
+    # Nothing could deliver it. The token is NOT returned to the caller and NOT
+    # written to the log: this endpoint is unauthenticated, so handing back a
+    # live reset token would let anyone who knows a colleague's email address
+    # take over their account.
+    log_error(f"password reset for {email}: no delivery path succeeded, token discarded")
+    db2 = get_db()
+    try:
+        db2.execute("UPDATE password_resets SET used_at = ? WHERE email = ? AND used_at IS NULL",
+                    [datetime.now(timezone.utc).isoformat(), email])
+        db2.commit()
+    except Exception:
+        pass
+    return jsonify(generic)
 
 @app.route("/api/auth/reset-password", methods=["POST"])
 def api_reset_password():
@@ -722,20 +798,32 @@ def api_reset_password():
     if not ok:
         return jsonify({"error": msg}), 400
 
-    stored = RESET_TOKENS.get(email)
-    if not stored or stored["token"] != token or stored["expires"] < time.time():
+    db = get_db()
+    _reset_tokens_table(db)
+    row = db.execute(
+        "SELECT id, username, token_hash, expires_at FROM password_resets "
+        "WHERE email = ? AND used_at IS NULL ORDER BY id DESC LIMIT 1", [email]).fetchone()
+    if not row:
         return jsonify({"error": "Invalid or expired reset token"}), 400
-    
-    # Update password
+    row_id, username, token_hash, expires_at = row[0], row[1], row[2], row[3]
+    try:
+        expired = datetime.fromisoformat(expires_at) < datetime.now(timezone.utc)
+    except Exception:
+        expired = True
+    if expired or not _hmac.compare_digest(token_hash, _hash_reset_token(token)):
+        return jsonify({"error": "Invalid or expired reset token"}), 400
+
     users = _load_users()
-    username = stored["username"]
-    if username in users:
-        users[username]["password"] = _hash_password(new_password)
-        _save_users(users)
-        del RESET_TOKENS[email]
-        return jsonify({"success": True, "message": "Password has been reset successfully."})
-    
-    return jsonify({"error": "User not found"}), 404
+    if username not in users:
+        return jsonify({"error": "User not found"}), 404
+    users[username]["password"] = _hash_password(new_password)
+    _save_users(users)
+    db.execute("UPDATE password_resets SET used_at = ? WHERE id = ?",
+               [datetime.now(timezone.utc).isoformat(), row_id])
+    db.commit()
+    log_auth_event("password_reset", username, "Password reset via emailed link",
+                   request.remote_addr or "unknown")
+    return jsonify({"success": True, "message": "Password has been reset successfully."})
 
 @app.route("/reset-password")
 def reset_password_page():
