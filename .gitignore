@@ -69,3 +69,6 @@ regression_backup_*.db
 *.db
 verv_os_db
 sync_log.txt
+
+# reCAPTCHA secret key — never commit (example file is committed instead)
+captcha_config.json

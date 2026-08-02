@@ -575,6 +575,79 @@ def login_page():
 def dashboard_redirect():
     return redirect("/banksia-os")
 
+# ── Login captcha (Google reCAPTCHA v2 checkbox — same widget Arthur Online uses) ──
+# Keys live in captcha_config.json, which is gitignored: the secret key must never
+# reach the repo. With no keys configured the check is inert and login behaves
+# exactly as it did before, so deploying this cannot lock the team out.
+CAPTCHA_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "captcha_config.json")
+
+
+def _captcha_config():
+    """Return the captcha config, or {} when it is not usable/enabled."""
+    try:
+        with open(CAPTCHA_CONFIG_PATH) as f:
+            cfg = json.load(f)
+    except Exception:
+        return {}
+    if not isinstance(cfg, dict):
+        return {}
+    if cfg.get("enabled") is False:
+        return {}
+    if not cfg.get("site_key") or not cfg.get("secret_key"):
+        return {}
+    return cfg
+
+
+def _verify_captcha(token, ip):
+    """Verify a reCAPTCHA response server-side.
+
+    Returns True when the challenge passes, and True when no keys are
+    configured. A verdict of "not a human" from Google fails closed; Google
+    being unreachable fails open, because an outbound network fault must not
+    lock every user out of an internal operations dashboard. The per-IP login
+    rate limit still applies either way.
+    """
+    cfg = _captcha_config()
+    if not cfg:
+        return True
+    if not token:
+        return False
+    import urllib.parse
+    body = urllib.parse.urlencode({
+        "secret": cfg["secret_key"],
+        "response": token,
+        "remoteip": ip or "",
+    }).encode()
+    try:
+        req = urllib.request.Request(
+            "https://www.google.com/recaptcha/api/siteverify",
+            data=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            result = json.loads(r.read())
+    except Exception as e:
+        log_error(f"captcha: siteverify unreachable, allowing login attempt: {e}")
+        return True
+    if not result.get("success"):
+        log_info(f"captcha: rejected from {ip} ({result.get('error-codes')})")
+        return False
+    return True
+
+
+@app.route("/api/auth/captcha-config")
+def api_auth_captcha_config():
+    """Public: tells the login page whether to draw the widget, and with which
+    site key. The site key is public by design; the secret key never leaves the
+    server."""
+    cfg = _captcha_config()
+    return jsonify({
+        "enabled": bool(cfg),
+        "provider": cfg.get("provider", "recaptcha_v2"),
+        "site_key": cfg.get("site_key", ""),
+    })
+
+
 # ── Auth API ──
 @app.route("/api/auth/login", methods=["POST"])
 def api_auth_login():
@@ -585,6 +658,13 @@ def api_auth_login():
     data = request.get_json()
     username = data.get("username", "").strip()
     password = data.get("password", "")
+    # Checked before the password so a bot never reaches the credential check.
+    # A failed captcha deliberately does NOT count towards the lockout counter:
+    # tokens expire after two minutes, and a slow human should not burn their
+    # attempts on an expired tick-box.
+    if not _verify_captcha(data.get("captcha_token") or data.get("recaptcha_token"), ip):
+        log_auth_event("login_captcha_failed", username, "Captcha check failed", ip)
+        return jsonify({"error": "Please complete the \"I'm not a robot\" check and try again."}), 400
     user = _authenticate(username, password)
     if not user:
         _record_login_attempt(ip)
@@ -658,23 +738,65 @@ def _reset_tokens_table(db):
     db.execute("CREATE INDEX IF NOT EXISTS idx_password_resets_email ON password_resets(email)")
 
 
+def _throttle_table(db):
+    db.execute("CREATE TABLE IF NOT EXISTS auth_throttle ("
+               "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+               "bucket TEXT NOT NULL,"
+               "subject TEXT NOT NULL,"
+               "ts REAL NOT NULL)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_auth_throttle "
+               "ON auth_throttle(bucket, subject, ts)")
+
+
+def _over_throttle(bucket, subject, limit, window):
+    """Shared, cross-worker rate limit. True when the caller is over the limit.
+
+    Gunicorn runs 4 workers, so a plain in-process dict gives a caller `limit`
+    attempts *per worker* rather than `limit` in total - four times weaker than
+    it reads. This keeps the counter in SQLite, which every worker shares.
+    Fails open on a database error: an internal operations dashboard must not
+    become unreachable because a counter table is unavailable.
+    """
+    now = time.time()
+    try:
+        db = get_db()
+        _throttle_table(db)
+        db.execute("DELETE FROM auth_throttle WHERE ts < ?", [now - 86400])
+        row = db.execute(
+            "SELECT COUNT(*) FROM auth_throttle WHERE bucket = ? AND subject = ? AND ts > ?",
+            [bucket, subject, now - window]).fetchone()
+        used = (row[0] if not isinstance(row, dict) else list(row.values())[0]) or 0
+        if used >= limit:
+            db.commit()
+            return True
+        db.execute("INSERT INTO auth_throttle (bucket, subject, ts) VALUES (?, ?, ?)",
+                   [bucket, subject, now])
+        db.commit()
+        return False
+    except Exception as e:
+        log_error("throttle unavailable, allowing request: %s" % e)
+        return False
+
+
+
 def _hash_reset_token(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
 @app.route("/api/auth/forgot-password", methods=["POST"])
 def api_forgot_password():
-    # Rate limit forgot-password: 3 per 10 minutes per IP
+    # 3 reset requests per 10 minutes from one address, counted in the database
+    # so all four gunicorn workers share the tally.
     ip = request.remote_addr or "unknown"
-    rl_key = f"forgot:{ip}"
-    now = time.time()
-    if rl_key not in _login_attempts:
-        _login_attempts[rl_key] = []
-    _login_attempts[rl_key] = [t for t in _login_attempts[rl_key] if now - t < 600]
-    if len(_login_attempts[rl_key]) >= 3:
+    if _over_throttle("forgot_ip", ip, 3, 600):
+        log_auth_event("password_reset_rate_limited", "-",
+                       "More than 3 reset requests in 10 minutes", ip)
         return jsonify({"error": "Too many requests. Try again later."}), 429
-    _login_attempts[rl_key].append(now)
-    
-    data = request.get_json()
+
+    data = request.get_json() or {}
+    # Same "I am not a robot" gate as the sign-in form, so the reset form cannot
+    # be driven by a script. Inert until captcha keys are configured.
+    if not _verify_captcha(data.get("captcha_token") or data.get("recaptcha_token"), ip):
+        return jsonify({"error": "Please complete the \"I am not a robot\" check and try again."}), 400
     email = data.get("email", "").strip().lower()
     if not email:
         return jsonify({"error": "Email is required"}), 400
@@ -690,8 +812,22 @@ def api_forgot_password():
     generic = {"success": True,
                "message": "If this email is registered, a reset link has been sent to it."}
     if not found:
-        # Don't reveal whether email exists - always return success
+        # A reset link is only ever issued to an address that belongs to a real
+        # Banksia OS account. The reply is deliberately identical either way, so
+        # the form cannot be used to work out who has an account. The refusal is
+        # recorded in the auth log instead, where the team can see it.
+        log_auth_event("password_reset_denied", email,
+                       "No Banksia OS account for this address", ip)
         return jsonify(generic)
+
+    # And no more than 3 links to the same account per hour, however many
+    # different addresses ask for it.
+    if _over_throttle("forgot_email", email, 3, 3600):
+        log_auth_event("password_reset_rate_limited", found,
+                       "More than 3 reset links requested for this account in an hour", ip)
+        return jsonify(generic)
+    log_auth_event("password_reset_requested", found,
+                   f"Reset link requested for {email}", ip)
 
     # Generate reset token
     token = secrets.token_urlsafe(32)

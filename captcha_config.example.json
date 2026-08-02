@@ -1,0 +1,7 @@
+{
+  "_note": "Google reCAPTCHA v2 checkbox keys for the Banksia OS login page. Create at https://www.google.com/recaptcha/admin/create -> type: reCAPTCHA v2 -> I am not a robot Checkbox -> domains: ops.srv1744186.hstgr.cloud. Paste both keys here, set enabled true, then: systemctl restart banksia-backend. No rebuild needed.",
+  "provider": "recaptcha_v2",
+  "enabled": false,
+  "site_key": "",
+  "secret_key": ""
+}
