@@ -5159,6 +5159,56 @@ def api_guarantors():
     return json_success({"items": rows, "totals": totals}, total, page, per_page)
 
 
+GUARANTOR_FIELDS = (
+    "guarantor_first_name", "guarantor_last_name", "guarantor_email",
+    "guarantor_phone", "guarantor_mobile", "guarantor_relation",
+    "guarantor_address", "guarantor_city", "guarantor_postcode",
+    "guarantor_country", "guarantor_date_of_birth", "guarantor_profession",
+    "guarantor_home_owner", "guarantor_status",
+)
+
+
+@banksia_os_bp.route("/guarantors/tenant/<int:tenant_id>", methods=["DELETE"])
+def api_delete_guarantor(tenant_id):
+    """Remove a guarantor.
+
+    A guarantor is not a record of its own — it is the guarantor_* fields on a
+    tenant row. So deleting one clears the guarantee and leaves the tenant
+    completely alone. The details that were removed are written into the
+    activity log so the entry can be put back by hand if it was a mistake.
+    """
+    db = get_dict_db()
+    try:
+        t = db.execute("SELECT * FROM tenants WHERE id=?", (tenant_id,)).fetchone()
+        if not t:
+            return json_error("Guarantor not found", 404)
+        name = f"{t.get('guarantor_first_name','') or ''} {t.get('guarantor_last_name','') or ''}".strip()
+        tenant_name = f"{t.get('first_name','') or ''} {t.get('last_name','') or ''}".strip()
+        if not name and not t.get("has_guarantor"):
+            return json_error("There is no guarantor on this tenant to remove.", 409)
+
+        snapshot = {k: t.get(k) for k in GUARANTOR_FIELDS if t.get(k)}
+        now = datetime.now(timezone.utc).isoformat()
+        sets = ", ".join(f"{c} = NULL" for c in GUARANTOR_FIELDS)
+        db.execute(
+            f"UPDATE tenants SET {sets}, has_guarantor = 0, modified = ?, "
+            "sync_dirty = 1, local_modified = ?, sync_origin = 'banksia_os' WHERE id = ?",
+            (now, now, tenant_id))
+        db.commit()
+        _log_activity(
+            "guarantor", tenant_id, "deleted",
+            notes=(f"Guarantor '{name or 'unnamed'}' removed from tenant "
+                   f"{tenant_name or tenant_id}. Details were: "
+                   + json.dumps(snapshot, default=str)),
+            db=db)
+        db.commit()
+        return json_success({"deleted": True, "name": name, "tenant": tenant_name})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
 @banksia_os_bp.route("/guarantors/tenant/<int:tenant_id>/status", methods=["PATCH"])
 def api_set_guarantor_status(tenant_id):
     """Set a guarantor's status by hand. Active and Inactive are the only two."""
