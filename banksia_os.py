@@ -2952,6 +2952,9 @@ def _ensure_archive_columns(db):
         "ALTER TABLE applicants ADD COLUMN pre_archive_status TEXT",
         "ALTER TABLE guarantors ADD COLUMN archived_at TEXT",
         "ALTER TABLE guarantors ADD COLUMN archived_by TEXT",
+        # Guarantors are held on the tenant row; this is their own status,
+        # set by hand and overriding the one derived from the tenancy.
+        "ALTER TABLE tenants ADD COLUMN guarantor_status TEXT",
     ):
         try:
             db.execute(s)
@@ -5057,15 +5060,33 @@ def api_tenant(tenant_id):
 # 5b. GUARANTORS (from tenants table)
 # ═══════════════════════════════════════════════
 
+# Guarantors live on the tenant row, not in a table of their own, so a
+# guarantor "is" the tenant record that names them.
+GUARANTOR_BASE_WHERE = (
+    "(t.has_guarantor = 1 OR (t.guarantor_first_name IS NOT NULL AND t.guarantor_first_name != ''))"
+)
+
+# A guarantor is active while the tenancy they stand behind is running. Anyone
+# can override that by hand, and the override wins. There is no third state:
+# the tenant's own portal status (invited/pending) says nothing about the
+# guarantee, which is why it is not used here.
+GUARANTOR_STATUS_SQL = (
+    "LOWER(COALESCE(NULLIF(TRIM(t.guarantor_status), ''), "
+    "CASE WHEN (SELECT tn.status FROM tenancies tn WHERE tn.id = t.tenancy_id) "
+    "IN ('Current', 'Periodic') THEN 'active' ELSE 'inactive' END))"
+)
+
+GUARANTOR_CATEGORIES = ("active", "inactive")
+
+
 @banksia_os_bp.route("/guarantors")
 def api_guarantors():
     page = int_param(request.args.get("page"))
     per_page = int_param(request.args.get("per_page"), 20, max_val=MAX_PAGE_SIZE)
     search = request.args.get("search", "").strip()
+    category = request.args.get("category", "").strip().lower()
 
-    where_parts = [
-        "(t.has_guarantor = 1 OR (t.guarantor_first_name IS NOT NULL AND t.guarantor_first_name != ''))"
-    ]
+    where_parts = [GUARANTOR_BASE_WHERE]
     params = []
 
     if search:
@@ -5076,6 +5097,12 @@ def api_guarantors():
         where_parts.append(search_clause)
         params.extend(search_params)
 
+    # Scoped server-side so paging and counts are right; a client-side filter
+    # would only ever filter the page you happen to be looking at.
+    if category in GUARANTOR_CATEGORIES:
+        where_parts.append(f"{GUARANTOR_STATUS_SQL} = ?")
+        params.append(category)
+
     where = " AND ".join(where_parts)
 
     base_cols = (
@@ -5083,17 +5110,20 @@ def api_guarantors():
         "t.guarantor_first_name AS first_name, "
         "t.guarantor_last_name AS last_name, "
         "t.guarantor_email AS email, "
-        "t.guarantor_mobile AS phone, "
+        "COALESCE(NULLIF(t.guarantor_mobile, ''), t.guarantor_phone) AS phone, "
         "t.guarantor_mobile AS mobile, "
         "t.guarantor_relation AS relationship, "
-        "t.status, "
+        f"{GUARANTOR_STATUS_SQL} AS status, "
+        "t.guarantor_status AS status_override, "
+        "(SELECT tn.status FROM tenancies tn WHERE tn.id = t.tenancy_id) AS tenancy_status, "
         "t.first_name || ' ' || t.last_name AS linked_applicant_name, "
         "t.first_name || ' ' || t.last_name AS linked_tenant_name, "
         "COALESCE("
-        "(SELECT p.name FROM properties p JOIN tenancies tn ON tn.property_id = p.id WHERE tn.id = t.tenancy_id), "
-        "(SELECT p.name FROM properties p WHERE p.arthur_id = CAST(t.property_id AS TEXT))"
+        "(SELECT COALESCE(NULLIF(p.address_line_1, ''), p.name) FROM properties p "
+        "JOIN tenancies tn ON tn.property_id = p.id WHERE tn.id = t.tenancy_id), "
+        "(SELECT COALESCE(NULLIF(p.address_line_1, ''), p.name) FROM properties p "
+        "WHERE p.arthur_id = CAST(t.property_id AS TEXT))"
         ") AS property_name, "
-        "t.employment_salary AS annual_income, "
         "t.employment_company AS employer_name"
     )
 
@@ -5101,6 +5131,7 @@ def api_guarantors():
         "guarantor_last_name": "t.guarantor_last_name",
         "guarantor_first_name": "t.guarantor_first_name",
         "guarantor_email": "t.guarantor_email",
+        "status": "status",
     }, "t.guarantor_last_name ASC, t.guarantor_first_name ASC")
 
     rows, total = paginate(
@@ -5109,14 +5140,61 @@ def api_guarantors():
         params, page, per_page
     )
 
-    return json_success(rows, total, page, per_page)
+    # Card counts are deliberately unfiltered, so they don't shrink when
+    # somebody leaves a search in the box.
+    db = get_dict_db()
+    try:
+        counts = {r["s"]: r["cnt"] for r in db.execute(
+            f"SELECT {GUARANTOR_STATUS_SQL} AS s, COUNT(*) AS cnt FROM tenants t "
+            f"WHERE {GUARANTOR_BASE_WHERE} GROUP BY s"
+        ).fetchall()}
+    except Exception:
+        counts = {}
+    totals = {
+        "active": counts.get("active", 0),
+        "inactive": counts.get("inactive", 0),
+        "all": sum(counts.values()),
+    }
+
+    return json_success({"items": rows, "totals": totals}, total, page, per_page)
 
 
-@banksia_os_bp.route("/guarantors/<int:guarantor_id>")
-def api_guarantor(guarantor_id):
-    """Redirect to the new guarantor detail endpoint."""
-    from flask import redirect as _rd
-    return _rd(f"/api/banksia-os/guarantors/{guarantor_id}")
+@banksia_os_bp.route("/guarantors/tenant/<int:tenant_id>/status", methods=["PATCH"])
+def api_set_guarantor_status(tenant_id):
+    """Set a guarantor's status by hand. Active and Inactive are the only two."""
+    data = request.get_json() or {}
+    new_status = str(data.get("status", "")).strip().lower()
+    if new_status not in GUARANTOR_CATEGORIES:
+        return json_error("Status must be Active or Inactive.", 400)
+    db = get_dict_db()
+    try:
+        t = db.execute("SELECT * FROM tenants WHERE id=?", (tenant_id,)).fetchone()
+        if not t:
+            return json_error("Guarantor not found", 404)
+        old = db.execute(
+            f"SELECT {GUARANTOR_STATUS_SQL} AS s FROM tenants t WHERE t.id=?", (tenant_id,)
+        ).fetchone()["s"]
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "UPDATE tenants SET guarantor_status=?, modified=?, sync_dirty=1, "
+            "local_modified=?, sync_origin='banksia_os' WHERE id=?",
+            (new_status, now, now, tenant_id))
+        db.commit()
+        name = f"{t.get('guarantor_first_name','')} {t.get('guarantor_last_name','')}".strip()
+        _log_activity("guarantor", tenant_id, "update", field_changed="status",
+                      old_value=old, new_value=new_status,
+                      notes=f"Guarantor status: {name or 'unnamed'}", db=db)
+        db.commit()
+        return json_success({"id": tenant_id, "status": new_status})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+# NOTE: there used to be a /guarantors/<id> route here that redirected to
+# itself, so every guarantor row on the list 302'd forever and could not be
+# opened. Removed — the real handler is api_get_guarantor further down.
 
 
 # ═══════════════════════════════════════════════
@@ -12877,6 +12955,38 @@ def api_get_guarantor(g_id):
     """Get guarantor detail."""
     db = get_dict_db()
     try:
+        # The guarantors list is built from tenant rows, so the ids it links to
+        # are tenant ids. Tenant ids start well above the handful of rows in the
+        # guarantors table, so there is no ambiguity between the two.
+        t = db.execute(
+            f"SELECT * FROM tenants t WHERE t.id = ? AND {GUARANTOR_BASE_WHERE}", (g_id,)
+        ).fetchone()
+        if t:
+            status = db.execute(
+                f"SELECT {GUARANTOR_STATUS_SQL} AS s FROM tenants t WHERE t.id=?", (g_id,)
+            ).fetchone()["s"]
+            return json_success({
+                "id": t["id"],
+                "first_name": t.get("guarantor_first_name") or "",
+                "last_name": t.get("guarantor_last_name") or "",
+                "email": t.get("guarantor_email") or "",
+                "phone": t.get("guarantor_phone") or "",
+                "mobile": t.get("guarantor_mobile") or "",
+                "date_of_birth": t.get("guarantor_date_of_birth") or "",
+                "relationship": t.get("guarantor_relation") or "",
+                "address": t.get("guarantor_address") or "",
+                "city": t.get("guarantor_city") or "",
+                "postcode": t.get("guarantor_postcode") or "",
+                "country": t.get("guarantor_country") or "",
+                "employment": t.get("guarantor_profession") or "",
+                "status": status,
+                "linked_tenant_id": t["id"],
+                "linked_tenant_name": f"{t.get('first_name','')} {t.get('last_name','')}".strip(),
+                "tenancy_id": t.get("tenancy_id"),
+                "documents": [],
+                "source": "tenant",
+            })
+
         g = db.execute("SELECT * FROM guarantors WHERE id = ?", (g_id,)).fetchone()
         if not g:
             return json_error("Guarantor not found", 404)
@@ -12903,6 +13013,43 @@ def api_update_guarantor(g_id):
 
     db = get_dict_db()
     try:
+        # Same resolution as the GET: an id off the list is a tenant id, and the
+        # editable fields map onto the tenant's guarantor_* columns. Without
+        # this the inline edits on the list wrote to whatever row in the
+        # guarantors table happened to share the number.
+        t = db.execute(
+            f"SELECT * FROM tenants t WHERE t.id = ? AND {GUARANTOR_BASE_WHERE}", (g_id,)
+        ).fetchone()
+        if t:
+            field_map = {
+                "first_name": "guarantor_first_name", "last_name": "guarantor_last_name",
+                "email": "guarantor_email", "phone": "guarantor_phone",
+                "mobile": "guarantor_mobile", "relationship": "guarantor_relation",
+                "address": "guarantor_address", "city": "guarantor_city",
+                "postcode": "guarantor_postcode", "country": "guarantor_country",
+                "date_of_birth": "guarantor_date_of_birth",
+            }
+            sets, vals = [], []
+            for key, val in data.items():
+                col = field_map.get(key)
+                if not col:
+                    continue
+                sets.append(f"{col} = ?")
+                vals.append(val)
+            if not sets:
+                return json_error("No valid fields to update")
+            now = datetime.now(timezone.utc).isoformat()
+            sets += ["modified = ?", "sync_dirty = 1", "local_modified = ?", "sync_origin = 'banksia_os'"]
+            vals += [now, now, g_id]
+            db.execute(f"UPDATE tenants SET {', '.join(sets)} WHERE id = ?", vals)
+            db.commit()
+            for key, val in data.items():
+                if key in field_map:
+                    _log_activity("guarantor", g_id, "update", field_changed=key,
+                                  old_value=t.get(field_map[key]), new_value=val, db=db)
+            db.commit()
+            return json_success({"id": g_id, "updated": True})
+
         g = db.execute("SELECT * FROM guarantors WHERE id = ?", (g_id,)).fetchone()
         if not g:
             return json_error("Guarantor not found", 404)
