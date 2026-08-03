@@ -1756,16 +1756,41 @@ def api_properties():
     sort_field = request.args.get("sort_field", "").strip()
     sort_direction = request.args.get("sort_direction", "asc").strip().lower()
 
-    # Show all properties by default — including archived ones when searching
-    base_where = "(status IS NULL OR status <> 'archived')"
+    # Category scoping (Norbert, 2026-08-03). The properties page is entered through
+    # three cards, and they deliberately OVERLAP: a managed property is still an
+    # active property, and an inactive one can be a managed one too. So these are
+    # three ways of asking about the same 45 rows, not a partition of them.
+    #   active     — trading properties (is_active = 1, not archived)
+    #   management — let on a management fee rather than fixed rent
+    #   inactive   — stood down or archived, whatever the fee basis
+    category = request.args.get("category", "").strip().lower()
+    not_archived = "(status IS NULL OR status <> 'archived')"
+    if category == "inactive":
+        # Archived properties are NOT inactive properties (Norbert, 2026-08-03): he saw
+        # 59 Claylands Road and 95 Wheat Sheaf Close here and said both should be
+        # archived — they already were. Archived stock lives on the Archive page and
+        # nowhere else, so this category is "stood down but still on the books".
+        scope_clause = f"COALESCE(is_active, 1) = 0 AND {not_archived}"
+    elif category == "all":
+        # "I still want the option to see all the properties in 1" (Norbert). Archived
+        # rows stay out — the Archive page is where those live.
+        scope_clause = not_archived
+    elif category == "management":
+        scope_clause = f"management_type = 'Management Fee' AND {not_archived}"
+    elif category == "active":
+        scope_clause = f"COALESCE(is_active, 1) = 1 AND {not_archived}"
+    else:
+        # No category — the whole list, archived excluded (they live in Archive).
+        scope_clause = not_archived
+
+    base_where = scope_clause
     base_params = []
 
     if search:
         search_clause, search_params = build_search_clause(
             ["name", "ref", "address_line_1", "city", "postcode"], search
         )
-        base_where = f"({search_clause}) AND (status IS NULL OR status <> 'archived')"
-        # Archived properties live in the Archive page, never the main list
+        base_where = f"({search_clause}) AND {scope_clause}"
         base_params = search_params
 
     # Occupancy filter
@@ -1835,14 +1860,20 @@ def api_properties():
         real_units = totals_row["units_cnt"]
         real_occupied = totals_row["occ_cnt"]
         # Active/inactive counts — unfiltered (from full DB, not current page)
-        active_cnt = db2.execute("SELECT COUNT(*) AS cnt FROM properties WHERE is_active = 1 AND (status IS NULL OR status <> 'archived')").fetchone()["cnt"]
-        inactive_cnt = db2.execute("SELECT COUNT(*) AS cnt FROM properties WHERE is_active = 0 AND (status IS NULL OR status <> 'archived')").fetchone()["cnt"]
+        active_cnt = db2.execute("SELECT COUNT(*) AS cnt FROM properties WHERE COALESCE(is_active, 1) = 1 AND (status IS NULL OR status <> 'archived')").fetchone()["cnt"]
+        inactive_cnt = db2.execute("SELECT COUNT(*) AS cnt FROM properties WHERE COALESCE(is_active, 1) = 0 AND (status IS NULL OR status <> 'archived')").fetchone()["cnt"]
+        all_cnt = db2.execute("SELECT COUNT(*) AS cnt FROM properties WHERE status IS NULL OR status <> 'archived'").fetchone()["cnt"]
+        # Card counts. Unfiltered on purpose: the landing cards state how big each
+        # category is, so they must not shrink because someone left a search in the box.
+        management_cnt = db2.execute("SELECT COUNT(*) AS cnt FROM properties WHERE management_type = 'Management Fee' AND (status IS NULL OR status <> 'archived')").fetchone()["cnt"]
     finally:
         db2.close()
 
     return json_success({
         "items": rows,
-        "totals": {"properties": real_props_count, "units": real_units, "occupied": real_occupied, "active": active_cnt, "inactive": inactive_cnt},
+        "totals": {"properties": real_props_count, "units": real_units, "occupied": real_occupied,
+                   "active": active_cnt, "inactive": inactive_cnt, "management": management_cnt,
+                   "all": all_cnt},
     }, total, page, per_page)
 
 
@@ -3469,6 +3500,10 @@ def api_create_activity():
 # 2h. UNIT CRUD — create, edit, archive, delete, bulk-create
 # ═══════════════════════════════════════════════
 
+# The only three unit statuses (Norbert, 2026-08-03). Was a free-text mix of
+# Let / Available To Let / Available / Unavailable to Let / Vacant.
+UNIT_STATUSES = {"Occupied", "Vacant", "Inactive"}
+
 ALLOWED_UNIT_FIELDS = {
     "unit_ref", "unit_type", "floor", "bedrooms", "capacity",
     "market_rent", "furnished", "status", "notes",
@@ -3570,6 +3605,46 @@ def api_update_unit(unit_id):
         if not updates:
             return json_error("No valid fields to update", 400)
 
+        # Unit status is one of exactly three values (Norbert, 2026-08-03), and it is
+        # the same fact as unit_vacant — so the two are written together. Letting them
+        # drift is how a room reads "Vacant" on this page and "occupied" in every count
+        # that reads unit_vacant instead.
+        if "unit_status" in updates:
+            wanted = str(updates["unit_status"] or "").strip().title()
+            if wanted not in UNIT_STATUSES:
+                return json_error("Status must be one of: %s" % ", ".join(sorted(UNIT_STATUSES)), 400)
+            updates["unit_status"] = wanted
+
+            # Status has to agree with the tenancy (Norbert, 2026-08-03):
+            #   Occupied -> there must be a tenant
+            #   Vacant   -> there must not be
+            #   Inactive -> there must not be
+            # Enforced here rather than in the UI because the tenancy is the fact and the
+            # status is a label on it. A room marked empty while someone lives in it is
+            # how rent stops being chased and a re-let gets advertised over a tenant.
+            live = db.execute(
+                "SELECT main_tenant_name, status FROM tenancies WHERE unit_id = ? "
+                "AND LOWER(COALESCE(status,'')) IN ('current','active','periodic') "
+                "ORDER BY start_date DESC LIMIT 1", (unit_id,)
+            ).fetchone()
+            who = (live or {}).get("main_tenant_name") or "a tenant"
+
+            if wanted == "Occupied" and not live:
+                return json_error(
+                    "This unit has no tenant, so it cannot be marked Occupied. "
+                    "Create the tenancy first and the unit becomes occupied with it.", 409)
+            if wanted in ("Vacant", "Inactive") and live:
+                return json_error(
+                    "%s still has a live tenancy on this unit, so it cannot be marked %s. "
+                    "End the tenancy first." % (who, wanted), 409)
+
+            if wanted == "Vacant":
+                updates["unit_vacant"] = 1
+            elif wanted == "Occupied":
+                updates["unit_vacant"] = 0
+            # Inactive says nothing about whether anyone is in there, so unit_vacant
+            # is left exactly as it was rather than being invented.
+
         set_parts = [f"{k} = ?" for k in updates]
         params = list(updates.values())
         set_parts.append("modified = ?")
@@ -3577,11 +3652,21 @@ def api_update_unit(unit_id):
         params.append(unit_id)
 
         db.execute(f"UPDATE units SET {', '.join(set_parts)} WHERE id = ?", params)
-        db.commit()
 
-        _log_activity("unit", unit_id, "update",
-                      notes=f"Unit '{unit.get('unit_ref', '')}' updated",
-                      db=db)
+        # Logged before the commit — _log_activity does not commit when it is handed a
+        # connection, so an audit row written after db.commit() is thrown away.
+        if "unit_status" in updates:
+            _log_activity("unit", unit_id, "update", field_changed="unit_status",
+                          old_value=unit.get("unit_status") or "",
+                          new_value=updates["unit_status"],
+                          notes=f"Unit '{unit.get('unit_ref', '')}' status changed",
+                          db=db)
+        else:
+            _log_activity("unit", unit_id, "update",
+                          notes=f"Unit '{unit.get('unit_ref', '')}' updated",
+                          db=db)
+
+        db.commit()
 
         updated = db.execute("SELECT * FROM units WHERE id = ?", (unit_id,)).fetchone()
         return json_success(clean_none(dict(updated)))
@@ -3765,6 +3850,18 @@ def api_property_images(prop_id):
 # 3. UNITS
 # ═══════════════════════════════════════════════
 
+def _next_months(from_month, count):
+    """The next `count` calendar month keys after `from_month` ("YYYY-MM")."""
+    y, m = int(from_month[:4]), int(from_month[5:7])
+    out = []
+    for _ in range(count):
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+        out.append("%04d-%02d" % (y, m))
+    return out
+
+
 @banksia_os_bp.route("/units", methods=["GET", "POST"])
 def api_units():
     if request.method == "POST":
@@ -3792,6 +3889,86 @@ def api_units():
 
     where_parts = ["(u.is_active IS NULL OR u.is_active = 1)"]
     params = []
+
+    # Category scoping (Norbert, 2026-08-03) — the units page is entered by category,
+    # the same shape as Properties. Unlike the property categories these do NOT overlap:
+    # a unit in a stood-down property is not "vacant" in any useful sense (you cannot let
+    # it), so Inactive takes it out of both Occupied and Vacant rather than sitting
+    # alongside them.
+    #   occupied — someone is living there
+    #   vacant   — empty and lettable, optionally narrowed to when it frees up
+    #   inactive — the property it belongs to is inactive, so the unit is too
+    category = request.args.get("category", "").strip().lower()
+    vacant_when = request.args.get("vacant_when", "").strip().lower()
+
+    _this_month = datetime.now(timezone.utc).strftime("%Y-%m")
+    # Buckets start at the CURRENT month so a tenancy ending this month cannot fall
+    # through the gap between "now" and the first future month.
+    _upcoming_months = [_this_month] + _next_months(_this_month, 4)
+
+    # "Vacant now" means EMPTY NOW, nothing else (Norbert, 2026-08-03, after 5 Radford
+    # House E3 turned up here while Jessica Tamang was living in it).
+    NOW_CLAUSE = "u.unit_vacant = 1"
+
+    # A unit is "coming vacant in month X" only when a live tenancy is actually ENDING
+    # then. available_from is not evidence on its own: it holds the date the unit was
+    # last advertised, so E3 carried 2026-08-31 against an open-ended periodic tenancy.
+    # It is used only as a fallback for a unit with no live tenancy at all, where there
+    # is nothing better to go on. Takes the month twice.
+    MONTH_CLAUSE = (
+        "(COALESCE(u.unit_vacant, 0) = 0 AND ("
+        # Bucketed by the day AFTER the tenancy ends — that is the day the room can be
+        # let. A tenancy ending 31 October makes the room a NOVEMBER vacancy.
+        # An APPROVED notice to quit is the better evidence when there is one: it
+        # carries the agreed vacate date, which is the first day the room can be let.
+        # Falls back to the day after the tenancy end date when there is no notice.
+        "substr(COALESCE((SELECT COALESCE(n.move_out_date, date(t.end_date, '+1 day')) "
+        "FROM tenancies t LEFT JOIN tenancy_notice n ON n.tenancy_id = t.id AND n.status = 'approved' "
+        "WHERE t.unit_id = u.id "
+        "AND LOWER(COALESCE(t.status,'')) IN ('current','active','periodic') "
+        "ORDER BY t.start_date DESC LIMIT 1), ''), 1, 7) = ? "
+        "OR (NOT EXISTS (SELECT 1 FROM tenancies t2 WHERE t2.unit_id = u.id "
+        "AND LOWER(COALESCE(t2.status,'')) IN ('current','active','periodic')) "
+        "AND substr(COALESCE(u.available_from, ''), 1, 7) = ?)))"
+    )
+
+    prop_inactive = ("EXISTS (SELECT 1 FROM properties p2 WHERE p2.id = u.property_id "
+                     "AND COALESCE(p2.is_active, 1) = 0)")
+    prop_archived = ("EXISTS (SELECT 1 FROM properties p3 WHERE p3.id = u.property_id "
+                     "AND p3.status = 'archived')")
+
+    if category:
+        # Archived properties live on the Archive page, so their units never appear here.
+        where_parts.append("NOT " + prop_archived)
+
+    # The status column is now the answer, except that a stood-down property still
+    # forces its units inactive whatever their own row says — that rule is Norbert's
+    # and it has to survive someone flipping a single unit back to Occupied.
+    if category == "all":
+        pass  # every live unit, no further narrowing
+    elif category == "inactive":
+        where_parts.append("(%s OR LOWER(COALESCE(u.unit_status,'')) = 'inactive')" % prop_inactive)
+    elif category == "occupied":
+        where_parts.append("NOT " + prop_inactive)
+        where_parts.append("LOWER(COALESCE(u.unit_status,'')) <> 'inactive'")
+        where_parts.append("(u.unit_vacant = 0 OR u.unit_vacant IS NULL)")
+    elif category == "vacant":
+        where_parts.append("NOT " + prop_inactive)
+        where_parts.append("LOWER(COALESCE(u.unit_status,'')) <> 'inactive'")
+        if vacant_when and vacant_when != "now":
+            # A named month: units still let today that free up in that month.
+            # Already-empty units belong under Now, not under a future month.
+            where_parts.append(MONTH_CLAUSE)
+            params.extend([vacant_when[:7], vacant_when[:7]])
+        elif vacant_when == "now":
+            where_parts.append(NOW_CLAUSE)
+        else:
+            # No month chosen: the whole vacancy pipeline, which is exactly the union of
+            # the buckets shown on screen — so the card count and this list always agree.
+            month_ors = " OR ".join([MONTH_CLAUSE] * len(_upcoming_months))
+            where_parts.append("(%s OR %s)" % (NOW_CLAUSE, month_ors))
+            for _m in _upcoming_months:
+                params.extend([_m, _m])
 
     if status_filter:
         if status_filter.lower() == 'vacant':
@@ -3848,18 +4025,56 @@ def api_units():
         else:
             occ_count += 1
 
-    # Get real totals from DB (not just the current page)
+    # Get real totals from DB (not just the current page).
+    # NOTE: the params must be passed — this counted with a bare WHERE before, which
+    # threw as soon as any filter carried a placeholder.
     db2 = get_dict_db()
     try:
-        real_total = db2.execute(f"SELECT COUNT(*) AS cnt FROM units u WHERE {where}").fetchone()["cnt"]
-        real_vacant = db2.execute(f"SELECT COUNT(*) AS cnt FROM units u WHERE {where} AND unit_vacant = 1").fetchone()["cnt"]
+        real_total = db2.execute(f"SELECT COUNT(*) AS cnt FROM units u WHERE {where}", params).fetchone()["cnt"]
+        real_vacant = db2.execute(f"SELECT COUNT(*) AS cnt FROM units u WHERE {where} AND unit_vacant = 1", params).fetchone()["cnt"]
         real_occupied = real_total - real_vacant
+
+        # ── Card counts for the category landing ──
+        # Unfiltered by category on purpose: the cards say how big each category is, so
+        # they must not change according to which one you are standing in.
+        live = ("(u.is_active IS NULL OR u.is_active = 1) "
+                "AND NOT EXISTS (SELECT 1 FROM properties p3 WHERE p3.id = u.property_id AND p3.status = 'archived')")
+        active_prop = ("NOT EXISTS (SELECT 1 FROM properties p2 WHERE p2.id = u.property_id "
+                       "AND COALESCE(p2.is_active, 1) = 0) "
+                       "AND LOWER(COALESCE(u.unit_status,'')) <> 'inactive'")
+        cnt = lambda clause, args=(): db2.execute(
+            f"SELECT COUNT(*) AS cnt FROM units u WHERE {live} AND {clause}", args).fetchone()["cnt"]
+
+        cat_occupied = cnt(f"{active_prop} AND (u.unit_vacant = 0 OR u.unit_vacant IS NULL)")
+        cat_inactive = cnt("(EXISTS (SELECT 1 FROM properties p2 WHERE p2.id = u.property_id "
+                           "AND COALESCE(p2.is_active, 1) = 0) "
+                           "OR LOWER(COALESCE(u.unit_status,'')) = 'inactive')")
+
+        # The four months roll forward from today rather than being pinned, so the board
+        # cannot go stale. Today that renders exactly as Norbert listed it:
+        # September / October / November / December 2026.
+        buckets = [{"key": "now", "label": "Now",
+                    "count": cnt(f"{active_prop} AND {NOW_CLAUSE}")}]
+        for key in _upcoming_months:
+            buckets.append({
+                "key": key,
+                "label": datetime(int(key[:4]), int(key[5:7]), 1).strftime("%B %Y"),
+                "count": cnt(f"{active_prop} AND {MONTH_CLAUSE}", (key, key)),
+            })
+        cat_vacant = sum(b["count"] for b in buckets)
+        # Every live unit in one list, the way the page worked before it gained
+        # categories — the categories answer different questions and do not have
+        # to add up to this.
+        cat_all = cnt("1 = 1")
     finally:
         db2.close()
 
     return json_success({
         "items": rows,
-        "totals": {"total": real_total, "occupied": real_occupied, "vacant": real_vacant},
+        "totals": {"total": real_total, "occupied": real_occupied, "vacant": real_vacant,
+                   "cat_occupied": cat_occupied, "cat_vacant": cat_vacant,
+                   "cat_inactive": cat_inactive, "cat_all": cat_all,
+                   "vacancy_buckets": buckets},
     }, total, page, per_page)
 
 
@@ -3954,8 +4169,14 @@ def api_tenancies():
             where_parts.append("status = ?")
             params.append(status_filter)
     else:
-        # Default: only show active/current/periodic tenancies
-        where_parts.append("status IN ('Current', 'current', 'Periodic', 'periodic', 'Active', 'active')")
+        # Default: live tenancies plus prospective ones. A signed application creates
+        # a Prospective tenancy (see tenant_application_api._create_prospective_tenancy),
+        # and hiding those by default would mean the hand-off the team is meant to act
+        # on never appears on this page.
+        where_parts.append(
+            "status IN ('Current', 'current', 'Periodic', 'periodic', 'Active', 'active', "
+            "'Prospective', 'prospective')"
+        )
 
     if search:
         search_clause, search_params = build_search_clause(
@@ -3979,7 +4200,9 @@ def api_tenancies():
         f"(SELECT p.address_line_1 FROM properties p WHERE p.id = t.property_id) AS property_address, "
         f"(SELECT u.unit_ref FROM units u WHERE u.id = t.unit_id) AS unit_ref, "
         f"(SELECT u.unit_type FROM units u WHERE u.id = t.unit_id) AS unit_type_name, "
-        f"t.deposit_registered_amount AS deposit_amount "
+        f"t.deposit_registered_amount AS deposit_amount, "
+        f"(SELECT n.status FROM tenancy_notice n WHERE n.tenancy_id = t.id) AS notice_status, "
+        f"(SELECT n.move_out_date FROM tenancy_notice n WHERE n.tenancy_id = t.id) AS notice_move_out "
         f"FROM tenancies t WHERE {where} ORDER BY {order_clause}",
         f"SELECT COUNT(*) AS cnt FROM tenancies t WHERE {where}",
         params, page, per_page
@@ -3987,6 +4210,15 @@ def api_tenancies():
 
     for r in rows:
         bool_fields(r, "deposit_registered", "section_21_served", "is_renewed")
+        # Only an APPROVED notice earns the tag — a pending or declined one must not
+        # read as though the room is going.
+        r["notice_tag"] = None
+        if r.get("notice_status") == "approved" and r.get("notice_move_out"):
+            try:
+                r["notice_tag"] = "Notice (%s)" % datetime.strptime(
+                    r["notice_move_out"][:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+            except (ValueError, TypeError):
+                r["notice_tag"] = "Notice"
 
     return json_success(rows, total, page, per_page)
 
@@ -3994,6 +4226,30 @@ def api_tenancies():
 @banksia_os_bp.route("/tenancies/<int:ten_id>", methods=["GET", "PATCH"])
 def api_tenancy(ten_id):
     if request.method == "PATCH":
+        # An end date is a consequence of an approved notice, never a free field
+        # (Norbert, 2026-08-03). Enforced here rather than in the form so it holds
+        # however the change arrives.
+        _data = request.get_json(silent=True) or {}
+        if "end_date" in _data:
+            _db = get_dict_db()
+            try:
+                _cur = _db.execute("SELECT end_date FROM tenancies WHERE id = ?", (ten_id,)).fetchone()
+                if not _cur:
+                    return json_error("Tenancy not found", 404)
+                _new = (str(_data.get("end_date") or "").strip())[:10]
+                _old = (str(dict(_cur).get("end_date") or "").strip())[:10]
+                if _new and _new != _old:
+                    _agreed = _approved_move_out(_db, ten_id)
+                    if not _agreed:
+                        return json_error(
+                            "An end date can only be set once the tenant has served notice and "
+                            "that notice has been approved. Record it on the Notice tab first.", 400)
+                    if _new != str(_agreed)[:10]:
+                        return json_error(
+                            "The end date must match the approved notice, which gives up the room on "
+                            "%s. Change the notice date if that is wrong." % str(_agreed)[:10], 400)
+            finally:
+                _db.close()
         return api_update_resource("tenancies", ten_id)
     db = get_dict_db()
     try:
@@ -4079,6 +4335,10 @@ def api_tenancy(ten_id):
             (ten.get("property_id"),)
         ).fetchall()
         ten["maintenance_jobs"] = maintenance_jobs
+
+        # Notice to quit. Lives in its own table rather than tenancies.tags, which
+        # the Arthur sync rewrites wholesale on every pull.
+        ten["notice"] = _notice_payload(_get_notice(db, ten_id))
 
         return json_success(ten)
     except Exception as e:
@@ -9693,17 +9953,19 @@ def create_notification(username, message, link=None):
         int — the new notification id, or None on failure
     """
     try:
+        # get_dict_db() hands back the caller's own thread-local connection, so closing
+        # it here closed the database out from under whoever called us: the tenancy
+        # conversion notified four admins, then died on its own db.commit() with
+        # "Cannot operate on a closed database" — after the tenancy had been written.
+        # The connection is per-thread and reused by design; leave it open.
         db = get_dict_db()
-        try:
-            now = datetime.now(timezone.utc).isoformat()
-            cur = db.execute(
-                "INSERT INTO notifications (username, message, link, read, created) VALUES (?, ?, ?, 0, ?)",
-                (username, message, link or "", now)
-            )
-            db.commit()
-            return cur.lastrowid
-        finally:
-            db.close()
+        now = datetime.now(timezone.utc).isoformat()
+        cur = db.execute(
+            "INSERT INTO notifications (username, message, link, read, created) VALUES (?, ?, ?, 0, ?)",
+            (username, message, link or "", now)
+        )
+        db.commit()
+        return cur.lastrowid
     except Exception:
         return None
 
@@ -9907,6 +10169,350 @@ def api_update_move_in(tenancy_id):
         out = dict(db.execute("SELECT * FROM tenancy_move_in WHERE tenancy_id = ?", (tenancy_id,)).fetchone())
         out["updated"] = True
         return json_success(out)
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# 6b. TENANCY NOTICE — tenant's notice to quit
+# ═══════════════════════════════════════════════
+# Legal requirement from 1 May. A tenant serving notice must do so by the day
+# before rent collection (the 1st of the month), and the notice period is two
+# months. So notice served at any point during July is served against the
+# 1 August rent day, and two months from there puts the move-out at 1 October.
+# That reduces to: the 1st of the month three months after the notice month.
+# Rule and worked example from Norbert, 2026-08-03.
+
+def _notice_move_out(notice_date):
+    """Move-out date for a notice served on notice_date (YYYY-MM-DD)."""
+    if not notice_date:
+        return None
+    try:
+        d = datetime.strptime(str(notice_date)[:10], "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+    m = d.month + 3
+    y = d.year + (m - 1) // 12
+    m = (m - 1) % 12 + 1
+    return "%04d-%02d-01" % (y, m)
+
+
+def _notice_payload(row):
+    """Shape a tenancy_notice row for the API, including the derived tag."""
+    if not row:
+        return {"notice_given": 0, "notice_date": None, "move_out_date": None,
+                "status": None, "tag": None, "exists": False}
+    d = dict(row)
+    d["exists"] = True
+    d["notice_given"] = 1 if d.get("notice_given") else 0
+    # The tag is DERIVED, never stored on tenancies.tags — that column is
+    # overwritten wholesale by the Arthur sync (arthur_sync.py:546), so a tag
+    # written there would silently vanish on the next pull.
+    d["tag"] = None
+    # A withdrawn notice never carries a tag, whatever it was decided before.
+    d["revoked"] = d.get("status") == "revoked"
+    if d.get("status") == "approved" and d.get("move_out_date"):
+        try:
+            mo = datetime.strptime(d["move_out_date"][:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+        except (ValueError, TypeError):
+            mo = d["move_out_date"]
+        d["tag"] = "Notice (%s)" % mo
+    return d
+
+
+_NOTICE_SCHEMA_READY = False
+
+
+def _ensure_notice_schema(db):
+    """Idempotently create the notice table and its withdrawal columns.
+
+    A withdrawn notice keeps its original date and decision — it is revoked,
+    not erased — so it needs columns of its own rather than reusing the
+    approve/decline ones."""
+    global _NOTICE_SCHEMA_READY
+    if _NOTICE_SCHEMA_READY:
+        return
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS tenancy_notice ("
+        "  tenancy_id      INTEGER PRIMARY KEY,"
+        "  notice_given    INTEGER DEFAULT 0,"
+        "  notice_date     TEXT,"
+        "  move_out_date   TEXT,"
+        "  status          TEXT DEFAULT 'pending',"
+        "  decided_by      TEXT,"
+        "  decided_at      TEXT,"
+        "  note            TEXT,"
+        "  created_by      TEXT,"
+        "  created         TEXT DEFAULT CURRENT_TIMESTAMP,"
+        "  updated         TEXT DEFAULT CURRENT_TIMESTAMP"
+        ")")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_tenancy_notice_status ON tenancy_notice(status)")
+    for stmt in (
+        "ALTER TABLE tenancy_notice ADD COLUMN revoked_by TEXT",
+        "ALTER TABLE tenancy_notice ADD COLUMN revoked_at TEXT",
+        "ALTER TABLE tenancy_notice ADD COLUMN revoke_reason TEXT",
+    ):
+        try:
+            db.execute(stmt)
+        except Exception:
+            pass  # column already present
+    db.commit()
+    _NOTICE_SCHEMA_READY = True
+
+
+def _approved_move_out(db, tenancy_id):
+    """The agreed move-out date, or None when there is no approved notice.
+
+    This is the ONLY thing that may put an end date on a tenancy (Norbert,
+    2026-08-03): a tenancy runs until the tenant gives notice, so an end date
+    typed before that would be a guess presented as a fact."""
+    try:
+        row = db.execute(
+            "SELECT move_out_date FROM tenancy_notice WHERE tenancy_id = ? AND status = 'approved'",
+            (tenancy_id,)).fetchone()
+    except Exception:
+        return None  # table not created yet
+    return (dict(row).get("move_out_date") if row else None) or None
+
+
+def _sync_end_date_to_notice(db, tenancy_id, move_out, previous_move_out=None):
+    """Keep tenancies.end_date in step with the notice.
+
+    Approving fills the end date in, so nobody has to type it. Withdrawing or
+    declining clears it again, but only when it still matches the date the
+    notice put there — an end date entered for some other reason is left alone."""
+    if move_out:
+        db.execute("UPDATE tenancies SET end_date = ? WHERE id = ?", (move_out, tenancy_id))
+        return
+    cur = db.execute("SELECT end_date FROM tenancies WHERE id = ?", (tenancy_id,)).fetchone()
+    cur_end = (dict(cur).get("end_date") or "")[:10] if cur else ""
+    if cur_end and previous_move_out and cur_end == str(previous_move_out)[:10]:
+        db.execute("UPDATE tenancies SET end_date = '' WHERE id = ?", (tenancy_id,))
+
+
+def _get_notice(db, tenancy_id):
+    _ensure_notice_schema(db)
+    return db.execute("SELECT * FROM tenancy_notice WHERE tenancy_id = ?", (tenancy_id,)).fetchone()
+
+
+@banksia_os_bp.route("/tenancies/<int:tenancy_id>/notice", methods=["GET"])
+def api_get_tenancy_notice(tenancy_id):
+    """Return the notice record for a tenancy (empty shape when none on file)."""
+    db = get_dict_db()
+    try:
+        return json_success(_notice_payload(_get_notice(db, tenancy_id)))
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/tenancies/<int:tenancy_id>/notice", methods=["PUT"])
+def api_save_tenancy_notice(tenancy_id):
+    """Record that notice was given, with its date. Move-out is always derived,
+    never taken from the client, so the legal calculation cannot be edited around."""
+    data = request.get_json() or {}
+    db = get_dict_db()
+    try:
+        ten = db.execute("SELECT id, status, main_tenant_name FROM tenancies WHERE id = ?", (tenancy_id,)).fetchone()
+        if not ten:
+            return json_error("Tenancy not found", 404)
+
+        given = 1 if data.get("notice_given") else 0
+        notice_date = (data.get("notice_date") or "").strip()[:10] or None
+
+        if given and not notice_date:
+            return json_error("A notice date is required when notice has been given.", 400)
+        if notice_date:
+            try:
+                datetime.strptime(notice_date, "%Y-%m-%d")
+            except ValueError:
+                return json_error("Notice date must be a valid date.", 400)
+
+        move_out = _notice_move_out(notice_date) if given else None
+        prev = _get_notice(db, tenancy_id)
+        prev_d = dict(prev) if prev else {}
+        # Editing the date after a decision reopens it — the approval was for a
+        # different move-out date and must not silently carry over.
+        status = "pending"
+        actor = getattr(request, "current_user", {}).get("username", "system")
+        now = datetime.now(timezone.utc).isoformat()
+
+        db.execute(
+            "INSERT INTO tenancy_notice (tenancy_id, notice_given, notice_date, move_out_date, status, note, created_by, updated) "
+            "VALUES (?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(tenancy_id) DO UPDATE SET notice_given=excluded.notice_given, notice_date=excluded.notice_date, "
+            "move_out_date=excluded.move_out_date, status=excluded.status, note=excluded.note, "
+            "decided_by=NULL, decided_at=NULL, revoked_by=NULL, revoked_at=NULL, revoke_reason=NULL, "
+            "updated=excluded.updated",
+            (tenancy_id, given, notice_date, move_out, status, data.get("note") or "", actor, now))
+
+        # Any edit reopens the notice as pending, so the previously agreed end
+        # date is no longer agreed.
+        _sync_end_date_to_notice(db, tenancy_id, None, prev_d.get("move_out_date"))
+
+        log_activity("tenancy", tenancy_id, "notice_updated", "notice_date",
+                     prev_d.get("notice_date"), notice_date, actor)
+        db.commit()
+        return json_success(_notice_payload(_get_notice(db, tenancy_id)))
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+def _decide_notice(tenancy_id, decision):
+    """Shared approve/decline handler."""
+    db = get_dict_db()
+    try:
+        row = _get_notice(db, tenancy_id)
+        if not row or not dict(row).get("notice_given"):
+            return json_error("There is no notice on file for this tenancy.", 400)
+        cur = dict(row)
+        if not cur.get("notice_date"):
+            return json_error("This notice has no date, so it cannot be decided.", 400)
+        if cur.get("status") == "revoked":
+            return json_error(
+                "This notice was withdrawn, so it cannot be decided. "
+                "Reinstate it first if the tenant is going ahead after all.", 400)
+
+        actor = getattr(request, "current_user", {}).get("username", "system")
+        now = datetime.now(timezone.utc).isoformat()
+        # Recompute rather than trusting the stored value, so a record written
+        # before a rule change is decided under the current rule.
+        move_out = _notice_move_out(cur["notice_date"])
+
+        db.execute(
+            "UPDATE tenancy_notice SET status = ?, move_out_date = ?, decided_by = ?, decided_at = ?, updated = ? "
+            "WHERE tenancy_id = ?",
+            (decision, move_out if decision == "approved" else cur.get("move_out_date"),
+             actor, now, now, tenancy_id))
+
+        # The end date follows the decision rather than being typed separately.
+        if decision == "approved":
+            _sync_end_date_to_notice(db, tenancy_id, move_out)
+        else:
+            _sync_end_date_to_notice(db, tenancy_id, None, cur.get("move_out_date"))
+
+        log_activity("tenancy", tenancy_id, "notice_" + decision, "notice_status",
+                     cur.get("status"), decision, actor)
+        db.commit()
+        return json_success(_notice_payload(_get_notice(db, tenancy_id)))
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/tenancies/<int:tenancy_id>/notice/approve", methods=["POST"])
+def api_approve_tenancy_notice(tenancy_id):
+    """Approve the notice. The tenancy then carries a Notice tag with the move-out date."""
+    return _decide_notice(tenancy_id, "approved")
+
+
+@banksia_os_bp.route("/tenancies/<int:tenancy_id>/notice/decline", methods=["POST"])
+def api_decline_tenancy_notice(tenancy_id):
+    """Decline the notice. No tag is applied and the tenancy carries on unchanged."""
+    return _decide_notice(tenancy_id, "declined")
+
+
+@banksia_os_bp.route("/tenancies/<int:tenancy_id>/notice/revoke", methods=["POST"])
+def api_revoke_tenancy_notice(tenancy_id):
+    """Withdraw a notice the tenant has changed their mind about.
+
+    The record is kept — the date served, the decision, and who withdrew it —
+    because a served-then-withdrawn notice is part of the tenancy's history and
+    may matter later. The Notice tag drops and the room comes back off the
+    letting pipeline, since only an approved notice feeds it."""
+    data = request.get_json(silent=True) or {}
+    db = get_dict_db()
+    try:
+        row = _get_notice(db, tenancy_id)
+        if not row or not dict(row).get("notice_given"):
+            return json_error("There is no notice on file for this tenancy.", 400)
+        cur = dict(row)
+        if cur.get("status") == "revoked":
+            return json_error("This notice has already been withdrawn.", 400)
+
+        actor = getattr(request, "current_user", {}).get("username", "system")
+        now = datetime.now(timezone.utc).isoformat()
+        reason = (data.get("reason") or "").strip()[:500]
+
+        db.execute(
+            "UPDATE tenancy_notice SET status = 'revoked', revoked_by = ?, revoked_at = ?, "
+            "revoke_reason = ?, updated = ? WHERE tenancy_id = ?",
+            (actor, now, reason, now, tenancy_id))
+
+        # The tenant is staying, so the tenancy has no end date again.
+        _sync_end_date_to_notice(db, tenancy_id, None, cur.get("move_out_date"))
+
+        log_activity("tenancy", tenancy_id, "notice_revoked", "notice_status",
+                     cur.get("status"), "revoked", actor)
+        db.commit()
+        return json_success(_notice_payload(_get_notice(db, tenancy_id)))
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/tenancies/<int:tenancy_id>/notice/reinstate", methods=["POST"])
+def api_reinstate_tenancy_notice(tenancy_id):
+    """Put a withdrawn notice back on the table.
+
+    It returns to awaiting decision rather than straight back to approved: the
+    earlier approval was withdrawn and has to be given again."""
+    db = get_dict_db()
+    try:
+        row = _get_notice(db, tenancy_id)
+        if not row:
+            return json_error("There is no notice on file for this tenancy.", 400)
+        cur = dict(row)
+        if cur.get("status") != "revoked":
+            return json_error("This notice has not been withdrawn, so there is nothing to reinstate.", 400)
+
+        actor = getattr(request, "current_user", {}).get("username", "system")
+        now = datetime.now(timezone.utc).isoformat()
+        # Recompute, so a notice reinstated after a rule change lands on the
+        # current calculation rather than the one it was first saved under.
+        move_out = _notice_move_out(cur.get("notice_date"))
+
+        db.execute(
+            "UPDATE tenancy_notice SET status = 'pending', move_out_date = ?, decided_by = NULL, "
+            "decided_at = NULL, revoked_by = NULL, revoked_at = NULL, revoke_reason = NULL, "
+            "updated = ? WHERE tenancy_id = ?",
+            (move_out, now, tenancy_id))
+
+        # Back to awaiting decision, so there is no agreed end date yet.
+        _sync_end_date_to_notice(db, tenancy_id, None, cur.get("move_out_date"))
+
+        log_activity("tenancy", tenancy_id, "notice_reinstated", "notice_status",
+                     "revoked", "pending", actor)
+        db.commit()
+        return json_success(_notice_payload(_get_notice(db, tenancy_id)))
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/tenancies/<int:tenancy_id>/notice", methods=["DELETE"])
+def api_clear_tenancy_notice(tenancy_id):
+    """Remove the notice entirely — for one logged against the wrong tenancy."""
+    db = get_dict_db()
+    try:
+        row = _get_notice(db, tenancy_id)
+        if not row:
+            return json_success(_notice_payload(None))
+        actor = getattr(request, "current_user", {}).get("username", "system")
+        db.execute("DELETE FROM tenancy_notice WHERE tenancy_id = ?", (tenancy_id,))
+        _sync_end_date_to_notice(db, tenancy_id, None, dict(row).get("move_out_date"))
+        log_activity("tenancy", tenancy_id, "notice_removed", "notice_date",
+                     dict(row).get("notice_date"), None, actor)
+        db.commit()
+        return json_success(_notice_payload(None))
     except Exception as e:
         return json_error(safe_error(e), 500)
     finally:
@@ -10780,6 +11386,94 @@ def api_create_property_owner():
     finally:
         db.close()
 
+# ── Landlord → property link ─────────────────────────────────────────────────
+# One definition used by the cards endpoint, the detail endpoint and delete, so
+# the count you see on a card is the same count that blocks a delete.
+# property_owner_id is authoritative; the name is only consulted when a property
+# carries no owner id at all (legacy Arthur rows).
+OWNER_LINK_SQL = ("(property_owner_id = ? OR "
+                  "(COALESCE(property_owner_id,'') = '' AND property_owner_name = ?))")
+
+
+def owner_link_params(owner_id, owner_name):
+    return (str(owner_id), owner_name or "")
+
+
+@banksia_os_bp.route("/property-owners/cards")
+def api_property_owners_cards():
+    """Every landlord with their portfolio totals — powers the landlord card grid.
+
+    Returns one row per landlord: property/unit/let counts, plus the flags the
+    cards and filter chips need (management, active, inactive, archived-only).
+    Counts are computed unfiltered so a search in the box never shrinks them.
+    """
+    db = get_dict_db()
+    try:
+        owners = db.execute("SELECT * FROM property_owners ORDER BY name COLLATE NOCASE").fetchall()
+        props = db.execute(
+            "SELECT id, ref, name, address_line_1, property_owner_id, property_owner_name, "
+            "management_type, status, COALESCE(is_active,1) AS is_active FROM properties"
+        ).fetchall()
+
+        # unit totals per property (archived units excluded)
+        unit_rows = db.execute(
+            "SELECT property_id, COUNT(*) AS units, "
+            "SUM(CASE WHEN LOWER(COALESCE(unit_status,'')) = 'occupied' THEN 1 ELSE 0 END) AS let_units "
+            "FROM units WHERE archived_at IS NULL GROUP BY property_id"
+        ).fetchall()
+        units_by_prop = {str(u["property_id"]): (u["units"] or 0, u["let_units"] or 0) for u in unit_rows}
+
+        by_id = {}
+        by_name = {}
+        for p in props:
+            pid = str(p["property_owner_id"] or "")
+            if pid:
+                by_id.setdefault(pid, []).append(p)
+            else:
+                by_name.setdefault(p["property_owner_name"] or "", []).append(p)
+
+        items = []
+        for o in owners:
+            linked = list(by_id.get(str(o["id"]), [])) + list(by_name.get(o["name"] or "", []))
+            live = [p for p in linked if (p["status"] or "") != "archived"]
+            archived = [p for p in linked if (p["status"] or "") == "archived"]
+            units = lets = 0
+            for p in live:
+                u, l = units_by_prop.get(str(p["id"]), (0, 0))
+                units += u
+                lets += l
+            is_mgmt = any((p["management_type"] or "") == "Management Fee" for p in live)
+            active_props = [p for p in live if p["is_active"] == 1]
+            row = dict(o)
+            row.update({
+                "property_count": len(live),
+                "archived_property_count": len(archived),
+                "unit_count": units,
+                "let_count": lets,
+                "is_management": is_mgmt,
+                "is_active_landlord": len(active_props) > 0,
+                "is_inactive_landlord": len(active_props) == 0,
+                "archived_only": len(live) == 0 and len(archived) > 0,
+                "property_refs": [p["address_line_1"] or p["ref"] or p["name"] for p in live],
+            })
+            items.append(row)
+
+        items.sort(key=lambda r: (-r["property_count"], (r["name"] or "").lower()))
+        totals = {
+            "all": len(items),
+            "active": sum(1 for r in items if r["is_active_landlord"]),
+            "management": sum(1 for r in items if r["is_management"]),
+            "inactive": sum(1 for r in items if r["is_inactive_landlord"]),
+            "properties": sum(r["property_count"] for r in items),
+            "units": sum(r["unit_count"] for r in items),
+        }
+        return json_success({"items": items, "totals": totals})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
 @banksia_os_bp.route("/property-owners/all")
 def api_property_owners_all():
     """Lightweight list for dropdowns — returns id, name, company_name only."""
@@ -10804,8 +11498,9 @@ def api_property_owner(owner_id):
         if not owner: return json_error("Not found", 404)
         # Count + list linked properties
         props = db.execute(
-            "SELECT id, ref, name, address_line_1, city, property_type FROM properties WHERE property_owner_id=? OR property_owner_name=? ORDER BY name",
-            (str(owner_id), owner.get("name",""))
+            "SELECT id, ref, name, address_line_1, city, property_type FROM properties "
+            f"WHERE {OWNER_LINK_SQL} ORDER BY name",
+            owner_link_params(owner_id, owner.get("name", ""))
         ).fetchall()
         owner["property_count"] = len(props)
         owner["properties"] = [dict(p) for p in props]
@@ -10821,14 +11516,26 @@ def api_delete_property_owner(owner_id):
         owner = db.execute("SELECT * FROM property_owners WHERE id=?", (owner_id,)).fetchone()
         if not owner:
             return json_error("Not found", 404)
-        # Check linked properties
-        count = db.execute("SELECT COUNT(*) AS cnt FROM properties WHERE property_owner_id=? OR property_owner_name=?",
-                           (str(owner_id), owner.get("name",""))).fetchone()["cnt"]
-        if count > 0:
-            return json_error(f"Cannot delete — {count} property(s) linked to this owner. Unlink them first.", 409)
+        # Check linked properties — same rule the landlord cards count with, so
+        # a card showing "no properties" can always be deleted.
+        linked = db.execute(
+            "SELECT id, ref, name, address_line_1 FROM properties "
+            f"WHERE {OWNER_LINK_SQL} ORDER BY name",
+            owner_link_params(owner_id, owner.get("name", ""))
+        ).fetchall()
+        if linked:
+            names = [(p["address_line_1"] or p["ref"] or p["name"] or f"#{p['id']}") for p in linked]
+            shown = ", ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
+            return json_error(
+                f"{owner.get('name') or 'This landlord'} still has "
+                f"{len(linked)} propert{'y' if len(linked) == 1 else 'ies'} linked ({shown}). "
+                "Reassign or unlink them first, then delete.", 409)
         db.execute("DELETE FROM property_owners WHERE id=?", (owner_id,))
         db.commit()
-        return json_success({"deleted": True})
+        _log_activity("property_owner", owner_id, "deleted",
+                      notes=f"Landlord deleted: {owner.get('name') or ''}", db=db)
+        db.commit()
+        return json_success({"deleted": True, "name": owner.get("name", "")})
     except Exception as e:
         return json_error(safe_error(e), 500)
     finally:
@@ -11375,9 +12082,17 @@ def api_applicants_list():
     where_parts = ["1=1"]
     params = []
 
-    if status_filter:
+    if status_filter and status_filter.lower() == "all":
+        pass  # explicit 'show me everything', cancelled included
+    elif status_filter:
         where_parts.append("status = ?")
         params.append(status_filter)
+    else:
+        # Cancelled applicants are off the main list (Norbert, 2026-08-03): cancelling
+        # is how the team clears the pipeline, so leaving them in defeats the point.
+        # They are not deleted — filter Pipeline Stage = Cancelled (or status=all) and
+        # they are all still there, with their audit trail.
+        where_parts.append("LOWER(COALESCE(status,'')) != 'cancelled'")
 
     if search:
         search_clause, search_params = build_search_clause(
@@ -11636,6 +12351,99 @@ def api_transition_applicant_status(app_id):
         bool_fields(updated, "has_guarantor")
         return json_success(updated)
     except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+APPLICANT_CANCELLED_STATUS = "Cancelled"
+BULK_CANCEL_MAX = 200
+
+
+@banksia_os_bp.route("/applicants/bulk-cancel", methods=["POST"])
+def api_applicants_bulk_cancel():
+    """Cancel several applicants in one go (Norbert, 2026-08-03).
+
+    Cancelling is a status change, never a delete: the applicant, their referencing
+    form and their documents all stay, so a cancellation made by mistake is undone
+    by setting the status back. Each row is logged to activity_log individually so
+    the audit trail reads the same as if they had been cancelled one at a time.
+
+    Already-cancelled and unknown ids are reported back rather than failing the
+    whole batch — a stale tab must not be able to turn one bad id into a no-op for
+    the other 40 rows the user picked.
+    """
+    data = request.get_json(silent=True) or {}
+    raw_ids = data.get("ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return json_error("ids must be a non-empty list of applicant ids")
+
+    ids = []
+    for value in raw_ids:
+        try:
+            ids.append(int(value))
+        except (TypeError, ValueError):
+            return json_error("ids must all be numeric applicant ids")
+    ids = list(dict.fromkeys(ids))
+
+    if len(ids) > BULK_CANCEL_MAX:
+        return json_error("Too many applicants at once (limit %d)" % BULK_CANCEL_MAX, 413)
+
+    reason = (data.get("reason") or "").strip()[:200]
+
+    db = get_dict_db()
+    try:
+        placeholders = ",".join("?" * len(ids))
+        rows = db.execute(
+            "SELECT id, first_name, last_name, status FROM applicants WHERE id IN (%s)" % placeholders,
+            ids
+        ).fetchall()
+        found = {r["id"]: r for r in rows}
+
+        not_found = [i for i in ids if i not in found]
+        already = [i for i in ids
+                   if i in found
+                   and (found[i].get("status") or "").strip().lower() == APPLICANT_CANCELLED_STATUS.lower()]
+        to_cancel = [i for i in ids if i in found and i not in already]
+
+        if not to_cancel:
+            return json_success({
+                "cancelled": 0, "cancelled_ids": [],
+                "already_cancelled": already, "not_found": not_found,
+            })
+
+        now = datetime.now(timezone.utc).isoformat()
+        marks = ",".join("?" * len(to_cancel))
+        db.execute(
+            "UPDATE applicants SET status = ?, modified = ? WHERE id IN (%s)" % marks,
+            [APPLICANT_CANCELLED_STATUS, now] + to_cancel
+        )
+
+        # Log BEFORE the commit, not after. _log_activity does not commit when it is
+        # handed a connection, and this connection is thread-local and closed at the
+        # end of the request — so an audit row written after db.commit() sits in a
+        # fresh implicit transaction that close() throws away. Logging first puts the
+        # status change and its audit trail in one transaction: both land, or neither.
+        for app_id in to_cancel:
+            row = found[app_id]
+            name = ("%s %s" % (row.get("first_name") or "", row.get("last_name") or "")).strip() or "applicant"
+            note = "Cancelled in bulk (%d selected)" % len(to_cancel)
+            if reason:
+                note += " — %s" % reason
+            _log_activity("applicant", app_id, "status_change",
+                          field_changed="status",
+                          old_value=row.get("status") or "",
+                          new_value=APPLICANT_CANCELLED_STATUS,
+                          notes="%s: %s" % (name, note), db=db)
+
+        db.commit()
+
+        return json_success({
+            "cancelled": len(to_cancel), "cancelled_ids": to_cancel,
+            "already_cancelled": already, "not_found": not_found,
+        })
+    except Exception as e:
+        db.rollback()
         return json_error(safe_error(e), 500)
     finally:
         db.close()
@@ -12220,33 +13028,73 @@ def api_create_tenancy_from_applicant(app_id):
         rent_amount = app.get("proposed_rent")
         deposit_amount = app.get("proposed_deposit")
 
-        # 4. Create tenancy record
-        tenancy_cur = db.execute(
-            "INSERT INTO tenancies (property_id, unit_id, main_tenant_name, status, "
-            "start_date, end_date, rent_amount, rent_frequency, created, modified) "
-            "VALUES (?, ?, ?, 'active', ?, ?, ?, 'pcm', ?, ?)",
-            [property_id, unit_id, main_tenant_name, start_date, end_date,
-             rent_amount, now_iso, now_iso]
-        )
-        tenancy_id = tenancy_cur.lastrowid
+        # 4. Create the tenancy — or promote the prospective one.
+        # Signing the tenant application already created a Prospective tenancy + tenant
+        # for this applicant. Converting must move those same records forward, not open
+        # a second tenancy on the same room: two tenancies for one let is how a unit ends
+        # up double-counted in occupancy, rent and arrears.
+        prospective = db.execute(
+            "SELECT ta.tenancy_id AS tenancy_id, ta.tenant_id AS tenant_id "
+            "FROM tenant_applications ta JOIN tenancies t ON t.id = ta.tenancy_id "
+            "WHERE ta.applicant_id = ? AND LOWER(COALESCE(t.status,'')) = 'prospective' "
+            "ORDER BY ta.id DESC LIMIT 1",
+            (app_id,)
+        ).fetchone()
 
-        _log_activity("tenancy", tenancy_id, "created",
-                       notes=f"Tenancy created from applicant #{app_id} ({main_tenant_name})",
-                       db=db)
+        if prospective and prospective.get("tenancy_id"):
+            tenancy_id = prospective["tenancy_id"]
+            db.execute(
+                "UPDATE tenancies SET property_id = ?, unit_id = ?, main_tenant_name = ?, "
+                "status = 'active', start_date = ?, end_date = ?, rent_amount = ?, "
+                "rent_frequency = 'pcm', modified = ? WHERE id = ?",
+                [property_id, unit_id, main_tenant_name, start_date, end_date,
+                 rent_amount, now_iso, tenancy_id]
+            )
+            _log_activity("tenancy", tenancy_id, "status_change",
+                           field_changed="status", old_value="Prospective", new_value="active",
+                           notes=f"Prospective tenancy confirmed from applicant #{app_id} ({main_tenant_name})",
+                           db=db)
+        else:
+            tenancy_cur = db.execute(
+                "INSERT INTO tenancies (property_id, unit_id, main_tenant_name, status, "
+                "start_date, end_date, rent_amount, rent_frequency, created, modified) "
+                "VALUES (?, ?, ?, 'active', ?, ?, ?, 'pcm', ?, ?)",
+                [property_id, unit_id, main_tenant_name, start_date, end_date,
+                 rent_amount, now_iso, now_iso]
+            )
+            tenancy_id = tenancy_cur.lastrowid
 
-        # 5. Create tenant record
-        tenant_cur = db.execute(
-            "INSERT INTO tenants (first_name, last_name, email, phone_home, mobile, "
-            "property_id, unit_id, tenancy_id, main_tenant, status, created, modified) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'active', ?, ?)",
-            [first_name, last_name, email, phone, phone,
-             property_id, unit_id, tenancy_id, now_iso, now_iso]
-        )
-        tenant_id = tenant_cur.lastrowid
+            _log_activity("tenancy", tenancy_id, "created",
+                           notes=f"Tenancy created from applicant #{app_id} ({main_tenant_name})",
+                           db=db)
 
-        _log_activity("tenant", tenant_id, "created",
-                       notes=f"Tenant {main_tenant_name} created from applicant #{app_id}",
-                       db=db)
+        # 5. Create or promote the tenant record
+        if prospective and prospective.get("tenant_id"):
+            tenant_id = prospective["tenant_id"]
+            db.execute(
+                "UPDATE tenants SET first_name = ?, last_name = ?, email = ?, phone_home = ?, "
+                "mobile = ?, property_id = ?, unit_id = ?, tenancy_id = ?, main_tenant = 1, "
+                "status = 'active', modified = ? WHERE id = ?",
+                [first_name, last_name, email, phone, phone,
+                 property_id, unit_id, tenancy_id, now_iso, tenant_id]
+            )
+            _log_activity("tenant", tenant_id, "status_change",
+                           field_changed="status", old_value="Prospective", new_value="active",
+                           notes=f"Prospective tenant {main_tenant_name} confirmed from applicant #{app_id}",
+                           db=db)
+        else:
+            tenant_cur = db.execute(
+                "INSERT INTO tenants (first_name, last_name, email, phone_home, mobile, "
+                "property_id, unit_id, tenancy_id, main_tenant, status, created, modified) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'active', ?, ?)",
+                [first_name, last_name, email, phone, phone,
+                 property_id, unit_id, tenancy_id, now_iso, now_iso]
+            )
+            tenant_id = tenant_cur.lastrowid
+
+            _log_activity("tenant", tenant_id, "created",
+                           notes=f"Tenant {main_tenant_name} created from applicant #{app_id}",
+                           db=db)
 
         # 6. Create deposit record
         dep_cur = db.execute(
@@ -12316,7 +13164,10 @@ def api_create_tenancy_from_applicant(app_id):
         notify_link = f"/banksia-os?entity=tenancies&id={tenancy_id}"
 
         # Notify assigned_to
-        assigned_to = app.get("assigned_to", "").strip()
+        # dict.get's default only fires when the key is ABSENT; applicants.assigned_to
+        # exists and is NULL for anyone unassigned, so the default never applied and
+        # .strip() blew up — 500ing every conversion for an applicant with no assignee.
+        assigned_to = (app.get("assigned_to") or "").strip()
         notified = set()
         if assigned_to:
             create_notification(assigned_to, notify_message, notify_link)
