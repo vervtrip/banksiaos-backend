@@ -11445,7 +11445,9 @@ def api_property_owners_cards():
             is_mgmt = any((p["management_type"] or "") == "Management Fee" for p in live)
             active_props = [p for p in live if p["is_active"] == 1]
             row = dict(o)
+            cancelled = (o.get("status") or "").lower() == "cancelled"
             row.update({
+                "is_cancelled": cancelled,
                 "property_count": len(live),
                 "archived_property_count": len(archived),
                 "unit_count": units,
@@ -11459,13 +11461,17 @@ def api_property_owners_cards():
             items.append(row)
 
         items.sort(key=lambda r: (-r["property_count"], (r["name"] or "").lower()))
+        # A cancelled landlord is off the books: it stays on record and can be
+        # restored, but it does not count towards the working views.
+        live = [r for r in items if not r["is_cancelled"]]
         totals = {
-            "all": len(items),
-            "active": sum(1 for r in items if r["is_active_landlord"]),
-            "management": sum(1 for r in items if r["is_management"]),
-            "inactive": sum(1 for r in items if r["is_inactive_landlord"]),
-            "properties": sum(r["property_count"] for r in items),
-            "units": sum(r["unit_count"] for r in items),
+            "all": len(live),
+            "active": sum(1 for r in live if r["is_active_landlord"]),
+            "management": sum(1 for r in live if r["is_management"]),
+            "inactive": sum(1 for r in live if r["is_inactive_landlord"]),
+            "cancelled": sum(1 for r in items if r["is_cancelled"]),
+            "properties": sum(r["property_count"] for r in live),
+            "units": sum(r["unit_count"] for r in live),
         }
         return json_success({"items": items, "totals": totals})
     except Exception as e:
@@ -11518,9 +11524,12 @@ def api_delete_property_owner(owner_id):
             return json_error("Not found", 404)
         # Check linked properties — same rule the landlord cards count with, so
         # a card showing "no properties" can always be deleted.
+        # Archived stock is excluded, exactly as the landlord cards count it —
+        # otherwise a landlord reading "no properties on record" could never be
+        # deleted and the refusal would name a property nobody can see.
         linked = db.execute(
             "SELECT id, ref, name, address_line_1 FROM properties "
-            f"WHERE {OWNER_LINK_SQL} ORDER BY name",
+            f"WHERE {OWNER_LINK_SQL} AND COALESCE(status,'') != 'archived' ORDER BY name",
             owner_link_params(owner_id, owner.get("name", ""))
         ).fetchall()
         if linked:
