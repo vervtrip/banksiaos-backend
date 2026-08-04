@@ -5611,6 +5611,7 @@ def api_banksia_deposits():
         rows = db.execute(
             f"SELECT d.id, d.tenancy_id, d.amount, d.registered_amount, d.scheme, d.protection_status, "
             f"d.protection_reference, d.date_received, d.date_protected, d.current_status, "
+            f"d.unprotected_at, d.unprotected_by, d.unprotected_reason, "
             f"t.deposit_held_by, "
             f"t.ref AS tenancy_ref, t.main_tenant_name, t.status AS tenancy_status, "
             f"NULLIF(t.end_date,'') AS tenancy_end, "
@@ -5654,7 +5655,14 @@ def api_banksia_deposits():
 
             t_status = (r.get("tenancy_status") or "").strip()
             end_date = str(r.get("tenancy_end") or "")[:10]
-            ended = t_status.lower() in ENDED_STATUSES or (bool(end_date) and end_date < today)
+            # A deposit can also be stood down by hand (Norbert, 2026-08-04) —
+            # released back, disputed, written off — without waiting for the
+            # tenancy to end. That decision is a person's, so it is recorded on
+            # the row with who and when, and it is reversible.
+            marked = str(r.get("unprotected_at") or "")[:10]
+            ended = (bool(marked)
+                     or t_status.lower() in ENDED_STATUSES
+                     or (bool(end_date) and end_date < today))
             protected = r.get("protection_status") == "protected"
             reg_date = r.get("date_protected") or ""
 
@@ -5672,6 +5680,10 @@ def api_banksia_deposits():
                 "tenancy_status": t_status,
                 "tenancy_end": end_date,
                 "date_registered": reg_date,
+                "unprotected_at": marked,
+                "unprotected_by": r.get("unprotected_by") or "",
+                "unprotected_reason": r.get("unprotected_reason") or "",
+                "manually_unprotected": bool(marked),
                 "attachments": attachments.get(r["id"], []),
             }
 
@@ -5690,6 +5702,9 @@ def api_banksia_deposits():
                     "never_protected": never_protected,
                     "days_since_end": _days_between(end_date, today) if end_date else None,
                 })
+                # (base already carries manually_unprotected / unprotected_by,
+                # so the row can say whether a person stood it down or the
+                # tenancy simply ran out.)
                 amt_unprotected += amt
             elif protected:
                 dtr = _days_between(r.get("commencement"), reg_date) if reg_date else None
@@ -5957,6 +5972,112 @@ def api_create_deposit():
             "category": "unprotected" if ended else ("registered" if date_protected else "to_register"),
             "main_tenant_name": ten.get("main_tenant_name") or "",
         })
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/deposits/<int:deposit_id>/unprotect", methods=["POST"])
+def api_unprotect_deposit(deposit_id):
+    """Stand a deposit down as unprotected by hand (Norbert, 2026-08-04).
+
+    Until now a deposit only reached the Unprotected category when its tenancy
+    ended. That is not the only way it happens: a deposit can be released back
+    to the tenant, disputed, or written off while the tenancy is still running.
+    This records that decision on the row, with who made it and when, and moves
+    it into Unprotected.
+
+    Nothing is destroyed. `protection_status` and the registration date are left
+    exactly as they are, so the register still knows the deposit *was* protected
+    and can say "to release" rather than "never registered". That also means
+    Restore puts it back where it came from with one click.
+    """
+    data = request.get_json(silent=True) or {}
+    reason = (data.get("reason") or "").strip()[:300]
+
+    db = get_dict_db()
+    try:
+        dep = db.execute(
+            "SELECT d.id, d.amount, d.registered_amount, d.unprotected_at, "
+            "t.main_tenant_name, "
+            "COALESCE(NULLIF(p.ref,''), NULLIF(p.address_line_1,''), p.name) AS property_label "
+            "FROM deposits d "
+            "LEFT JOIN tenancies t ON d.tenancy_id = t.id "
+            "LEFT JOIN properties p ON d.property_id = p.id "
+            "WHERE d.id = ?", (deposit_id,)).fetchone()
+        if not dep:
+            return json_error("Deposit not found", 404)
+        if dep.get("unprotected_at"):
+            return json_error("This deposit is already marked unprotected", 409)
+
+        who = getattr(request, "current_user", {}).get("username", "system")
+        when = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "UPDATE deposits SET unprotected_at = ?, unprotected_by = ?, unprotected_reason = ?, "
+            "modified = ? WHERE id = ?",
+            (when, who, reason or None, when, deposit_id))
+        db.commit()
+
+        amount = dep.get("registered_amount") or dep.get("amount") or 0
+        _log_activity(
+            "deposit", deposit_id, "unprotected",
+            field_changed="unprotected_at", old_value="", new_value=when,
+            notes=("Deposit of £%s for %s (%s) marked unprotected.%s"
+                   % (round(float(amount or 0), 2),
+                      dep.get("main_tenant_name") or "no tenant on record",
+                      dep.get("property_label") or "no property on record",
+                      (" Reason: %s" % reason) if reason else "")),
+            db=db)
+        db.commit()
+        return json_success({"id": deposit_id, "unprotected_at": when, "unprotected_by": who,
+                             "category": "unprotected"})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/deposits/<int:deposit_id>/restore-protection", methods=["POST"])
+def api_restore_deposit_protection(deposit_id):
+    """Undo a manual unprotect and send the deposit back to where it was.
+
+    Only clears the manual mark. A deposit whose tenancy has genuinely ended
+    stays in Unprotected afterwards, because that is not a decision anyone made
+    and it is not this route's to reverse — it says so rather than appearing to
+    work and changing nothing.
+    """
+    db = get_dict_db()
+    try:
+        dep = db.execute(
+            "SELECT d.id, d.amount, d.registered_amount, d.unprotected_at, t.main_tenant_name "
+            "FROM deposits d LEFT JOIN tenancies t ON d.tenancy_id = t.id "
+            "WHERE d.id = ?", (deposit_id,)).fetchone()
+        if not dep:
+            return json_error("Deposit not found", 404)
+        if not dep.get("unprotected_at"):
+            return json_error(
+                "Nothing to undo — nobody marked this deposit unprotected. If it is "
+                "sitting in Unprotected it is because its tenancy has ended, and that "
+                "is not something this can reverse", 409)
+
+        was = dep["unprotected_at"]
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "UPDATE deposits SET unprotected_at = NULL, unprotected_by = NULL, "
+            "unprotected_reason = NULL, modified = ? WHERE id = ?", (now, deposit_id))
+        db.commit()
+
+        amount = dep.get("registered_amount") or dep.get("amount") or 0
+        _log_activity(
+            "deposit", deposit_id, "protection_restored",
+            field_changed="unprotected_at", old_value=was, new_value="",
+            notes=("Deposit of £%s for %s put back on the register."
+                   % (round(float(amount or 0), 2),
+                      dep.get("main_tenant_name") or "no tenant on record")),
+            db=db)
+        db.commit()
+        return json_success({"id": deposit_id, "restored": True})
     except Exception as e:
         return json_error(safe_error(e), 500)
     finally:
