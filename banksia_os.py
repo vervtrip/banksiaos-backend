@@ -5778,6 +5778,191 @@ def api_banksia_deposits():
         db.close()
 
 
+@banksia_os_bp.route("/deposits/tenancy-lookup", methods=["GET"])
+def api_deposit_tenancy_lookup():
+    """Find a tenancy to hang a new deposit on (Norbert, 2026-08-04).
+
+    Everything the deposit register shows is already held on the tenancy, so a
+    new deposit is created by picking the tenancy rather than by re-typing the
+    tenant, the property and the start date. This returns exactly the fields
+    the Add Deposit dialog puts on screen, plus what is already on file:
+
+      suggested_amount   the deposit figure recorded on the tenancy itself, so
+                         the amount is prefilled rather than guessed at.
+      existing_deposits  deposits already held against that tenancy. Not a
+                         block — a top-up is legitimate — but the dialog says
+                         so out loud, because a duplicate deposit is otherwise
+                         invisible until it turns up twice in the register.
+
+    Live tenancies come first: those are the ones a new deposit belongs to.
+    Ended and archived ones are still findable, because a deposit can be keyed
+    in after the fact, but they are labelled as such.
+    """
+    q = request.args.get("search", "").strip()
+    limit = int_param(request.args.get("limit"), 25, max_val=50)
+
+    where_parts = ["1=1"]
+    params = []
+    if q:
+        like = f"%{q}%"
+        where_parts.append(
+            "(COALESCE(t.main_tenant_name,'') LIKE ? OR COALESCE(t.ref,'') LIKE ? "
+            "OR COALESCE(t.full_address,'') LIKE ? OR COALESCE(p.ref,'') LIKE ? "
+            "OR COALESCE(p.address_line_1,'') LIKE ?)"
+        )
+        params.extend([like] * 5)
+    where = " AND ".join(where_parts)
+
+    db = get_dict_db()
+    try:
+        rows = db.execute(
+            f"SELECT t.id, t.ref, t.status, t.main_tenant_name, t.start_date, t.end_date, "
+            f"t.move_in_date, t.deposit_registered_amount, t.rent_amount, "
+            f"COALESCE(NULLIF(p.ref,''), NULLIF(p.address_line_1,''), p.name) AS property_label, "
+            f"u.unit_ref, "
+            f"(SELECT COUNT(*) FROM deposits d WHERE d.tenancy_id = t.id AND d.current_status = 'held') AS existing_deposits, "
+            f"(SELECT COALESCE(SUM(COALESCE(d.registered_amount, d.amount)),0) FROM deposits d "
+            f" WHERE d.tenancy_id = t.id AND d.current_status = 'held') AS existing_amount "
+            f"FROM tenancies t "
+            f"LEFT JOIN properties p ON t.property_id = p.id "
+            f"LEFT JOIN units u ON t.unit_id = u.id "
+            f"WHERE {where} "
+            f"ORDER BY CASE WHEN LOWER(COALESCE(t.status,'')) IN ('current','periodic','active','prospective') "
+            f"         THEN 0 ELSE 1 END, t.start_date DESC, t.id DESC "
+            f"LIMIT ?",
+            params + [limit]
+        ).fetchall()
+
+        out = []
+        for r in rows:
+            addr = r.get("property_label") or ""
+            if r.get("unit_ref"):
+                addr = f"{addr} ({r['unit_ref']})" if addr else r["unit_ref"]
+            status = (r.get("status") or "").strip()
+            out.append({
+                "id": r["id"],
+                "ref": r.get("ref") or "",
+                "status": status,
+                "live": status.lower() in ("current", "periodic", "active", "prospective"),
+                "main_tenant_name": r.get("main_tenant_name") or "",
+                "full_address": addr,
+                "tenancy_start": r.get("start_date") or r.get("move_in_date") or "",
+                "tenancy_end": r.get("end_date") or "",
+                "suggested_amount": round(float(r.get("deposit_registered_amount") or 0), 2),
+                "rent_amount": round(float(r.get("rent_amount") or 0), 2),
+                "existing_deposits": r.get("existing_deposits") or 0,
+                "existing_amount": round(float(r.get("existing_amount") or 0), 2),
+            })
+        return json_success({"tenancies": out, "count": len(out)})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/deposits", methods=["POST"])
+def api_create_deposit():
+    """Add a deposit to the register against an existing tenancy.
+
+    The tenancy is the only thing asked for: tenant, property, unit and start
+    date are read off it rather than typed again, so a deposit cannot end up
+    describing a property its tenancy is not on.
+
+    Amount is required and must be a real, positive figure — a £0 deposit is
+    almost always a half-finished entry, and it would sit in the register
+    looking protected-but-worthless. A registration date can be supplied at
+    the same time, which files it straight into Registered; without one it
+    lands in To Be Registered with the 30-day clock running from the start of
+    the tenancy.
+    """
+    data = request.get_json(silent=True) or {}
+
+    tenancy_id = data.get("tenancy_id")
+    if not tenancy_id:
+        return json_error("Pick a tenancy for this deposit")
+
+    raw_amount = data.get("amount")
+    try:
+        amount = round(float(raw_amount), 2)
+    except (TypeError, ValueError):
+        return json_error("Enter the deposit amount")
+    if amount <= 0:
+        return json_error("A deposit has to be more than £0")
+
+    date_protected = (data.get("date_protected") or "").strip()[:10]
+    date_received = (data.get("date_received") or "").strip()[:10]
+    scheme = (data.get("scheme") or "").strip()
+    reference = (data.get("protection_reference") or "").strip()
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    if date_protected and date_protected > today:
+        return json_error("The registration date cannot be in the future")
+
+    db = get_dict_db()
+    try:
+        ten = db.execute(
+            "SELECT t.id, t.ref, t.property_id, t.unit_id, t.main_tenant_name, t.status, "
+            "t.start_date, t.move_in_date, t.deposit_held_by, "
+            "COALESCE(NULLIF(p.ref,''), NULLIF(p.address_line_1,''), p.name) AS property_label "
+            "FROM tenancies t LEFT JOIN properties p ON t.property_id = p.id "
+            "WHERE t.id = ?", (tenancy_id,)).fetchone()
+        if not ten:
+            return json_error("That tenancy no longer exists", 404)
+
+        # The tenant row is the person, the tenancy is the agreement. Link both
+        # where we can so the deposit is reachable from either side; a missing
+        # tenant row is not a reason to refuse the deposit.
+        tenant = db.execute(
+            "SELECT id FROM tenants WHERE tenancy_id = ? ORDER BY id LIMIT 1",
+            (tenancy_id,)).fetchone()
+
+        if not date_received:
+            date_received = ten.get("start_date") or ten.get("move_in_date") or today
+
+        protection_status = "protected" if date_protected else "unprotected"
+
+        cur = db.execute(
+            "INSERT INTO deposits (tenancy_id, tenant_id, unit_id, property_id, amount, "
+            "registered_amount, deposit_type, scheme, protection_status, protection_reference, "
+            "date_received, date_protected, current_status, source) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (tenancy_id, tenant["id"] if tenant else None, ten.get("unit_id"), ten.get("property_id"),
+             amount, amount, data.get("deposit_type") or "cash", scheme or None,
+             protection_status, reference or None,
+             date_received, date_protected or None, "held", "banksia-os"))
+        deposit_id = cur.lastrowid
+        db.commit()
+
+        _log_activity(
+            "deposit", deposit_id, "created",
+            notes=("Deposit of £%s added for %s (%s), tenancy %s. %s"
+                   % (amount,
+                      ten.get("main_tenant_name") or "no tenant on record",
+                      ten.get("property_label") or "no property on record",
+                      ten.get("ref") or tenancy_id,
+                      ("Registered on %s." % date_protected) if date_protected
+                      else "Not registered yet.")),
+            db=db)
+        db.commit()
+
+        # Tell the caller where it landed, so the page can drop the user into
+        # the category the deposit actually went to rather than the one they
+        # happened to be looking at.
+        ended = (ten.get("status") or "").strip().lower() in (
+            "past", "ended", "terminated", "expired", "closed", "completed")
+        return json_success({
+            "id": deposit_id,
+            "tenancy_id": tenancy_id,
+            "amount": amount,
+            "category": "unprotected" if ended else ("registered" if date_protected else "to_register"),
+            "main_tenant_name": ten.get("main_tenant_name") or "",
+        })
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
 @banksia_os_bp.route("/deposits/<int:deposit_id>", methods=["DELETE"])
 def api_delete_deposit(deposit_id):
     """Delete a deposit outright.
