@@ -4451,18 +4451,14 @@ def api_create_tenancy_from_form():
                 [now, applicant_id],
             )
 
-        # Create deposit record if deposit amount was provided
-        deposit_amount_val = float(deposit_amount) if deposit_amount else 0
-        if deposit_amount_val > 0:
-            db.execute(
-                "INSERT INTO deposits (tenancy_id, tenant_id, unit_id, property_id, amount, "
-                "registered_amount, deposit_type, scheme, protection_status, current_status, "
-                "date_received, source, notes, created, modified) "
-                "VALUES (?, ?, ?, ?, ?, ?, 'cash', ?, 'unprotected', 'held', ?, 'banksia', ?, ?, ?)",
-                [tenancy_id, None, unit_id, property_id, deposit_amount_val, deposit_amount_val,
-                 deposit_scheme or "", start_date,
-                 f"Auto-created from referencing form #{form_id}", now, now],
-            )
+        # Deposit record — every tenancy gets one, through the shared step. It
+        # used to be written only when an amount had been typed, so a tenancy
+        # set up without a deposit figure silently got no row and never appeared
+        # in the 30-day queue; it also left tenant_id empty and would open a
+        # second deposit on a tenancy that already had one.
+        from banksia_os import ensure_deposit_for_tenancy
+        ensure_deposit_for_tenancy(db, tenancy_id, amount=deposit_amount,
+                                   origin="referencing form #%s" % form_id)
 
         # ── Link the portal user to the tenancy ──
         try:
@@ -4729,13 +4725,12 @@ def _call_create_tenancy(app_id, db):
         )
         tenant_id = tenant_cur.lastrowid
 
-        dep_cur = db.execute(
-            "INSERT INTO deposits (tenancy_id, tenant_id, unit_id, property_id, "
-            "amount, current_status, protection_status, date_received, created, modified) "
-            "VALUES (?, ?, ?, ?, ?, 'held', 'unprotected', ?, ?, ?)",
-            [tenancy_id, tenant_id, unit_id, property_id,
-             deposit_amount or 0, start_date, now_iso, now_iso]
-        )
+        # Shared step rather than a raw insert: idempotent per tenancy, so a
+        # conversion that follows a signed application tops up the deposit that
+        # already exists instead of opening a second one.
+        from banksia_os import ensure_deposit_for_tenancy
+        ensure_deposit_for_tenancy(db, tenancy_id, amount=deposit_amount,
+                                   origin="applicant #%s" % app_id)
 
         old_app_status = app.get("status", "")
         db.execute("UPDATE applicants SET status = 'tenancy_created', modified = ? WHERE id = ?",

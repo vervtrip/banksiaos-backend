@@ -5579,7 +5579,12 @@ def api_banksia_deposits():
     split, which is what the tenancy detail page asks for.
     """
     LIMIT_DAYS = 30
-    ENDED_STATUSES = {"past", "ended", "terminated", "expired", "closed", "completed"}
+    ENDED_STATUSES = {"past", "ended", "terminated", "expired", "closed", "completed",
+                      # A tenancy that was rejected, cancelled or withdrawn never
+                      # became a let. Now that signing an application opens a
+                      # tenancy (and with it a deposit), those have to fall out of
+                      # the 30-day queue rather than be chased forever.
+                      "rejected", "cancelled", "canceled", "withdrawn"}
 
     search = request.args.get("search", "").strip()
     tenancy_filter = request.args.get("tenancy_id", "").strip()
@@ -6721,6 +6726,105 @@ def api_search():
 # 9. WRITE ENDPOINTS — Tenancies, Applicants, Tenants
 # ═══════════════════════════════════════════════
 
+def ensure_deposit_for_tenancy(db, tenancy_id, amount=None, origin=None):
+    """Give every new tenancy its deposit row, in To Be Registered (Norbert, 2026-08-04).
+
+    A deposit that only exists once somebody remembers to add it is a deposit that
+    gets protected late. The register's whole job is the statutory 30 days from the
+    start of the tenancy, and that clock starts the day the tenancy starts whether
+    or not anyone has keyed the money in — so the row is created with the tenancy
+    and the countdown is on screen from day one.
+
+    Idempotent by tenancy. If the tenancy already holds a deposit this returns that
+    one and writes nothing, because a single let passes through more than one
+    creation path: signing an application opens a Prospective tenancy, conversion
+    then promotes it. Two deposit rows for one let is a double count in the
+    register's money as well as its counts.
+
+    Deliberately NOT called from arthur_sync. An Arthur pull imports history, and
+    inventing deposits for 298 tenancies that ended years ago would be fiction.
+
+    The amount is whatever the tenancy already records, and a tenancy with no
+    deposit figure still gets its row: "we hold a deposit and have not keyed the
+    amount" is a job, and hiding it until someone types a number is how the 30
+    days get missed. The amount is editable on the register.
+
+    The caller owns the transaction — nothing is committed here, and the activity
+    line is written before the caller's commit because _log_activity(db=db) only
+    commits when it opened the connection itself.
+
+    Returns {"id", "created", "amount"}, or None if the tenancy has gone.
+    """
+    ten = db.execute(
+        "SELECT t.id, t.ref, t.property_id, t.unit_id, t.main_tenant_name, t.status, "
+        "t.start_date, t.move_in_date, t.deposit_registered_amount, t.deposit_scheme, "
+        "COALESCE(NULLIF(p.ref,''), NULLIF(p.address_line_1,''), p.name) AS property_label "
+        "FROM tenancies t LEFT JOIN properties p ON t.property_id = p.id "
+        "WHERE t.id = ?", (tenancy_id,)).fetchone()
+    if not ten:
+        return None
+
+    existing = db.execute(
+        "SELECT id, amount FROM deposits WHERE tenancy_id = ? AND archived_at IS NULL "
+        "ORDER BY id LIMIT 1", (tenancy_id,)).fetchone()
+    if existing:
+        return {"id": existing["id"], "created": False,
+                "amount": float(existing.get("amount") or 0)}
+
+    def _num(v):
+        # Some of these figures arrive as typed text ("£1,200"), because the
+        # tenant application stores what the applicant was quoted rather than a
+        # number. A pound sign is not a reason to record the deposit as zero.
+        if v is None:
+            return 0.0
+        try:
+            return round(float(str(v).replace("\u00a3", "").replace(",", "").strip()), 2)
+        except (TypeError, ValueError):
+            return 0.0
+
+    value = _num(amount) if amount not in (None, "") else 0.0
+    if value <= 0:
+        value = _num(ten.get("deposit_registered_amount"))
+    if value < 0:
+        value = 0.0
+
+    # The tenant row is the person, the tenancy is the agreement. Link both where
+    # we can so the deposit is reachable from either side; a tenancy whose tenant
+    # row has not been written yet is not a reason to skip the deposit.
+    tenant = db.execute(
+        "SELECT id FROM tenants WHERE tenancy_id = ? ORDER BY main_tenant DESC, id LIMIT 1",
+        (tenancy_id,)).fetchone()
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    date_received = (ten.get("start_date") or ten.get("move_in_date") or today)
+    date_received = str(date_received)[:10]
+
+    cur = db.execute(
+        "INSERT INTO deposits (tenancy_id, tenant_id, unit_id, property_id, amount, "
+        "registered_amount, deposit_type, scheme, protection_status, date_received, "
+        "current_status, source) "
+        "VALUES (?,?,?,?,?,?,?,?,'unprotected',?,'held','auto-tenancy')",
+        (tenancy_id, tenant["id"] if tenant else None, ten.get("unit_id"),
+         ten.get("property_id"), value, value, "cash",
+         (ten.get("deposit_scheme") or None), date_received))
+    deposit_id = cur.lastrowid
+
+    _log_activity(
+        "deposit", deposit_id, "created",
+        notes=("Deposit opened automatically with %s for %s (%s). %s Awaiting "
+               "registration — 30 days from %s.%s"
+               % (("tenancy %s" % ten.get("ref")) if ten.get("ref") else "the tenancy",
+                  ten.get("main_tenant_name") or "no tenant on record",
+                  ten.get("property_label") or "no property on record",
+                  ("Amount \u00a3%s." % value) if value > 0
+                  else "Amount not recorded on the tenancy, so it needs keying.",
+                  date_received,
+                  (" Source: %s." % origin) if origin else "")),
+        db=db)
+
+    return {"id": deposit_id, "created": True, "amount": value}
+
+
 @banksia_os_bp.route("/tenancies", methods=["POST"])
 def api_create_tenancy():
     """Create a new tenancy."""
@@ -6771,6 +6875,12 @@ def api_create_tenancy():
              main_tenant_name or "", now_iso, now_iso)
         )
         new_id = db.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+
+        # The deposit is part of opening a tenancy, not a separate errand, so it
+        # is written in the same transaction: if it cannot be written the tenancy
+        # rolls back with it rather than leaving a let with no deposit on record.
+        deposit = ensure_deposit_for_tenancy(
+            db, new_id, amount=deposit_amount_val, origin="new tenancy")
         db.commit()
 
         # Mark unit as not vacant
@@ -6802,7 +6912,8 @@ def api_create_tenancy():
             esign = db.execute("SELECT * FROM esignature_requests WHERE id = ?", (eid,)).fetchone()
             db.commit()
 
-        return json_success({"id": new_id, "ref": ref, "esignature": esign, "delivery": delivery})
+        return json_success({"id": new_id, "ref": ref, "esignature": esign,
+                             "delivery": delivery, "deposit": deposit})
     except Exception as e:
         db.rollback()
         return json_error(safe_error(e), 500)
@@ -13819,19 +13930,12 @@ def api_create_tenancy_from_applicant(app_id):
                            notes=f"Tenant {main_tenant_name} created from applicant #{app_id}",
                            db=db)
 
-        # 6. Create deposit record
-        dep_cur = db.execute(
-            "INSERT INTO deposits (tenancy_id, tenant_id, unit_id, property_id, "
-            "amount, current_status, protection_status, date_received, created, modified) "
-            "VALUES (?, ?, ?, ?, ?, 'held', 'unprotected', ?, ?, ?)",
-            [tenancy_id, tenant_id, unit_id, property_id,
-             deposit_amount or 0, start_date, now_iso, now_iso]
-        )
-        deposit_id = dep_cur.lastrowid
-
-        _log_activity("deposit", deposit_id, "created",
-                       notes=f"Deposit of {deposit_amount} created for tenancy #{tenancy_id}",
-                       db=db)
+        # 6. Deposit record — through the shared step, which is idempotent per
+        # tenancy. Signing the application already opened this tenancy and its
+        # deposit; converting the applicant must not open a second one.
+        _dep = ensure_deposit_for_tenancy(
+            db, tenancy_id, amount=deposit_amount, origin="applicant #%s" % app_id)
+        deposit_id = _dep["id"] if _dep else None
 
         # 7. Update applicant status to 'tenancy_created'
         old_app_status = app.get("status", "")

@@ -526,7 +526,13 @@ def _create_prospective_tenancy(db, r, applicant_id):
     Deliberately NOT done here:
     - the unit is not marked occupied. Nobody has moved in, and flipping occupancy on
       a signature would hide a still-lettable room.
-    - no deposit record. Money has not been taken yet; the real conversion creates it.
+    - the unit occupancy above. Nobody has moved in.
+
+    A deposit row IS created here (Norbert, 2026-08-04). The 30-day protection clock
+    runs from the start of the tenancy, so it has to be visible from the moment the
+    tenancy exists; a holding deposit taken at signing is exactly the case the
+    register already sees. The step is idempotent per tenancy, so converting this
+    applicant later promotes the same deposit rather than opening a second one.
     - the existing occupancy guard on /applicants/<id>/create-tenancy only looks at
       Active/Periodic tenancies, so a Prospective row cannot block a genuine let.
 
@@ -581,6 +587,19 @@ def _create_prospective_tenancy(db, r, applicant_id):
         _os_log("applicant", applicant_id, "update",
                 field_changed="tenancy", old_value=None, new_value=PROSPECTIVE_STATUS,
                 notes="Application signed — prospective tenancy #%s created" % tenancy_id, db=db)
+
+    # The deposit belongs to the tenancy, so it opens with it. Wrapped, because
+    # this runs inside a client submitting their application: a missing deposit
+    # row is a job for the team, an applicant who cannot submit is worse.
+    try:
+        from banksia_os import ensure_deposit_for_tenancy
+        ensure_deposit_for_tenancy(db, tenancy_id,
+                                   amount=(r.get("deposit") or r.get("holding_deposit")),
+                                   origin="signed application #%s" % r.get("id"))
+    except Exception as e:
+        print("[tenant_application] deposit for prospective tenancy %s failed: %s"
+              % (tenancy_id, e))
+
     return tenancy_id, tenant_id
 
 
