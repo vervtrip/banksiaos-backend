@@ -7428,6 +7428,31 @@ def api_compliance_update(row_id):
                       notes="%s moved to %s" % (row["property_name"], new_group))
         return json_success({"monday_group": new_group})
 
+    if "co2_alarm_status" in data:
+        # The CO2 alarm is not a certificate with an expiry — it is either fitted
+        # or it is not, evidenced by a photo. It rides on the Gas board because
+        # that is the visit where anyone would check it (Norbert, 2026-08-04).
+        raw = str(data.get("co2_alarm_status", "")).strip().lower()
+        mapped = {"yes": "Yes", "no": "No", "": ""}.get(raw)
+        if mapped is None:
+            return json_error("CO2 alarm must be Yes or No.", 422)
+        row = _compliance_row(row_id, "co2_alarm_status")
+        if not row:
+            return json_error("Compliance record not found", 404)
+        old = (row["ref"] or "").strip()
+        db = get_dict_db()
+        try:
+            db.execute(
+                "UPDATE compliance SET co2_alarm_status = ?, updated_at = datetime('now') WHERE id = ?",
+                (mapped, row_id)
+            )
+            db.commit()
+        finally:
+            db.close()
+        _log_activity("compliance", row_id, "update", "co2_alarm_status", old, mapped,
+                      notes="CO2 alarm set to %s for %s" % (mapped or "blank", row["property_name"]))
+        return json_success({"co2_alarm_status": mapped})
+
     if "landlord" in data:
         name = str(data.get("landlord", "")).strip()
         if len(name) > 120:
