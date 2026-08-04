@@ -1138,6 +1138,22 @@ def api_update_form(form_id):
         db.close()
 
 
+def _os_log(entity_type, entity_id, action, notes=None, db=None,
+            field_changed=None, old_value=None, new_value=None):
+    """Surface a portal-side event in Banksia OS's activity_log (Norbert, 2026-08-03).
+
+    Until now the portal wrote only to portal_audit_log / esignature_audit_log, which
+    no Banksia OS page reads — so from the team's side the portal was silent. Imported
+    lazily because banksia_os imports this module. Never allowed to break the portal.
+    """
+    try:
+        from banksia_os import _log_activity
+        _log_activity(entity_type, entity_id, action, field_changed=field_changed,
+                      old_value=old_value, new_value=new_value, notes=notes, db=db)
+    except Exception as e:
+        print(f"[portal] activity log failed ({entity_type} {action}): {e}", file=sys.stderr)
+
+
 def _ensure_applicant_for_form(db, form_id):
     """Create or refresh an applicant record linked to a referencing form.
 
@@ -1284,10 +1300,18 @@ def api_submit_form(form_id):
 
         # Ensure a linked applicant exists so the applicant shows in the Applicants
         # tab and can flow through approval -> e-sign -> tenancy conversion.
+        applicant_id = None
         try:
-            _ensure_applicant_for_form(db, form_id)
+            applicant_id = _ensure_applicant_for_form(db, form_id)
         except Exception as _ae:
             print(f"[SUBMIT] applicant link failed for form {form_id}: {_ae}", file=sys.stderr)
+
+        _os_log("referencing_form", form_id, "submitted",
+                notes="Referencing form submitted by the applicant in the tenant portal", db=db)
+        if applicant_id:
+            _os_log("applicant", applicant_id, "update",
+                    field_changed="referencing", old_value=None, new_value="submitted",
+                    notes=f"Referencing form #{form_id} submitted from the tenant portal", db=db)
 
         db.commit()
 
@@ -1616,6 +1640,11 @@ def api_upload_document():
             [form_id, category, orig_filename, stored_name, file_path, file_size, mime_type, uploaded_by]
         )
         doc_id = db.execute("SELECT last_insert_rowid()").fetchone()["last_insert_rowid()"]
+
+        _os_log("referencing_form", form_id, "document_uploaded",
+                field_changed="documents", old_value=None, new_value=category,
+                notes=f"{orig_filename} uploaded by the {uploaded_by}", db=db)
+
         db.commit()
 
         doc = db.execute("SELECT * FROM referencing_documents WHERE id = ?", [doc_id]).fetchone()

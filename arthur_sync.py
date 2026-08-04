@@ -550,6 +550,20 @@ def sync_tenancies(force=False):
 
         existing = get_by_field("tenancies", "arthur_id", aid)
         if existing:
+            # An end date agreed here from an approved notice to quit is ours, not
+            # Arthur's. Arthur sends "" for a periodic tenancy, so letting the pull
+            # write that back would silently undo the notice — the same trap the
+            # tags column falls into. Keep ours whenever Arthur has nothing.
+            if not data.get("end_date"):
+                try:
+                    agreed = get_db().execute(
+                        "SELECT move_out_date FROM tenancy_notice "
+                        "WHERE tenancy_id = ? AND status = 'approved'",
+                        (existing[0]["id"],)).fetchone()
+                except Exception:
+                    agreed = None  # notice table not created yet
+                if agreed and agreed[0]:
+                    data.pop("end_date", None)
             update("tenancies", existing[0]["id"], data)
             updated += 1
         else:
