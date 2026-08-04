@@ -5602,6 +5602,22 @@ def api_banksia_deposits():
             params
         ).fetchall()
 
+        # Attachments (deposit protection certificates, prescribed information,
+        # bank proof) live in entity_documents like every other file in the OS,
+        # so they also surface in the Documents module. One query for the lot.
+        attachments = {}
+        for a in db.execute(
+            "SELECT id, entity_id, original_filename, file_type, file_size, created "
+            "FROM entity_documents WHERE entity_type = 'deposit' ORDER BY created DESC"
+        ).fetchall():
+            attachments.setdefault(a["entity_id"], []).append({
+                "id": a["id"],
+                "filename": a["original_filename"] or "attachment",
+                "file_type": a["file_type"] or "",
+                "file_size": a["file_size"] or 0,
+                "uploaded_at": a["created"] or "",
+            })
+
         today = datetime.now(timezone.utc).date().isoformat()
         registered, unregistered = [], []
         total_reg = total_unreg = 0.0
@@ -5623,6 +5639,7 @@ def api_banksia_deposits():
                 "protection_reference": r.get("protection_reference") or "",
                 "deposit_amount": round(amt, 2),
                 "tenancy_start": r.get("commencement") or "",
+                "attachments": attachments.get(r["id"], []),
             }
             if r.get("protection_status") == "protected":
                 reg_date = r.get("date_protected") or ""
@@ -5659,6 +5676,75 @@ def api_banksia_deposits():
             "late_registered_count": late_count,
             "overdue_unregistered_count": sum(1 for x in unregistered if x["overdue"]),
             "limit_days": LIMIT_DAYS,
+        })
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+
+@banksia_os_bp.route("/deposits/<int:deposit_id>", methods=["DELETE"])
+def api_delete_deposit(deposit_id):
+    """Delete a deposit outright.
+
+    Arthur does not own the deposits table — it syncs tenancy-level deposit
+    fields, not these rows — so a deleted deposit stays deleted and will not
+    reappear on the next pull.
+
+    Everything the row held is written into the activity log as JSON before it
+    goes, so a mistaken delete can be keyed straight back. Any files attached
+    to the deposit go with it (rows and files both), because an attachment
+    hanging off a record that no longer exists is invisible everywhere.
+    """
+    db = get_dict_db()
+    try:
+        dep = db.execute(
+            "SELECT d.*, t.main_tenant_name, t.ref AS tenancy_ref, "
+            "COALESCE(NULLIF(p.ref,''), NULLIF(p.address_line_1,''), p.name) AS property_label "
+            "FROM deposits d "
+            "LEFT JOIN tenancies t ON d.tenancy_id = t.id "
+            "LEFT JOIN properties p ON d.property_id = p.id "
+            "WHERE d.id = ?", (deposit_id,)).fetchone()
+        if not dep:
+            return json_error("Deposit not found", 404)
+
+        docs = db.execute(
+            "SELECT id, file_path, original_filename FROM entity_documents "
+            "WHERE entity_type = 'deposit' AND entity_id = ?", (deposit_id,)).fetchall()
+
+        snapshot = {k: v for k, v in dict(dep).items() if v not in (None, "")}
+        tenant = (dep.get("main_tenant_name") or "").strip()
+        where = (dep.get("property_label") or "").strip()
+        amount = dep.get("registered_amount") or dep.get("amount") or 0
+
+        db.execute("DELETE FROM entity_documents WHERE entity_type = 'deposit' AND entity_id = ?",
+                   (deposit_id,))
+        db.execute("DELETE FROM deposits WHERE id = ?", (deposit_id,))
+        db.commit()
+
+        # Files only after the row is safely gone, so a disk error cannot
+        # leave a deleted-looking deposit still in the table.
+        for d in docs:
+            try:
+                if d["file_path"] and os.path.exists(d["file_path"]):
+                    os.remove(d["file_path"])
+            except Exception:
+                pass  # a stray file is harmless; the record is what matters
+
+        _log_activity(
+            "deposit", deposit_id, "deleted",
+            notes=("Deposit of \u00a3%s for %s (%s) deleted%s. Record was: %s"
+                   % (round(float(amount or 0), 2), tenant or "no tenant on record",
+                      where or "no property on record",
+                      (", along with %d attachment(s)" % len(docs)) if docs else "",
+                      json.dumps(snapshot, default=str))),
+            db=db)
+        db.commit()
+        return json_success({
+            "deleted": True,
+            "id": deposit_id,
+            "tenant": tenant,
+            "attachments_removed": len(docs),
         })
     except Exception as e:
         return json_error(safe_error(e), 500)
@@ -8702,6 +8788,7 @@ VALID_ENTITY_TYPES = {
     "referencing", "referencing_form", "referencing_forms",
     "maintenance_job", "maintenance_jobs",
     "property_owner", "property_owners",
+    "deposit", "deposits",
 }
 
 def _normalise_entity_type(et: str) -> str:
@@ -8712,6 +8799,7 @@ def _normalise_entity_type(et: str) -> str:
         "referencing_form": "referencing", "referencing_forms": "referencing",
         "maintenance_job": "maintenance_job", "maintenance_jobs": "maintenance_job",
         "property_owners": "property_owner",
+        "deposits": "deposit",
     }
     return singular.get(et, et)
 
@@ -8728,6 +8816,9 @@ def _validate_entity_exists(entity_type: str, entity_id: int) -> tuple:
         "referencing": ("referencing_forms", "first_name", "last_name"),
         "maintenance_job": ("maintenance_jobs", "reference", "title"),
         "property_owner": ("property_owners", "name", "email"),
+        # A deposit has no name of its own; both columns are usually empty,
+        # so the label falls through to "Deposit #<id>".
+        "deposit": ("deposits", "protection_reference", "notes"),
     }
     info = table_map.get(et)
     if not info:
