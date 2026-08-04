@@ -172,6 +172,13 @@ def _ensure_schema():
         # submitted before signing was introduced still render.
         if "signature_image" not in have:
             db.execute("ALTER TABLE tenant_applications ADD COLUMN signature_image TEXT")
+        # A signed application creates a prospective tenancy + tenant. These two
+        # columns are what make that a one-time hand-off: if they are already set,
+        # the records exist and must not be created a second time.
+        if "tenancy_id" not in have:
+            db.execute("ALTER TABLE tenant_applications ADD COLUMN tenancy_id INTEGER")
+        if "tenant_id" not in have:
+            db.execute("ALTER TABLE tenant_applications ADD COLUMN tenant_id INTEGER")
         db.commit()
     finally:
         db.close()
@@ -188,10 +195,33 @@ _PUBLIC_KEYS = [
 ]
 
 
+def _as_utc_iso(value):
+    """Return a timestamp the browser cannot misread.
+
+    SQLite's datetime('now') gives '2026-08-04 12:40:31' — UTC, but with nothing
+    saying so. JavaScript parses that shape as *local* time, so the 24-hour
+    countdown was shifted by the viewer's own UTC offset: 23 hours in the UK,
+    17 for anyone seven hours east. Stamp it as ISO with a Z and it is the same
+    instant everywhere.
+    """
+    v = str(value or "").strip()
+    if not v:
+        return value
+    if v.endswith("Z") or "+" in v[10:] or v[10:].count("-") > 0:
+        return v
+    return v.replace(" ", "T") + "Z"
+
+
 def _row_public(r):
     if not r:
         return None
-    return {k: r.get(k) for k in _PUBLIC_KEYS}
+    out = {k: r.get(k) for k in _PUBLIC_KEYS}
+    # Applied on the way out as well as on write, so links opened before the fix
+    # count down correctly too.
+    for k in ("first_opened_at", "created_at"):
+        if k in out:
+            out[k] = _as_utc_iso(out[k])
+    return out
 
 
 @tenant_app_bp.route("/generate", methods=["POST"])
@@ -286,7 +316,8 @@ def get_tenant_application(token):
         if not r:
             return json_error("Application not found", 404)
         if r["status"] == "draft" and not r.get("first_opened_at"):
-            db.execute("UPDATE tenant_applications SET first_opened_at = datetime('now') WHERE id = ?", [r["id"]])
+            # ISO 8601 in UTC with an explicit Z — see _as_utc_iso
+            db.execute("UPDATE tenant_applications SET first_opened_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?", [r["id"]])
             db.commit()
             r["first_opened_at"] = db.execute("SELECT first_opened_at FROM tenant_applications WHERE id = ?", [r["id"]]).fetchone()["first_opened_at"]
         return json_success(_row_public(r))
@@ -464,6 +495,93 @@ def _create_or_update_applicant(db, r):
         "INSERT INTO applicants (%s) VALUES (%s)" % (", ".join(cols), ", ".join(["?"] * len(cols))),
         [fields[c] for c in cols])
     return db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
+
+
+PROSPECTIVE_STATUS = "Prospective"
+
+
+def _os_log(entity_type, entity_id, action, notes=None, db=None,
+            field_changed=None, old_value=None, new_value=None):
+    """Write a portal event into Banksia OS's activity_log.
+
+    Imported lazily: banksia_os imports this module's blueprint, so a module-level
+    import would be circular. Never allowed to break the portal — a missing audit
+    line is bad, a client who cannot submit their application is worse.
+    """
+    try:
+        from banksia_os import _log_activity
+        _log_activity(entity_type, entity_id, action, field_changed=field_changed,
+                      old_value=old_value, new_value=new_value, notes=notes, db=db)
+    except Exception as e:
+        print("[tenant_application] activity log failed (%s %s): %s" % (entity_type, action, e))
+
+
+def _create_prospective_tenancy(db, r, applicant_id):
+    """Turn a signed application into a prospective tenant + tenancy (Norbert, 2026-08-03).
+
+    The rule: signing the application is what makes someone a prospective tenant, so
+    the records appear on Tenancies and Tenants the moment it is signed, rather than
+    waiting for referencing and countersigning.
+
+    Deliberately NOT done here:
+    - the unit is not marked occupied. Nobody has moved in, and flipping occupancy on
+      a signature would hide a still-lettable room.
+    - no deposit record. Money has not been taken yet; the real conversion creates it.
+    - the existing occupancy guard on /applicants/<id>/create-tenancy only looks at
+      Active/Periodic tenancies, so a Prospective row cannot block a genuine let.
+
+    Returns (tenancy_id, tenant_id), or (None, None) when the application carries no
+    property/unit to hang a tenancy off.
+    """
+    if r.get("tenancy_id"):
+        return r.get("tenancy_id"), r.get("tenant_id")
+
+    property_id = r.get("property_id")
+    unit_id = r.get("unit_id")
+    if not property_id or not unit_id:
+        print("[tenant_application] application %s has no property/unit — no prospective tenancy created"
+              % r.get("id"))
+        return None, None
+
+    name = (r.get("a1_full_name") or "").strip()
+    parts = name.split(" ", 1)
+    first = parts[0] if parts else name
+    last = parts[1] if len(parts) > 1 else ""
+    now = datetime.now(timezone.utc).isoformat()
+
+    db.execute(
+        "INSERT INTO tenancies (property_id, unit_id, main_tenant_name, full_address, status, "
+        "start_date, rent_amount, rent_frequency, created, modified) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 'pcm', ?, ?)",
+        [property_id, unit_id, name or "Prospective tenant", r.get("property_address"),
+         PROSPECTIVE_STATUS, r.get("check_in_date"), r.get("monthly_rent"), now, now]
+    )
+    tenancy_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
+
+    db.execute(
+        "INSERT INTO tenants (first_name, last_name, email, mobile, property_id, unit_id, "
+        "tenancy_id, main_tenant, status, created, modified) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+        [first or name or "Prospective", last, r.get("a1_email"), r.get("a1_phone"),
+         property_id, unit_id, tenancy_id, PROSPECTIVE_STATUS, now, now]
+    )
+    tenant_id = db.execute("SELECT last_insert_rowid() AS rid").fetchone()["rid"]
+
+    db.execute("UPDATE tenant_applications SET tenancy_id = ?, tenant_id = ? WHERE id = ?",
+               [tenancy_id, tenant_id, r.get("id")])
+
+    where = r.get("property_address") or "property #%s" % property_id
+    _os_log("tenancy", tenancy_id, "created",
+            notes="Prospective tenancy for %s at %s — created when the tenant application was signed"
+                  % (name or "applicant", where), db=db)
+    _os_log("tenant", tenant_id, "created",
+            notes="%s became a prospective tenant by signing their application" % (name or "Applicant"),
+            db=db)
+    if applicant_id:
+        _os_log("applicant", applicant_id, "update",
+                field_changed="tenancy", old_value=None, new_value=PROSPECTIVE_STATUS,
+                notes="Application signed — prospective tenancy #%s created" % tenancy_id, db=db)
+    return tenancy_id, tenant_id
 
 
 def _draw_signature(pdf, sig_image, printed_name, sig_date):
@@ -904,6 +1022,21 @@ def submit_tenant_application(token):
         if a1_email:
             db.execute("UPDATE portal_users SET applicant_id = ? WHERE lower(email) = ?",
                        [applicant_id, a1_email.strip().lower()])
+
+        # Signing is the moment the applicant becomes a prospective tenant.
+        _os_log("applicant", applicant_id, "update",
+                field_changed="status", old_value=None, new_value="Application signed",
+                notes="Tenant application signed and submitted from the tenant portal", db=db)
+        try:
+            _create_prospective_tenancy(db, r2, applicant_id)
+        except Exception as tenancy_err:
+            # A failed hand-off must not lose the client's signed application; it is
+            # reported and can be replayed, whereas a 500 here loses the submission.
+            import traceback
+            print("[tenant_application] prospective tenancy failed for application %s: %s"
+                  % (r2.get("id"), tenancy_err))
+            traceback.print_exc()
+
         db.commit()
 
         # Referencing is the applicant's next step, so open it now rather than

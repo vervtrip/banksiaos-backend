@@ -311,7 +311,11 @@ async function load(){
     if(d.created_at){ try{ document.getElementById('appDate').textContent = new Date(d.created_at).toLocaleDateString('en-GB'); }catch(e){} }
     // Countdown timer: 24h from first_opened_at
     if(d.first_opened_at && d.status === 'draft'){
-      var deadline = new Date(new Date(d.first_opened_at).getTime() + 24*3600000);
+      // A timestamp with no timezone on it is UTC from this server; without
+      // this, the browser reads it as local time and the 24 hours come out short.
+      var openedRaw = String(d.first_opened_at).trim();
+      if(!/(Z|[+-]\d{2}:?\d{2})$/.test(openedRaw)) openedRaw = openedRaw.replace(' ', 'T') + 'Z';
+      var deadline = new Date(new Date(openedRaw).getTime() + 24*3600000);
       (function(deadline){
         var cd = document.getElementById('countdown'), dis = document.getElementById('countdownDisplay');
         if(cd && dis){
