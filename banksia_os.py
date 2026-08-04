@@ -5550,23 +5550,45 @@ def api_deposits():
 
 @banksia_os_bp.route("/deposits", methods=["GET"])
 def api_banksia_deposits():
-    """Deposit register: MyDeposits registration tracking + 28-day compliance.
+    """Deposit register, entered by category (Norbert, 2026-08-04).
 
-    Returns registered vs unregistered splits with, per deposit:
-      - tenant name, property, tenancy start (commencement), deposit amount
-      - registered: registration date (date_protected), scheme, reference,
-        days_to_register (registration date - commencement) and a `late` flag
-        when that exceeds the 28-day statutory window.
-      - unregistered: days_overdue = days since commencement beyond 28.
-    Deposit registration date/scheme/reference are editable via PATCH; Arthur
-    does not hold the registration date (it lives on MyDeposits), so it is NULL
-    until captured.
+    Three questions, in the order the money actually moves:
+
+      to_register   the tenancy is running and the deposit is not protected
+                    yet. The clock is the statutory 30 days from the start of
+                    the tenancy (Housing Act 2004 s.213 as amended by the
+                    Localism Act 2011) — not the 28 this endpoint used to
+                    count, which was stricter than the law.
+      registered    the tenancy is running and the deposit is protected.
+      unprotected   the tenancy has ended, so the deposit is no longer held
+                    against a live tenancy and has to be returned or resolved.
+
+    A deposit answers exactly one of them, so unlike the property categories
+    (which deliberately overlap) these partition the register.
+
+    "Ended" is read off the tenancy status first and the end date second. A
+    periodic tenancy rolls on past its fixed-term end date by definition, so
+    an end date on its own must never retire a deposit; but once an agreed end
+    date has actually passed, the deposit belongs in `unprotected` whether or
+    not anyone has got round to changing the status.
+
+    Archived deposits stay out entirely — archived stock lives on the Archive
+    page and nowhere else.
+
+    `?tenancy_id=` returns a flat list for a single tenancy instead of the
+    split, which is what the tenancy detail page asks for.
     """
-    LIMIT_DAYS = 28
+    LIMIT_DAYS = 30
+    ENDED_STATUSES = {"past", "ended", "terminated", "expired", "closed", "completed"}
+
     search = request.args.get("search", "").strip()
+    tenancy_filter = request.args.get("tenancy_id", "").strip()
 
     where_parts = ["d.current_status = 'held'"]
     params = []
+    if tenancy_filter:
+        where_parts.append("d.tenancy_id = ?")
+        params.append(tenancy_filter)
     if search:
         where_parts.append("(COALESCE(t.main_tenant_name,'') LIKE ? OR COALESCE(p.ref,'') LIKE ? OR COALESCE(p.address_line_1,'') LIKE ? OR COALESCE(t.ref,'') LIKE ?)")
         like_val = f"%{search}%"
@@ -5591,6 +5613,7 @@ def api_banksia_deposits():
             f"d.protection_reference, d.date_received, d.date_protected, d.current_status, "
             f"t.deposit_held_by, "
             f"t.ref AS tenancy_ref, t.main_tenant_name, t.status AS tenancy_status, "
+            f"NULLIF(t.end_date,'') AS tenancy_end, "
             f"COALESCE(NULLIF(t.start_date,''), NULLIF(t.move_in_date,''), d.date_received) AS commencement, "
             f"COALESCE(NULLIF(p.ref,''), NULLIF(p.address_line_1,''), p.name) AS full_address, "
             f"u.unit_ref "
@@ -5619,15 +5642,22 @@ def api_banksia_deposits():
             })
 
         today = datetime.now(timezone.utc).date().isoformat()
-        registered, unregistered = [], []
-        total_reg = total_unreg = 0.0
-        late_count = 0
+        to_register, registered, unprotected = [], [], []
+        amt_to_register = amt_registered = amt_unprotected = 0.0
+        late_count = overdue_count = never_protected_count = 0
 
         for r in rows:
             amt = r.get("registered_amount") or r.get("amount") or 0
             addr = r.get("full_address") or ""
             if r.get("unit_ref"):
                 addr = f"{addr} ({r['unit_ref']})" if addr else r["unit_ref"]
+
+            t_status = (r.get("tenancy_status") or "").strip()
+            end_date = str(r.get("tenancy_end") or "")[:10]
+            ended = t_status.lower() in ENDED_STATUSES or (bool(end_date) and end_date < today)
+            protected = r.get("protection_status") == "protected"
+            reg_date = r.get("date_protected") or ""
+
             base = {
                 "id": r["id"],
                 "tenancy_id": r.get("tenancy_id"),
@@ -5639,42 +5669,107 @@ def api_banksia_deposits():
                 "protection_reference": r.get("protection_reference") or "",
                 "deposit_amount": round(amt, 2),
                 "tenancy_start": r.get("commencement") or "",
+                "tenancy_status": t_status,
+                "tenancy_end": end_date,
+                "date_registered": reg_date,
                 "attachments": attachments.get(r["id"], []),
             }
-            if r.get("protection_status") == "protected":
-                reg_date = r.get("date_protected") or ""
+
+            if ended:
+                # The tenancy is over. Whether the deposit was ever protected
+                # still matters — one is a deposit to release, the other is a
+                # deposit that was never protected at all — so it is carried
+                # through rather than collapsed into a single state.
+                never_protected = not protected
+                if never_protected:
+                    never_protected_count += 1
+                unprotected.append({
+                    **base,
+                    "category": "unprotected",
+                    "was_protected": protected,
+                    "never_protected": never_protected,
+                    "days_since_end": _days_between(end_date, today) if end_date else None,
+                })
+                amt_unprotected += amt
+            elif protected:
                 dtr = _days_between(r.get("commencement"), reg_date) if reg_date else None
-                late = dtr is not None and dtr > LIMIT_DAYS
+                # A registration date in the future cannot have happened, so it
+                # is a keying error, not a late registration — counting it as
+                # either on-time or late would be inventing a fact.
+                future_dated = bool(reg_date) and str(reg_date)[:10] > today
+                late = (not future_dated) and dtr is not None and dtr > LIMIT_DAYS
                 if late:
                     late_count += 1
                 registered.append({
                     **base,
-                    "date_registered": reg_date,
+                    "category": "registered",
                     "days_to_register": dtr,
                     "late": late,
+                    "future_dated": future_dated,
+                    # Protecting a deposit before the tenancy commences is
+                    # normal (it is taken at holding stage), so a negative
+                    # count is not an error — it just is not a countdown.
+                    "before_start": dtr is not None and dtr < 0,
                     "date_missing": not bool(reg_date),
                 })
-                total_reg += amt
+                amt_registered += amt
             else:
                 dss = _days_between(r.get("commencement"), today)
                 overdue_by = (dss - LIMIT_DAYS) if (dss is not None and dss > LIMIT_DAYS) else 0
-                unregistered.append({
+                if overdue_by > 0:
+                    overdue_count += 1
+                to_register.append({
                     **base,
+                    "category": "to_register",
                     "days_since_start": dss,
+                    "days_left": (LIMIT_DAYS - dss) if (dss is not None and dss <= LIMIT_DAYS) else None,
                     "days_overdue": overdue_by,
                     "overdue": overdue_by > 0,
                 })
-                total_unreg += amt
+                amt_to_register += amt
+
+        # A single tenancy asked for its own deposits: give it the flat list it
+        # expects rather than the register's category split. This call used to
+        # be ignored — the whole register came back as an object, the tenancy
+        # page read `.length` off it, and so no tenancy has ever shown its
+        # deposit. The aliases below are the names that page reads.
+        if tenancy_filter:
+            flat = []
+            for item in to_register + registered + unprotected:
+                flat.append({
+                    **item,
+                    "amount": item["deposit_amount"],
+                    "scheme": item["deposit_scheme"],
+                    "held_by": item["deposit_held_by"],
+                    "registered": item["category"] == "registered",
+                    "date_paid": item["date_registered"] or item["tenancy_start"],
+                    "status": {
+                        "to_register": "Awaiting registration",
+                        "registered": "Registered",
+                        "unprotected": "Tenancy ended",
+                    }[item["category"]],
+                })
+            return json_success(flat)
 
         return json_success({
+            "to_register": to_register,
             "registered": registered,
-            "unregistered": unregistered,
-            "registered_count": len(registered),
-            "unregistered_count": len(unregistered),
-            "total_registered_amount": round(total_reg, 2),
-            "total_unregistered_amount": round(total_unreg, 2),
+            "unprotected": unprotected,
+            "counts": {
+                "to_register": len(to_register),
+                "registered": len(registered),
+                "unprotected": len(unprotected),
+                "all": len(to_register) + len(registered) + len(unprotected),
+            },
+            "amounts": {
+                "to_register": round(amt_to_register, 2),
+                "registered": round(amt_registered, 2),
+                "unprotected": round(amt_unprotected, 2),
+                "all": round(amt_to_register + amt_registered + amt_unprotected, 2),
+            },
+            "overdue_count": overdue_count,
             "late_registered_count": late_count,
-            "overdue_unregistered_count": sum(1 for x in unregistered if x["overdue"]),
+            "never_protected_count": never_protected_count,
             "limit_days": LIMIT_DAYS,
         })
     except Exception as e:
