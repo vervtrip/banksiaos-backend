@@ -10550,9 +10550,13 @@ def api_get_current_user():
 
 @banksia_os_bp.route("/comments/<entity_type>/<int:entity_id>", methods=["GET"])
 def api_get_comments(entity_type, entity_id):
+    # "compliance" added 2026-08-06 (Norbert) so the compliance board carries the
+    # same per-row updates Monday has. Property-level: an update is about the
+    # property, so it reads the same on all nine certificate pages.
     valid = {"tenancy","tenancies","property","properties","tenant","tenants",
              "applicant","applicants","unit","units","transaction","transactions",
-             "maintenance_job","maintenance_jobs","property_owner","property_owners"}
+             "maintenance_job","maintenance_jobs","property_owner","property_owners",
+             "compliance"}
     if entity_type not in valid:
         return json_error("Invalid entity type", 400)
     sg_map = {"tenancy":"tenancies","property":"properties","applicant":"applicants",
@@ -10619,7 +10623,12 @@ def api_add_comment(entity_type, entity_id):
               "transaction":"transactions","maintenance_job":"maintenance_jobs",
               "tenant":"tenants","unit":"units","property_owner":"property_owners"}
     etype = sg_map.get(etype, etype)
-    valid = {"tenancies","properties","tenants","applicants","units","transactions","maintenance_jobs","property_owners"}
+    # This is a second, separately-worded allowlist from the one on GET (plurals
+    # only, since the singular has already been mapped by here). Adding an entity
+    # type means touching both -- "compliance" reads on one and 400s on the other
+    # otherwise, which looks like the board silently swallowing updates.
+    valid = {"tenancies","properties","tenants","applicants","units","transactions",
+             "maintenance_jobs","property_owners","compliance"}
     if etype not in valid:
         return json_error("Invalid entity type", 400)
     current_user, _ = _get_current_user()
@@ -10694,9 +10703,14 @@ def api_edit_comment(comment_id):
         import re
         mentioned = list(set(re.findall(r'@(\w+)', new_body)))
         now_iso = datetime.now(timezone.utc).isoformat()
-        # Soft-delete old comment
+        # Soft-delete the old version. It kept only is_edited until 2026-08-06,
+        # but GET filters on is_deleted, so the original stayed visible alongside
+        # the new one and a single edit showed the comment twice. The clone points
+        # back here via parent_id, so hiding the original loses no history.
+        # Never triggered in production -- nobody had used the in-app edit -- but
+        # it would have shown up the first time anyone edited a compliance update.
         db.execute(
-            "UPDATE comments SET is_edited = 1, modified = ? WHERE id = ?",
+            "UPDATE comments SET is_edited = 1, is_deleted = 1, modified = ? WHERE id = ?",
             (now_iso, comment_id)
         )
         # Insert new version with parent_id pointing to original
@@ -10784,6 +10798,28 @@ def api_upload_comment_media():
     file.save(save_path)
     url_path = f"/static/uploads/comments/{safe_name}"
     return json_success({"url": url_path, "filename": safe_name})
+
+
+@banksia_os_bp.route("/comments/counts/<entity_type>", methods=["GET"])
+def api_comment_counts(entity_type):
+    """How many updates each row of one entity type has, plus when the last one
+    landed. One request for the whole board -- a count per row would be 62 calls
+    on a page that already loads in one.
+    """
+    etype = str(entity_type or "").strip().lower()
+    if not re.fullmatch(r"[a-z_]+", etype):
+        return json_error("Invalid entity type", 400)
+    db = get_dict_db()
+    try:
+        rows = db.execute(
+            "SELECT entity_id, COUNT(*) AS n, MAX(created) AS last_at"
+            " FROM comments WHERE entity_type = ? AND is_deleted = 0"
+            " GROUP BY entity_id",
+            (etype,)
+        ).fetchall()
+    finally:
+        db.close()
+    return json_success(rows)
 
 
 @banksia_os_bp.route("/comments/recent")
