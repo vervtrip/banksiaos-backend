@@ -8613,15 +8613,27 @@ def _compliance_email_draft(row, cert, sender=None):
     greeting = landlord if landlord else "Sir or Madam"
 
     subject = "%s due for renewal - %s" % (label[:1].upper() + label[1:], prop)
+    # Deliberately no claim about what the law requires: this one wording goes out
+    # for nine different certificates whose legal footing is not the same, and a
+    # landlord who checks and finds it overstated will trust none of the rest.
     lines = [
         "Dear %s," % greeting,
         "",
-        "The %s for %s is due to expire on %s." % (label, prop, _uk_date(expiry) or "its recorded date"),
+        "We look after the compliance certificates for %s on your behalf, and one of "
+        "them is now coming up for renewal." % prop,
         "",
-        "We can arrange the renewal on your behalf. Our quote for the work is %s." % COMPLIANCE_QUOTE_TOKEN,
+        "The %s expires on %s. We would like to arrange the renewal before that date so "
+        "there is no gap in the property's compliance."
+        % (label, _uk_date(expiry) or "its recorded date"),
         "",
-        "If you are happy to go ahead, please reply to confirm and we will book the "
-        "contractor and arrange access with the tenants where it is needed.",
+        "We can book the work for you. Our quote is %s." % COMPLIANCE_QUOTE_TOKEN,
+        "",
+        "If you are happy to go ahead, just reply to confirm. We will book the contractor, "
+        "arrange access with the tenants where it is needed, and send you the new "
+        "certificate as soon as it has been issued.",
+        "",
+        "If you would rather arrange it yourself, that is no problem — please let us know, "
+        "and send us a copy of the new certificate so our records stay up to date.",
         "",
         "Kind regards,",
         (sender or COMPLIANCE_EMAIL_SENDERS[0])["name"],
