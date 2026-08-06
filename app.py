@@ -1281,8 +1281,8 @@ def api_add_user():
     email_val = data.get("email", "").strip()
     if email_val and not _email_re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', email_val):
         return jsonify({"error": "Invalid email format — enter a valid email address"}), 400
-    msg = _validate_password_strength(password)
-    if msg:
+    ok, msg = _validate_password_strength(password)
+    if not ok:
         return jsonify({"error": msg}), 400
     if new_role not in VALID_ROLES:
         new_role = "viewer"
@@ -3344,6 +3344,7 @@ def _fetch_calendar(lid, start_date, end_date):
 
 
 @app.route("/api/pricing/weekend")
+@require_auth
 def api_weekend_pricing():
     """Return weekend pricing data as JSON."""
     from datetime import date, timedelta
@@ -3407,6 +3408,7 @@ def api_weekend_pricing():
 
 
 @app.route("/pricing/weekend")
+@require_auth
 def weekend_pricing_page():
     """Render the weekend pricing dashboard page."""
     return render_template("weekend_pricing.html")
@@ -3417,6 +3419,7 @@ def weekend_pricing_page():
 # ──────────────────────────────────────────────
 
 @app.route("/api/luna-rooms/str/pricing/weekend", methods=["GET", "PUT"])
+@require_auth
 def api_luna_str_pricing():
     """Live pricing dashboard for STR — read prices & write updates to Hostaway."""
     from datetime import date, timedelta
@@ -3447,6 +3450,30 @@ def api_luna_str_pricing():
         new_min_stay = data.get("minimumStay")
         if not lid or not date_str:
             return jsonify({"success": False, "error": "listing_id and date required"}), 400
+        # Refuse a nightly rate below the agreed floor for that listing. A bad
+        # rate reaches the channels within minutes and gets booked against, so
+        # this is caught on the way in rather than spotted afterwards.
+        if new_price is not None:
+            _fi = floors.get(str(lid), {})
+            try:
+                _d = date.fromisoformat(date_str)
+                _is_weekend = _d.weekday() >= 4  # Fri/Sat carry the weekend floor
+            except ValueError:
+                return jsonify({"success": False, "error": "date must be YYYY-MM-DD"}), 400
+            _floor = _fi.get("weekend_floor") if _is_weekend else _fi.get("floor")
+            if _floor is None:
+                _floor = _fi.get("floor")
+            try:
+                _price_val = int(new_price)
+            except (TypeError, ValueError):
+                return jsonify({"success": False, "error": "price must be a whole number"}), 400
+            if _floor is not None and _price_val < int(_floor):
+                return jsonify({
+                    "success": False,
+                    "error": (f"£{_price_val} is below the agreed minimum of £{int(_floor)} for "
+                              f"{LISTING_NAMES.get(lid, lid)} on {date_str}. Raise the floor in the "
+                              "pricing settings first if this rate is genuinely intended."),
+                }), 400
         token = _get_hostaway_token()
         if not token:
             return jsonify({"success": False, "error": "No Hostaway token"}), 500
