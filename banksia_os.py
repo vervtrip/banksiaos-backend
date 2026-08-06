@@ -8629,25 +8629,87 @@ def _compliance_email_draft(row, cert, sender=None):
     return {"subject": subject, "body": "\n".join(lines), "expiry_date": expiry}
 
 
-def _email_html(body_text):
-    """Plain text in, email-safe HTML out. The editor is a plain textarea on purpose --
-    a landlord reminder is a short letter, and a rich editor would only invite
-    formatting that renders differently in every mail client."""
+# Letterhead per sending mailbox (Norbert, 2026-08-06: a bare email risks the spam
+# folder). Banksia's postal details are taken from their own letterhead on the
+# guarantor form, not invented -- an address nobody can verify in a footer is
+# worse than no address. Verv Rooms has no postal address on record here, so it
+# shows none rather than borrowing Banksia's.
+EMAIL_BRANDS = {
+    "team@banksialondon.com": {
+        "name": "Banksia London",
+        "accent": "#0f766e",
+        "address": "Banksia Limited, 29-31 Adelaide Road, London NW3 7BB",
+        "contact": "team@banksialondon.com",
+    },
+    "admin@vervrooms.com": {
+        "name": "Verv Rooms",
+        "accent": "#52BA31",
+        "address": "",
+        "contact": "admin@vervrooms.com",
+    },
+}
+
+
+def _email_html(body_text, sender=None):
+    """Plain text in, email-safe HTML out.
+
+    The editor is a plain textarea on purpose -- these are short letters, and a
+    rich editor would only invite formatting that renders differently in every
+    mail client. The letterhead is added here instead, so every email carries a
+    sender name, a footer and a reason for existing: a message that is little more
+    than an attachment is the shape spam filters are built to catch (Norbert,
+    2026-08-06).
+    """
+    brand = EMAIL_BRANDS.get(
+        ((sender or {}).get("address") or "").lower(),
+        EMAIL_BRANDS["team@banksialondon.com"],
+    )
     esc = (body_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
     paragraphs = [p.strip() for p in esc.split("\n\n")]
     html = "".join(
         "<p style=\"margin:0 0 14px;\">%s</p>" % p.replace("\n", "<br>")
         for p in paragraphs if p
     )
+    footer_address = (
+        "<div style=\"margin-top:4px;\">%s</div>" % brand["address"]
+    ) if brand["address"] else ""
     return (
-        "<!DOCTYPE html><html><body style=\"margin:0;padding:0;background:#f2f4f7;\">"
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "</head><body style=\"margin:0;padding:0;background:#f2f4f7;\">"
         "<table role=\"presentation\" width=\"100%%\" cellpadding=\"0\" cellspacing=\"0\">"
         "<tr><td align=\"center\" style=\"padding:26px 12px;\">"
         "<table role=\"presentation\" width=\"100%%\" style=\"max-width:600px;background:#ffffff;"
-        "border-radius:10px;font-family:Arial,Helvetica,sans-serif;color:#1a2233;font-size:15px;"
-        "line-height:1.6;\"><tr><td style=\"padding:28px 32px;\">%s</td></tr></table>"
-        "</td></tr></table></body></html>"
-    ) % html
+        "border-radius:12px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;"
+        "color:#1a2233;font-size:15px;line-height:1.6;"
+        "border:1px solid #e3e8ef;\">"
+        # Letterhead
+        "<tr><td style=\"background:%(accent)s;padding:18px 32px;\">"
+        "<div style=\"color:#ffffff;font-size:17px;font-weight:bold;letter-spacing:0.3px;\">"
+        "%(name)s</div>"
+        "<div style=\"color:#ffffff;opacity:0.85;font-size:12.5px;margin-top:2px;\">"
+        "Property compliance</div>"
+        "</td></tr>"
+        # Letter
+        "<tr><td style=\"padding:28px 32px 8px;\">%(body)s</td></tr>"
+        # Footer
+        "<tr><td style=\"padding:14px 32px 24px;\">"
+        "<div style=\"border-top:1px solid #e3e8ef;padding-top:14px;"
+        "font-size:11.5px;line-height:1.55;color:#6b7688;\">"
+        "This email was sent by %(name)s regarding a property we manage or maintain "
+        "compliance records for. If anything here looks wrong, reply to this email "
+        "and a person will read it."
+        "<div style=\"margin-top:8px;\">%(contact)s</div>"
+        "%(address)s"
+        "</div></td></tr>"
+        "</table></td></tr></table></body></html>"
+    ) % {
+        "accent": brand["accent"],
+        "name": brand["name"],
+        "contact": brand["contact"],
+        "address": footer_address,
+        "body": html,
+    }
 
 
 def _compliance_cert_bytes(row_id, cert):
@@ -8718,7 +8780,7 @@ def _send_via_missive(to_email, subject, body_text, sender=None, attachments=Non
     payload = {
         "drafts": {
             "subject": subject,
-            "body": _email_html(body_text),
+            "body": _email_html(body_text, sender),
             "to_fields": [{"address": to_email}],
             "from_field": {"address": sender["address"], "name": sender["name"]},
             "send": True,
@@ -8923,15 +8985,29 @@ def _certificate_email_draft(row, cert, sender=None):
     lines = [
         "Dear %s," % greeting,
         "",
-        "We have arranged the %s for %s, and the certificate is attached to this email "
-        "for your records." % (label, prop),
+        "We arrange and keep track of the compliance certificates for %s on your behalf." % prop,
+        "",
+        "The %s has now been carried out and the certificate is attached to this email. "
+        "Please keep a copy for your records — it is the document you would need to produce "
+        "if it were ever asked for." % label,
     ]
     if expiry:
-        lines += ["", "It is valid until %s. We will be in touch before then to arrange "
-                      "the renewal." % _uk_date(expiry)]
+        lines += [
+            "",
+            "The certificate is valid until %s. We hold the renewal date on file and will "
+            "contact you before it runs out, so there is nothing you need to do now."
+            % _uk_date(expiry),
+        ]
+    else:
+        lines += [
+            "",
+            "There is nothing you need to do — we hold this on file and will let you know "
+            "when it next needs attention.",
+        ]
     lines += [
         "",
-        "If you have any questions about the work or the certificate, just reply to this email.",
+        "If anything in the certificate looks wrong, or you have a question about the work "
+        "that was done, just reply to this email and we will look into it.",
         "",
         "Kind regards,",
         (sender or _sender_for(CERTIFICATE_EMAIL_SENDER))["name"],
