@@ -8527,6 +8527,17 @@ def _last_used_sender():
 # worse than a blocked send.
 COMPLIANCE_QUOTE_TOKEN = "[QUOTE]"
 
+
+def _vat_mentioned(body):
+    """Norbert, 2026-08-06: no email to a landlord mentions VAT.
+
+    Enforced at send time rather than only kept out of the templates, because the
+    body is editable -- the templates have never carried it, so a template-only
+    rule would guard the one place the word was never going to come from. Matched
+    on word boundaries so 'private' and similar are not caught.
+    """
+    return bool(re.search(r"\bvat\b", str(body or ""), re.IGNORECASE))
+
 COMPLIANCE_CERT_LABELS = {
     "gas": "gas safety certificate",
     "electric": "electrical certificate (EICR)",
@@ -8920,6 +8931,8 @@ def api_compliance_email_send(row_id):
         return json_error("The email is empty", 422)
     if COMPLIANCE_QUOTE_TOKEN in body:
         return json_error("Replace %s with the quote before sending" % COMPLIANCE_QUOTE_TOKEN, 422)
+    if _vat_mentioned(body):
+        return json_error("These emails do not mention VAT — please take it out of the wording", 422)
 
     db = get_dict_db()
     try:
@@ -9105,6 +9118,8 @@ def api_compliance_certificate_email_send(row_id):
     body = str(data.get("body", "")).strip()
     if not body:
         return json_error("The email is empty", 422)
+    if _vat_mentioned(body):
+        return json_error("These emails do not mention VAT — please take it out of the wording", 422)
 
     db = get_dict_db()
     try:
