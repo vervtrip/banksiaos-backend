@@ -17757,7 +17757,7 @@ def api_maintenance_bulk_status():
 # against Banksia for work billed on to a landlord, so neither party comes from
 # the job. The addresses and the bank details are his ZOLT-322 template.
 INVOICE_FROM = ["Zolt X", "2 Claremont Square", "N1 9LY", "London"]
-INVOICE_BILL_TO = ["Banksia", "29-31 Adelaide Road", "London"]
+INVOICE_BILL_TO = ["Banksia", "29-31 Adelaide Road", "NW3 3QB", "London"]
 INVOICE_PAYMENT = [("Sort Code", "23-08-01"), ("Acc Number", "26242135")]
 
 # assets/, not media/ -- media is gitignored because it holds tenant documents,
