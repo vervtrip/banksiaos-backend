@@ -1406,6 +1406,9 @@ def api_create_maintenance_job():
                     "move it across once it has them." % _join_words(missing), 422)
         if wanted and wanted in MAINT_STATUSES:
             db.execute("UPDATE maintenance_jobs SET status = ? WHERE id = ?", [wanted, job_id])
+            if wanted.upper() == "COMPLETED":
+                db.execute("UPDATE maintenance_jobs SET completed_date = datetime('now') "
+                           "WHERE id = ? AND completed_date IS NULL", [job_id])
             db.commit()
 
         # A Cost LL supplied at creation is a decision (the compliance booking
@@ -17736,6 +17739,245 @@ def api_maintenance_bulk_status():
 
     return json_success({"status": status, "moved": moved, "refused": refused,
                          "moved_count": len(moved), "refused_count": len(refused)})
+
+
+# ─── LL invoice ──────────────────────────────────────────────────────────────
+# A printable invoice per completed job (Norbert, 2026-08-08), modelled on the
+# Zolt invoice he sent. Generated on demand rather than stored: the job is the
+# record, and a stored PDF would go stale the moment a figure is corrected.
+
+INVOICE_BILL_TO = [
+    "Verv Rooms",
+    "35a Highbury Corner",
+    "N5 1RA",
+    "London",
+]
+
+# Banksia green, so the document does not look like it came from somewhere else.
+INVOICE_ACCENT = (0.32, 0.73, 0.19)
+INVOICE_INK = (0.11, 0.13, 0.16)
+INVOICE_MUTED = (0.45, 0.49, 0.55)
+
+
+def _money(n):
+    return "£%s" % format(float(n or 0), ",.2f")
+
+
+def _invoice_date(job):
+    """The day the work was signed off.
+
+    Falls back to the day the job was raised, never to "today": an invoice that
+    carries a different date each time it is printed is not an invoice. Older
+    jobs completed before the board stamped a completion date rely on this.
+    """
+    from datetime import datetime
+    for field in ("completed_date", "created"):
+        raw = str(job.get(field) or "").strip()
+        for fmt, width in (("%Y-%m-%d %H:%M:%S", 19), ("%Y-%m-%d", 10)):
+            try:
+                return datetime.strptime(raw[:width], fmt)
+            except ValueError:
+                continue
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Europe/London"))
+    except Exception:
+        return datetime.now()
+
+
+def _invoice_pdf_bytes(job):
+    """Draw the invoice. Kept to one page: it is one job, and an invoice that
+    runs over is an invoice somebody has to check twice."""
+    import io as _io
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas as rl_canvas
+
+    buf = _io.BytesIO()
+    W, H = A4
+    c = rl_canvas.Canvas(buf, pagesize=A4)
+    c.setTitle("Invoice %s" % (job.get("reference") or ""))
+
+    L, R = 48, W - 48
+
+    def ink(col=INVOICE_INK):
+        c.setFillColorRGB(*col)
+
+    # Accent rule across the head.
+    c.setFillColorRGB(*INVOICE_ACCENT)
+    c.rect(0, H - 10, W, 10, stroke=0, fill=1)
+
+    y = H - 62
+    ink()
+    c.setFont("Helvetica-Bold", 26)
+    c.drawString(L, y, "INVOICE")
+
+    number = "INV-%s" % (job.get("reference") or job.get("id"))
+    when = _invoice_date(job)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawRightString(R, y + 8, number)
+    ink(INVOICE_MUTED)
+    c.setFont("Helvetica", 10)
+    c.drawRightString(R, y - 6, when.strftime("%-d %b %Y") if hasattr(when, "strftime") else "")
+
+    y -= 24
+    c.setStrokeColorRGB(0.85, 0.87, 0.89)
+    c.setLineWidth(1)
+    c.line(L, y, R, y)
+
+    # ── Bill to (left) and From (right) ──
+    y -= 30
+    top = y
+    ink(INVOICE_MUTED)
+    c.setFont("Helvetica-Bold", 8.5)
+    c.drawString(L, y, "BILL TO")
+    ink()
+    c.setFont("Helvetica-Bold", 11.5)
+    y -= 16
+    c.drawString(L, y, INVOICE_BILL_TO[0])
+    c.setFont("Helvetica", 10.5)
+    for line in INVOICE_BILL_TO[1:]:
+        y -= 14
+        c.drawString(L, y, line)
+
+    ry = top
+    ink(INVOICE_MUTED)
+    c.setFont("Helvetica-Bold", 8.5)
+    c.drawRightString(R, ry, "FROM")
+    ink()
+    c.setFont("Helvetica-Bold", 11.5)
+    ry -= 16
+    c.drawRightString(R, ry, str(job.get("contractor") or "Contractor not recorded"))
+    ink(INVOICE_MUTED)
+    c.setFont("Helvetica", 10.5)
+    ry -= 14
+    c.drawRightString(R, ry, "Reference %s" % (job.get("reference") or ""))
+
+    # ── What the invoice is for ──
+    y = min(y, ry) - 34
+    ink(INVOICE_MUTED)
+    c.setFont("Helvetica-Bold", 8.5)
+    c.drawString(L, y, "WORK CARRIED OUT")
+    y -= 17
+    ink()
+    c.setFont("Helvetica-Bold", 12)
+    title = str(job.get("title") or "Maintenance")
+    c.drawString(L, y, title[:78])
+
+    where = str(job.get("property_name") or "").strip()
+    unit = str(job.get("unit") or "").strip()
+    if unit:
+        where = ("%s, %s" % (where, unit)).strip(", ")
+    if where:
+        y -= 15
+        ink(INVOICE_MUTED)
+        c.setFont("Helvetica", 10.5)
+        c.drawString(L, y, where[:88])
+
+    done = str(job.get("completed_date") or "")[:10]
+    if done:
+        y -= 14
+        c.setFont("Helvetica", 9.5)
+        c.drawString(L, y, "Completed %s" % done)
+
+    # ── Items ──
+    y -= 34
+    c.setFillColorRGB(0.96, 0.97, 0.98)
+    c.rect(L, y - 6, R - L, 24, stroke=0, fill=1)
+    ink(INVOICE_MUTED)
+    c.setFont("Helvetica-Bold", 8.5)
+    c.drawString(L + 12, y + 3, "ITEMS")
+    c.drawRightString(R - 12, y + 3, "AMOUNT")
+
+    labour = float(job.get("labour_cost") or 0)
+    materials = float(job.get("materials_cost") or 0)
+    total = round(labour + materials, 2)
+
+    y -= 14
+    for label, amount in (("Labour", labour), ("Materials", materials)):
+        y -= 22
+        ink()
+        c.setFont("Helvetica", 11)
+        c.drawString(L + 12, y, label)
+        c.drawRightString(R - 12, y, _money(amount))
+        c.setStrokeColorRGB(0.91, 0.93, 0.94)
+        c.setLineWidth(0.6)
+        c.line(L + 12, y - 8, R - 12, y - 8)
+
+    y -= 30
+    c.setStrokeColorRGB(*INVOICE_ACCENT)
+    c.setLineWidth(1.6)
+    c.line(L + 12, y + 14, R - 12, y + 14)
+    ink()
+    c.setFont("Helvetica-Bold", 13)
+    c.drawString(L + 12, y - 4, "Total Due")
+    c.drawRightString(R - 12, y - 4, _money(total))
+
+    # ── Payment, directly under the total where it is read ──
+    y -= 44
+    c.setFillColorRGB(0.96, 0.97, 0.98)
+    c.rect(L, y - 34, R - L, 52, stroke=0, fill=1)
+    ink(INVOICE_MUTED)
+    c.setFont("Helvetica-Bold", 8.5)
+    c.drawString(L + 12, y + 6, "PAYMENT")
+    ink()
+    c.setFont("Helvetica", 10)
+    c.drawString(L + 12, y - 10, "Please quote %s on payment." % number)
+    ink(INVOICE_MUTED)
+    c.setFont("Helvetica", 9)
+    c.drawString(L + 12, y - 25, "Bank details to be confirmed.")
+
+    # ── Foot ──
+    c.setStrokeColorRGB(0.85, 0.87, 0.89)
+    c.setLineWidth(1)
+    c.line(L, 74, R, 74)
+    ink(INVOICE_MUTED)
+    c.setFont("Helvetica-Oblique", 9.5)
+    c.drawString(L, 56, "Thank you for your business.")
+    c.setFont("Helvetica", 8.5)
+    c.drawRightString(R, 56, "%s · %s" % (number, INVOICE_BILL_TO[0]))
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+@banksia_os_bp.route("/maintenance/jobs/<int:job_id>/ll-invoice", methods=["GET"])
+def api_maintenance_ll_invoice(job_id):
+    """The invoice for a completed job, as a PDF.
+
+    Completed only: an invoice for work still being argued about is a document
+    somebody will send by accident.
+    """
+    denied = _require_super_admin()
+    if denied:
+        return denied
+
+    db = get_dict_db()
+    try:
+        job = db.execute(
+            """SELECT mj.*,
+                      COALESCE(NULLIF(CASE WHEN LOWER(p.name) IN ('multi','single') THEN ''
+                                           ELSE p.name END, ''),
+                               p.address_line_1, p.ref, p.name) AS property_name
+               FROM maintenance_jobs mj
+               LEFT JOIN properties p ON mj.property_id = p.id
+               WHERE mj.id = ?""", [job_id]
+        ).fetchone()
+        if not job:
+            return json_error("Job not found", 404)
+        job = dict(job)
+        if str(job.get("status") or "").strip().upper() != "COMPLETED":
+            return json_error("Only a completed job has an invoice.", 422)
+        pdf = _invoice_pdf_bytes(job)
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+    from flask import Response
+    return Response(pdf, mimetype="application/pdf", headers={
+        "Content-Disposition": 'inline; filename="Invoice-%s.pdf"' % (job.get("reference") or job_id),
+    })
 
 
 # ─── Landlord Report ─────────────────────────────────────────────────────────
