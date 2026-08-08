@@ -1146,7 +1146,15 @@ MAINT_REF_PREFIX = "REF"
 # (Norbert, 2026-08-07). Materials of zero is a real answer, so the test is
 # "has a figure been entered", not "is it more than nothing" -- which is why new
 # jobs leave the cost columns NULL rather than defaulting them to 0.
-MAINT_LIVE_REQUIRED = ("contractor", "labour_cost", "materials_cost", "photo_paths")
+# "type" is in the list because it decides whether evidence is required at all,
+# so a request that changes the type has to be judged on the new one.
+MAINT_LIVE_REQUIRED = ("contractor", "labour_cost", "materials_cost", "photo_paths", "type")
+
+# A certificate job produces the certificate, and that is filed against the
+# property on the compliance board rather than photographed here (Norbert,
+# 2026-08-08). Asking for a photo as well only produces a token one taken to
+# clear the block, which is worse than not asking.
+MAINT_NO_EVIDENCE_TYPES = {"certificate"}
 
 
 def _next_maintenance_reference(db):
@@ -1193,6 +1201,11 @@ def _is_management_fee(db, property_id):
     return "management fee" in str(dict(row or {}).get("management_type") or "").strip().lower()
 
 
+def _needs_evidence(job):
+    """Whether this job has to show its work before it can go Live."""
+    return str(job.get("type") or "").strip().lower() not in MAINT_NO_EVIDENCE_TYPES
+
+
 def _live_blockers(job):
     """What is stopping this job going Live, in words a person can act on."""
     missing = []
@@ -1202,7 +1215,7 @@ def _live_blockers(job):
         missing.append("the labour")
     if job.get("materials_cost") is None:
         missing.append("the materials")
-    if not [p for p in str(job.get("photo_paths") or "").split(",") if p.strip()]:
+    if _needs_evidence(job) and not [p for p in str(job.get("photo_paths") or "").split(",") if p.strip()]:
         missing.append("evidence")
     return missing
 
@@ -1401,7 +1414,7 @@ def api_maintenance_job(job_id):
         # exactly as it was, not half-applied.
         if str(data.get("status") or "").strip().upper() == "LIVE":
             current = db.execute(
-                "SELECT contractor, labour_cost, materials_cost, photo_paths "
+                "SELECT contractor, labour_cost, materials_cost, photo_paths, type "
                 "FROM maintenance_jobs WHERE id = ?",
                 [job_id]
             ).fetchone()
@@ -17342,7 +17355,10 @@ def api_quote_round_reopen(row_id, cert):
 # Norbert, 2026-08-07. Four groups, one line per job, and the landlord's price
 # derived from the labour rather than typed twice.
 
-MAINT_BOARD_GROUPS = ["URGENT", "TO BE ARRANGED", "LIVE", "COMPLETED"]
+# Cancelled is a group rather than a delete (Norbert, 2026-08-08). A job called
+# off still has to be answerable for -- who raised it, against which property and
+# what it would have cost. Deleting it loses that, so cancelling moves it aside.
+MAINT_BOARD_GROUPS = ["URGENT", "TO BE ARRANGED", "LIVE", "COMPLETED", "CANCELLED"]
 
 # What we charge the landlord on top of the LABOUR only. Materials are passed on
 # at cost -- marking them up as well was never the agreement, and it is the kind
@@ -17508,6 +17524,197 @@ def api_maintenance_evidence_delete(job_id):
     finally:
         db.close()
     return json_success({"photo_paths": ",".join(kept)})
+
+
+# ─── Acting on several jobs at once ──────────────────────────────────────────
+
+
+@banksia_os_bp.route("/maintenance/jobs/bulk-status", methods=["POST"])
+def api_maintenance_bulk_status():
+    """Move a set of jobs into one group -- cancelling a handful being the point
+    of it (Norbert, 2026-08-08).
+
+    Every job is judged on its own. One that cannot go where it is being sent is
+    refused *by name* and the rest still move, because the alternative is a
+    selection of twenty failing on account of one and no way to see which.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    raw_ids = data.get("ids") or []
+    ids = []
+    for i in raw_ids:
+        try:
+            ids.append(int(i))
+        except (TypeError, ValueError):
+            continue
+    status = str(data.get("status") or "").strip().upper()
+
+    if not ids:
+        return json_error("No jobs selected", 400)
+    if status not in MAINT_BOARD_GROUPS:
+        return json_error("%s is not a group on this board" % (status or "That"), 400)
+
+    db = get_dict_db()
+    moved, refused = [], []
+    try:
+        _ensure_maintenance_cost_ll(db)
+        for job_id in ids:
+            row = db.execute(
+                "SELECT id, reference, status, contractor, labour_cost, materials_cost, "
+                "photo_paths, type FROM maintenance_jobs WHERE id = ?", [job_id]
+            ).fetchone()
+            if not row:
+                refused.append({"id": job_id, "reference": "#%s" % job_id,
+                                "reason": "no longer on the board"})
+                continue
+            row = dict(row)
+            ref = row.get("reference") or "#%s" % job_id
+
+            if str(row.get("status") or "").strip().upper() == status:
+                # Already where it is being sent. Counted as moved rather than
+                # skipped: somebody who cancels five and is told "three moved"
+                # reasonably wonders what happened to the other two.
+                moved.append({"id": job_id, "reference": ref})
+                continue
+
+            if status == "LIVE":
+                missing = _live_blockers(row)
+                if missing:
+                    refused.append({"id": job_id, "reference": ref,
+                                    "reason": "still needs %s" % _join_words(missing)})
+                    continue
+
+            db.execute(
+                "UPDATE maintenance_jobs SET status = ?, modified = datetime('now') WHERE id = ?",
+                [status, job_id]
+            )
+            if status == "COMPLETED":
+                db.execute(
+                    "UPDATE maintenance_jobs SET completed_date = datetime('now') "
+                    "WHERE id = ? AND completed_date IS NULL", [job_id]
+                )
+            db.commit()
+            _sync_cost_ll(db, job_id, {})
+            try:
+                db.execute("UPDATE maintenance_jobs SET sync_pending = 1 WHERE id = ?", [job_id])
+                db.commit()
+            except Exception:
+                db.rollback()
+            moved.append({"id": job_id, "reference": ref})
+    except Exception as e:
+        db.rollback()
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+    return json_success({"status": status, "moved": moved, "refused": refused,
+                         "moved_count": len(moved), "refused_count": len(refused)})
+
+
+# ─── Contractor invoices ─────────────────────────────────────────────────────
+# Separate from the evidence photos because the two answer different questions
+# and are read by different people: evidence settles whether the work happened,
+# the invoice settles what we were actually charged for it (Norbert, 2026-08-08).
+
+MAINT_INVOICE_DIR = os.path.join(MAINT_EVIDENCE_DIR, "invoices")
+os.makedirs(MAINT_INVOICE_DIR, exist_ok=True)
+
+# Invoices arrive as a PDF or a photograph of a paper one. No video: there is no
+# such thing as a video invoice, and allowing it only invites 60MB of nothing.
+_INVOICE_ALLOWED_EXT = {".pdf", ".jpg", ".jpeg", ".png", ".webp", ".heic"}
+_INVOICE_MAX_BYTES = 25 * 1024 * 1024
+
+
+@banksia_os_bp.route("/maintenance/jobs/<int:job_id>/invoice", methods=["POST"])
+def api_maintenance_invoice_upload(job_id):
+    """Attach the contractor's invoice to a job. Appended, never replaced -- a
+    job split across two invoices is ordinary."""
+    import secrets
+    db = get_dict_db()
+    combined = ""
+    try:
+        job = db.execute(
+            "SELECT id, invoice_paths FROM maintenance_jobs WHERE id = ?", [job_id]
+        ).fetchone()
+        if not job:
+            return json_error("Job not found", 404)
+        job = dict(job)
+
+        files = request.files.getlist("file")
+        if not files:
+            return json_error("No file provided (use field 'file')", 400)
+
+        added = []
+        for f in files:
+            if not f or not f.filename:
+                continue
+            name = _evidence_name(f.filename)
+            ext = os.path.splitext(name)[1].lower()
+            if ext not in _INVOICE_ALLOWED_EXT:
+                return json_error(
+                    "Cannot attach %s as an invoice — allowed: %s"
+                    % (ext or "that file", ", ".join(sorted(_INVOICE_ALLOWED_EXT))), 415)
+            payload = f.read()
+            if not payload:
+                return json_error("%s is empty" % name, 400)
+            if len(payload) > _INVOICE_MAX_BYTES:
+                return json_error("%s is larger than 25MB" % name, 413)
+            stored = "%s_%s_%s" % (job_id, secrets.token_hex(4), name)
+            with open(os.path.join(MAINT_INVOICE_DIR, stored), "wb") as fh:
+                fh.write(payload)
+            added.append("/api/banksia-os/maintenance/invoice/%s" % stored)
+
+        if not added:
+            return json_error("Nothing to attach", 400)
+
+        existing = [p.strip() for p in str(job.get("invoice_paths") or "").split(",") if p.strip()]
+        combined = ",".join(existing + added)
+        db.execute(
+            "UPDATE maintenance_jobs SET invoice_paths = ?, modified = datetime('now') WHERE id = ?",
+            [combined, job_id]
+        )
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+    return json_success({"invoice_paths": combined, "added": added})
+
+
+@banksia_os_bp.route("/maintenance/invoice/<path:stored>", methods=["GET"])
+def api_maintenance_invoice_file(stored):
+    name = _evidence_name(stored)
+    path = os.path.join(MAINT_INVOICE_DIR, name)
+    if not os.path.exists(path):
+        return json_error("Not found", 404)
+    from flask import send_file
+    return send_file(path, as_attachment=False)
+
+
+@banksia_os_bp.route("/maintenance/jobs/<int:job_id>/invoice", methods=["DELETE"])
+def api_maintenance_invoice_delete(job_id):
+    """Take one invoice off a job. The file stays on disk -- an invoice removed
+    by a mis-click is a document we are supposed to be able to produce."""
+    target = (request.args.get("path") or "").strip()
+    if not target:
+        return json_error("Which file?", 400)
+    db = get_dict_db()
+    try:
+        job = db.execute(
+            "SELECT invoice_paths FROM maintenance_jobs WHERE id = ?", [job_id]
+        ).fetchone()
+        if not job:
+            return json_error("Job not found", 404)
+        kept = [p.strip() for p in str(dict(job).get("invoice_paths") or "").split(",")
+                if p.strip() and p.strip() != target]
+        db.execute(
+            "UPDATE maintenance_jobs SET invoice_paths = ?, modified = datetime('now') WHERE id = ?",
+            [",".join(kept), job_id]
+        )
+        db.commit()
+    finally:
+        db.close()
+    return json_success({"invoice_paths": ",".join(kept)})
 
 
 @banksia_os_bp.route("/maintenance/jobs/<int:job_id>", methods=["DELETE"])
