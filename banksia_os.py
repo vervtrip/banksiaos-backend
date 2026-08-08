@@ -17580,7 +17580,9 @@ def _ensure_reporter_columns(db):
     communal report gives you no way back to the person who made it.
     """
     for ddl in ("ALTER TABLE maintenance_jobs ADD COLUMN reporter_phone TEXT DEFAULT ''",
-                "ALTER TABLE maintenance_jobs ADD COLUMN reporter_unit TEXT DEFAULT ''"):
+                "ALTER TABLE maintenance_jobs ADD COLUMN reporter_unit TEXT DEFAULT ''",
+                "ALTER TABLE maintenance_jobs ADD COLUMN reporter_tenancy_ref TEXT DEFAULT ''",
+                "ALTER TABLE maintenance_jobs ADD COLUMN reporter_tenancy_status TEXT DEFAULT ''"):
         try:
             db.execute(ddl)
             db.commit()
@@ -17598,7 +17600,8 @@ def _tenant_at(db, property_id, unit_ref):
     if not unit_ref:
         return None
     row = db.execute(
-        """SELECT t.first_name, t.last_name, t.email, t.mobile, t.phone_home, u.unit_ref
+        """SELECT t.first_name, t.last_name, t.email, t.mobile, t.phone_home, u.unit_ref,
+                  ten.ref AS tenancy_ref, ten.status AS tenancy_status
            FROM units u
            JOIN tenants t ON t.unit_id = u.id
            LEFT JOIN tenancies ten ON t.tenancy_id = ten.id
@@ -17619,6 +17622,10 @@ def _tenant_at(db, property_id, unit_ref):
         "email": (row.get("email") or "").strip(),
         "phone": (row.get("mobile") or row.get("phone_home") or "").strip(),
         "unit": (row.get("unit_ref") or "").strip(),
+        "tenancy_ref": (row.get("tenancy_ref") or "").strip(),
+        # Carried so the job page can say "this tenancy is not live" rather than
+        # letting somebody assume the name belongs to a current tenant.
+        "tenancy_status": (row.get("tenancy_status") or "").strip(),
     }
 
 
@@ -17896,8 +17903,9 @@ def api_public_report_job():
             """INSERT INTO maintenance_jobs
                (reference, title, description, type, priority, status, location,
                 unit, property_id, address, emergency, source, bill_ll,
-                reporter_name, reporter_email, reporter_phone, reporter_unit)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'tenant', 0, ?, ?, ?, ?)""",
+                reporter_name, reporter_email, reporter_phone, reporter_unit,
+                reporter_tenancy_ref, reporter_tenancy_status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'tenant', 0, ?, ?, ?, ?, ?, ?)""",
             [reference, title, description, job_type or None,
              "High" if emergency else "Medium",
              # An emergency does not wait in the intake pile to be noticed
@@ -17907,7 +17915,8 @@ def api_public_report_job():
              MAINT_AREA_BOARD.get(area, ""), board_unit,
              property_id, prop.get("name"), emergency,
              (tenant or {}).get("name", ""), (tenant or {}).get("email", ""),
-             (tenant or {}).get("phone", ""), unit]
+             (tenant or {}).get("phone", ""), unit,
+             (tenant or {}).get("tenancy_ref", ""), (tenant or {}).get("tenancy_status", "")]
         )
         db.commit()
         job_id = cur.lastrowid
