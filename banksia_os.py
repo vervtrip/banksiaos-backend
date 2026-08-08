@@ -1209,6 +1209,18 @@ def _needs_evidence(job):
     return str(job.get("type") or "").strip().lower() not in MAINT_NO_EVIDENCE_TYPES
 
 
+# Somebody did the work and somebody has to be paid for it. A job closed with
+# nobody named cannot be matched to an invoice later (Norbert, 2026-08-08).
+MAINT_COMPLETED_REQUIRED = ("contractor",)
+
+
+def _completed_blockers(job):
+    """What is stopping this job being closed."""
+    if not str(job.get("contractor") or "").strip():
+        return ["a contractor"]
+    return []
+
+
 def _live_blockers(job):
     """What is stopping this job going Live, in words a person can act on."""
     missing = []
@@ -1376,6 +1388,14 @@ def api_create_maintenance_job():
             db.commit()
 
         wanted = str(data.get("status") or "").strip()
+        if wanted.upper() == "COMPLETED":
+            missing = _completed_blockers(dict(data))
+            if missing:
+                db.execute("DELETE FROM maintenance_jobs WHERE id = ?", [job_id])
+                db.commit()
+                return json_error(
+                    "A job cannot be raised straight into Completed — it still needs %s."
+                    % _join_words(missing), 422)
         if wanted.upper() == "LIVE":
             missing = _live_blockers(dict(data))
             if missing:
@@ -1470,6 +1490,20 @@ def api_maintenance_job(job_id):
 
         # Guard before writing, not after: a rejected move must leave the job
         # exactly as it was, not half-applied.
+        if str(data.get("status") or "").strip().upper() == "COMPLETED":
+            current = db.execute(
+                "SELECT contractor FROM maintenance_jobs WHERE id = ?", [job_id]
+            ).fetchone()
+            merged = dict(current or {})
+            for f in MAINT_COMPLETED_REQUIRED:
+                if f in data:
+                    merged[f] = data[f]
+            missing = _completed_blockers(merged)
+            if missing:
+                return json_error(
+                    "This job cannot be marked Completed — it still needs %s."
+                    % _join_words(missing), 422)
+
         if str(data.get("status") or "").strip().upper() == "LIVE":
             current = db.execute(
                 "SELECT contractor, labour_cost, materials_cost, photo_paths, type "
@@ -17658,6 +17692,12 @@ def api_maintenance_bulk_status():
                 moved.append({"id": job_id, "reference": ref})
                 continue
 
+            if status == "COMPLETED":
+                missing = _completed_blockers(row)
+                if missing:
+                    refused.append({"id": job_id, "reference": ref,
+                                    "reason": "still needs %s" % _join_words(missing)})
+                    continue
             if status == "LIVE":
                 missing = _live_blockers(row)
                 if missing:
@@ -17696,6 +17736,105 @@ def api_maintenance_bulk_status():
 
     return json_success({"status": status, "moved": moved, "refused": refused,
                          "moved_count": len(moved), "refused_count": len(refused)})
+
+
+# ─── Landlord Report ─────────────────────────────────────────────────────────
+
+
+def _require_super_admin():
+    """Refuse anyone who is not super_admin. Returns a response, or None to carry on.
+
+    Hiding the tab in the browser is not a control -- the endpoint has to say no
+    on its own (Norbert, 2026-08-08). This report puts what we charge a landlord
+    next to what the work cost us, which is the whole reason it is restricted.
+    """
+    _, role = _get_current_user()
+    if str(role or "").strip().lower() != "super_admin":
+        return json_error("This report is restricted to super admins.", 403)
+    return None
+
+
+@banksia_os_bp.route("/maintenance/landlord-report", methods=["GET"])
+def api_maintenance_landlord_report():
+    """Maintenance grouped by the landlord who owns the property.
+
+    Cancelled work is left out -- it never happened, so it cannot be reported on.
+    Money is only counted where Bill LL is ticked: an unticked job is one we are
+    carrying, and adding it to a landlord's column would misstate what they owe.
+    """
+    denied = _require_super_admin()
+    if denied:
+        return denied
+
+    db = get_dict_db()
+    try:
+        rows = db.execute(
+            """SELECT mj.id, mj.reference, mj.title, mj.status, mj.type, mj.contractor,
+                      mj.start_date, mj.completed_date, mj.labour_cost, mj.materials_cost,
+                      mj.bill_ll, mj.cost_ll, mj.unit,
+                      COALESCE(NULLIF(CASE WHEN LOWER(p.name) IN ('multi','single') THEN ''
+                                           ELSE p.name END, ''),
+                               p.address_line_1, p.ref, p.name) AS property_name,
+                      p.property_owner_name, p.owner_company, p.management_type
+               FROM maintenance_jobs mj
+               LEFT JOIN properties p ON mj.property_id = p.id
+               WHERE UPPER(COALESCE(mj.status, '')) != 'CANCELLED'
+               ORDER BY mj.created DESC"""
+        ).fetchall()
+
+        by_landlord = {}
+        for r in rows:
+            r = dict(r)
+            name = (str(r.get("property_owner_name") or "").strip()
+                    or str(r.get("owner_company") or "").strip()
+                    or "No landlord on the property")
+            billed = bool(r.get("bill_ll"))
+            ours = round(float(r.get("labour_cost") or 0) + float(r.get("materials_cost") or 0), 2)
+            charged = round(float(r.get("cost_ll") or 0), 2) if billed else 0.0
+
+            entry = by_landlord.setdefault(name, {
+                "landlord": name, "properties": set(), "jobs": [],
+                "our_cost": 0.0, "charged": 0.0, "billed_jobs": 0,
+            })
+            entry["properties"].add(r.get("property_name") or "—")
+            entry["our_cost"] = round(entry["our_cost"] + ours, 2)
+            entry["charged"] = round(entry["charged"] + charged, 2)
+            if billed:
+                entry["billed_jobs"] += 1
+            entry["jobs"].append({
+                "id": r["id"], "reference": r.get("reference"), "title": r.get("title"),
+                "status": r.get("status"), "type": r.get("type"),
+                "contractor": r.get("contractor"), "property_name": r.get("property_name"),
+                "unit": r.get("unit"), "management_type": r.get("management_type"),
+                "start_date": r.get("start_date"), "completed_date": r.get("completed_date"),
+                "labour_cost": r.get("labour_cost"), "materials_cost": r.get("materials_cost"),
+                "bill_ll": billed, "our_cost": ours, "charged": charged,
+                "margin": round(charged - ours, 2) if billed else 0.0,
+            })
+
+        landlords = []
+        for e in by_landlord.values():
+            e["property_count"] = len(e["properties"])
+            e["properties"] = sorted(e["properties"])
+            e["job_count"] = len(e["jobs"])
+            e["margin"] = round(e["charged"] - e["our_cost"], 2)
+            landlords.append(e)
+        # Most billed first: the ones worth reading are at the top.
+        landlords.sort(key=lambda e: (-e["charged"], e["landlord"]))
+
+        totals = {
+            "landlords": len(landlords),
+            "jobs": sum(e["job_count"] for e in landlords),
+            "billed_jobs": sum(e["billed_jobs"] for e in landlords),
+            "our_cost": round(sum(e["our_cost"] for e in landlords), 2),
+            "charged": round(sum(e["charged"] for e in landlords), 2),
+        }
+        totals["margin"] = round(totals["charged"] - totals["our_cost"], 2)
+        return json_success({"landlords": landlords, "totals": totals})
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
 
 
 # ─── Contractor invoices ─────────────────────────────────────────────────────
