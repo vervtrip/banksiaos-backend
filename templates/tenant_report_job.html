@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Report a problem — Banksia</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,sans-serif;background:#f4f6fb;color:#0b1220;min-height:100vh;-webkit-font-smoothing:antialiased}
+.center{min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:20px}
+.card{background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(15,23,42,.12);width:100%;max-width:480px;padding:36px 32px;margin:24px 0}
+.brand{text-align:center;margin-bottom:26px}
+.brand .logo{width:56px;height:56px;border-radius:14px;background:#111827;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:24px;margin:0 auto 14px}
+.brand h1{font-size:23px;font-weight:800;letter-spacing:-.5px}
+.brand p{color:#6b7688;font-size:13px;margin-top:5px;line-height:1.55}
+.fg{margin-bottom:16px}
+.fg label{display:block;font-size:12px;font-weight:600;color:#475569;margin-bottom:6px}
+.fg label .req{color:#dc2626;margin-left:2px}
+.fg label .opt{color:#94a3b8;font-weight:500;margin-left:4px}
+.fg input,.fg select,.fg textarea{width:100%;padding:12px 14px;border-radius:11px;border:1px solid #e2e8f0;font-size:14px;font-family:inherit;outline:none;background:#fff;transition:border .15s,box-shadow .15s}
+.fg textarea{min-height:104px;resize:vertical;line-height:1.5}
+.fg input:focus,.fg select:focus,.fg textarea:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+.fg .hint{font-size:11px;color:#94a3b8;margin-top:5px;line-height:1.5}
+.check{display:flex;align-items:flex-start;gap:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:13px 14px;margin-bottom:18px;cursor:pointer}
+.check input{width:18px;height:18px;margin-top:1px;accent-color:#ea580c;flex-shrink:0;cursor:pointer}
+.check .t{font-size:13px;font-weight:700;color:#9a3412}
+.check .s{font-size:11.5px;color:#b45309;margin-top:2px;line-height:1.5}
+.drop{border:1.5px dashed #cbd5e1;border-radius:12px;padding:20px 14px;text-align:center;cursor:pointer;background:#f8fafc;transition:border .15s,background .15s}
+.drop:hover{border-color:#6366f1;background:#f5f3ff}
+.drop .big{font-size:13px;font-weight:700;color:#334155}
+.drop .small{font-size:11.5px;color:#94a3b8;margin-top:3px}
+.files{margin-top:10px;display:none}
+.file{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:6px;font-size:12.5px;background:#fff}
+.file .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file .sz{color:#94a3b8;font-size:11px}
+.file .x{border:none;background:transparent;color:#94a3b8;cursor:pointer;font-size:15px;line-height:1;padding:0 2px}
+.file .x:hover{color:#dc2626}
+.btn{width:100%;padding:14px;border-radius:11px;background:#111827;color:#fff;font-size:14.5px;font-weight:700;border:none;cursor:pointer;font-family:inherit;transition:background .15s}
+.btn:hover{background:#000}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.err{background:#fee2e2;color:#b91c1c;padding:11px 13px;border-radius:10px;font-size:13px;margin-bottom:14px;display:none;line-height:1.5}
+.spinner{display:inline-block;width:15px;height:15px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:-2px;margin-right:7px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.done{text-align:center;padding:14px 0}
+.done .tick{width:62px;height:62px;border-radius:50%;background:#dcfce7;color:#15803d;font-size:31px;display:flex;align-items:center;justify-content:center;margin:0 auto 18px}
+.done h2{font-size:21px;font-weight:800;margin-bottom:9px}
+.done p{font-size:13.5px;color:#475569;line-height:1.6}
+.done .ref{display:inline-block;margin:16px 0 4px;padding:11px 20px;border-radius:11px;background:#f1f5f9;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:17px;font-weight:700;letter-spacing:.5px}
+.footer{text-align:center;margin-top:18px;font-size:11.5px;color:#94a3b8;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="center">
+  <div class="card">
+
+    <div id="form-view">
+      <div class="brand">
+        <div class="logo">B</div>
+        <h1>Report a problem</h1>
+        <p>Tell us what needs fixing and we will pick it up. A photo helps us send the right person first time.</p>
+      </div>
+
+      <div class="err" id="err"></div>
+
+      <div class="fg">
+        <label>Description <span class="req">*</span></label>
+        <textarea id="description" placeholder="What is wrong, and where in the property is it?"></textarea>
+        <div class="hint">The more detail the better — when it started, whether it is getting worse.</div>
+      </div>
+
+      <div class="fg">
+        <label>Property <span class="req">*</span></label>
+        <select id="property"><option value="">Loading…</option></select>
+      </div>
+
+      <div class="fg">
+        <label>Room or unit <span class="opt">optional</span></label>
+        <select id="unit"><option value="">Not sure / whole property</option></select>
+      </div>
+
+      <div class="fg">
+        <label>Type of job <span class="opt">optional</span></label>
+        <select id="type"><option value="">Not sure</option></select>
+      </div>
+
+      <label class="check" for="emergency">
+        <input type="checkbox" id="emergency">
+        <span>
+          <span class="t">This is an emergency</span>
+          <span class="s">No heating or hot water, a leak you cannot stop, no power, or anything unsafe. If someone is in danger, call 999 first.</span>
+        </span>
+      </label>
+
+      <div class="fg">
+        <label>Photo or video <span class="req">*</span></label>
+        <div class="drop" id="drop">
+          <div class="big">Tap to add a photo or video</div>
+          <div class="small">Up to 6 files, 60MB each</div>
+        </div>
+        <input type="file" id="evidence" multiple accept="image/*,video/*,.pdf" style="display:none">
+        <div class="files" id="files"></div>
+      </div>
+
+      <button class="btn" id="send">Send report</button>
+      <div class="footer">Banksia will see this straight away. You do not need an account.</div>
+    </div>
+
+    <div id="done-view" style="display:none">
+      <div class="done">
+        <div class="tick">&#10003;</div>
+        <h2>Thank you — it is with us</h2>
+        <p>We have logged your report and it is on the maintenance board now.</p>
+        <div class="ref" id="ref"></div>
+        <p style="margin-top:10px">Keep this reference — quote it if you call us about it.</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+var PROPS = [], picked = [];
+
+function esc(s){ var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+function showErr(m){ var e = document.getElementById('err'); e.textContent = m; e.style.display = 'block'; window.scrollTo({top:0,behavior:'smooth'}); }
+function hideErr(){ document.getElementById('err').style.display = 'none'; }
+function kb(n){ return n > 1048576 ? (n/1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n/1024)) + 'KB'; }
+
+async function load() {
+  try {
+    var r = await fetch('/api/banksia-os/maintenance/public/options');
+    var j = await r.json();
+    if (!r.ok || !j.success) throw new Error('could not load');
+    PROPS = j.data.properties || [];
+    var ps = document.getElementById('property');
+    ps.innerHTML = '<option value="">Choose your property…</option>' +
+      PROPS.map(function(p){ return '<option value="' + p.id + '">' + esc(p.name) + '</option>'; }).join('');
+    var ts = document.getElementById('type');
+    ts.innerHTML = '<option value="">Not sure</option>' +
+      (j.data.types || []).map(function(t){ return '<option value="' + esc(t) + '">' + esc(t) + '</option>'; }).join('');
+  } catch (e) {
+    showErr('We could not load the property list. Please refresh the page.');
+  }
+}
+
+// The unit list follows the property, so nobody can file a room against the
+// wrong building.
+document.getElementById('property').addEventListener('change', function () {
+  var p = PROPS.find(function (x) { return String(x.id) === this.value; }.bind(this));
+  var us = document.getElementById('unit');
+  var units = (p && p.units) || [];
+  us.innerHTML = '<option value="">Not sure / whole property</option>' +
+    units.map(function (u) { return '<option value="' + esc(u) + '">' + esc(u) + '</option>'; }).join('');
+  us.parentElement.style.display = units.length ? 'block' : 'none';
+});
+
+document.getElementById('drop').addEventListener('click', function () {
+  document.getElementById('evidence').click();
+});
+document.getElementById('evidence').addEventListener('change', function (e) {
+  for (var i = 0; i < e.target.files.length; i++) {
+    if (picked.length >= 6) break;
+    picked.push(e.target.files[i]);
+  }
+  e.target.value = '';
+  drawFiles();
+});
+
+function drawFiles() {
+  var box = document.getElementById('files');
+  box.style.display = picked.length ? 'block' : 'none';
+  box.innerHTML = picked.map(function (f, i) {
+    return '<div class="file"><span class="nm">' + esc(f.name) + '</span>' +
+           '<span class="sz">' + kb(f.size) + '</span>' +
+           '<button class="x" onclick="removeFile(' + i + ')" title="Remove">&times;</button></div>';
+  }).join('');
+}
+function removeFile(i) { picked.splice(i, 1); drawFiles(); }
+
+async function send() {
+  hideErr();
+  var desc = document.getElementById('description').value.trim();
+  var prop = document.getElementById('property').value;
+  if (desc.length < 10) return showErr('Please describe the problem in a little more detail.');
+  if (!prop) return showErr('Please choose the property.');
+  if (!picked.length) return showErr('Please add a photo or a short video of the problem.');
+
+  var btn = document.getElementById('send');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Sending…';
+
+  var fd = new FormData();
+  fd.append('description', desc);
+  fd.append('property_id', prop);
+  fd.append('unit', document.getElementById('unit').value);
+  fd.append('type', document.getElementById('type').value);
+  fd.append('emergency', document.getElementById('emergency').checked ? '1' : '0');
+  picked.forEach(function (f) { fd.append('evidence', f); });
+
+  try {
+    var r = await fetch('/api/banksia-os/maintenance/public/report', { method: 'POST', body: fd });
+    var j = await r.json();
+    if (!r.ok || !j.success) throw new Error(j.error || 'Something went wrong. Please try again.');
+    document.getElementById('ref').textContent = j.data.reference;
+    document.getElementById('form-view').style.display = 'none';
+    document.getElementById('done-view').style.display = 'block';
+    window.scrollTo({ top: 0 });
+  } catch (e) {
+    showErr(e.message);
+    btn.disabled = false;
+    btn.textContent = 'Send report';
+  }
+}
+
+document.getElementById('send').addEventListener('click', send);
+load();
+</script>
+</body>
+</html>

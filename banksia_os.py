@@ -136,6 +136,17 @@ def _require_banksia_auth():
     if request.path == _MISSIVE_HOOK_PATH:
         return None
     public_prefixes = ("/submissions/public", "/applicants/public", "/tenancies/public")
+    # NOTE: request.path carries the blueprint prefix, so the three above have
+    # never actually matched anything. Left exactly as they are -- quietly
+    # opening three routes that have been closed for months is not a change to
+    # make in passing. Flagged separately.
+    #
+    # The tenant report form has no account behind it, so its two routes are
+    # matched on the full path. Both are narrow: one reads a name-only list of
+    # properties, the other writes a single job into New Report, rate limited
+    # per address.
+    if request.path.startswith("/api/banksia-os/maintenance/public/"):
+        return None
     if request.path.startswith(public_prefixes):
         return None
     # Check API key first (for programmatic access)
@@ -17494,6 +17505,26 @@ _EVIDENCE_ALLOWED_EXT = {
 # contractor walking round a flat on a phone is comfortably past that.
 _EVIDENCE_MAX_BYTES = 60 * 1024 * 1024
 
+# The board's own type list (apps/banksia-os/src/app/maintenance/page.tsx).
+MAINT_TYPES_BOARD = [
+    "Plumbing", "Gas", "Heating", "Electrical", "Utilities", "Furniture", "Cleaning",
+    "Structural", "Appliances", "Refurbishment", "Certificate", "Wall Repairs",
+    "Painting", "Removal", "Locksmith", "Pest Control", "Small Repair", "Licenses",
+    "Inspection", "Gardening",
+]
+
+# What a tenant may pick on the public form. Deliberately shorter than the
+# board's own list: Certificate, Licenses and Refurbishment are things we raise,
+# not things anybody reports.
+MAINT_TYPES_PUBLIC = [
+    "Plumbing", "Heating", "Electrical", "Gas", "Appliances", "Utilities",
+    "Structural", "Wall Repairs", "Locksmith", "Pest Control", "Cleaning",
+    "Furniture", "Gardening", "Small Repair",
+]
+# Every one of these must exist on the board's own list, or a tenant could file a
+# job under a type the board's dropdown cannot display.
+assert not set(MAINT_TYPES_PUBLIC) - set(MAINT_TYPES_BOARD)
+
 
 def _ensure_cost_ll_override(db):
     """`cost_ll_override` marks a Cost LL somebody typed by hand.
@@ -17613,6 +17644,190 @@ def api_maintenance_evidence_upload(job_id):
     finally:
         db.close()
     return json_success({"photo_paths": combined, "added": added})
+
+
+# ─── Tenant job report (public, no account) ──────────────────────────────────
+# A link a tenant can open and report a problem from their phone (Norbert,
+# 2026-08-08). Everything it writes lands in New Report, which is the group for
+# exactly this: reported by a tenant, not yet looked at.
+
+_REPORT_MAX_FILES = 6
+
+
+def _public_throttle(bucket, subject, limit, window):
+    """True when this caller is over the limit.
+
+    Counted in SQLite rather than in memory because gunicorn runs four workers
+    and a per-process dict would give four times the allowance. Fails open: a
+    counter problem must not be the reason a tenant cannot report a leak.
+    """
+    import time as _time
+    now = _time.time()
+    try:
+        db = get_dict_db()
+        try:
+            db.execute("CREATE TABLE IF NOT EXISTS auth_throttle ("
+                       "id INTEGER PRIMARY KEY AUTOINCREMENT, bucket TEXT NOT NULL,"
+                       "subject TEXT NOT NULL, ts REAL NOT NULL)")
+            row = db.execute(
+                "SELECT COUNT(*) AS n FROM auth_throttle WHERE bucket = ? AND subject = ? AND ts > ?",
+                [bucket, subject, now - window]).fetchone()
+            if (dict(row).get("n") or 0) >= limit:
+                return True
+            db.execute("INSERT INTO auth_throttle (bucket, subject, ts) VALUES (?, ?, ?)",
+                       [bucket, subject, now])
+            db.commit()
+            return False
+        finally:
+            db.close()
+    except Exception:
+        return False
+
+
+@banksia_os_bp.route("/maintenance/public/options", methods=["GET"])
+def api_public_report_options():
+    """The properties and units the tenant form needs for its two dropdowns.
+
+    Addresses and unit references only. No owner, no rent, no tenant, no job
+    history: a page anyone can open should carry the minimum that lets somebody
+    say where the problem is.
+    """
+    db = get_dict_db()
+    try:
+        props = [dict(r) for r in db.execute(
+            """SELECT id,
+                      COALESCE(NULLIF(CASE WHEN LOWER(name) IN ('multi','single') THEN ''
+                                           ELSE name END, ''),
+                               address_line_1, ref, name) AS name
+               FROM properties
+               ORDER BY name COLLATE NOCASE"""
+        ).fetchall()]
+        units = [dict(r) for r in db.execute(
+            "SELECT property_id, unit_ref FROM units "
+            "WHERE unit_ref IS NOT NULL AND TRIM(unit_ref) != '' "
+            "ORDER BY unit_ref COLLATE NOCASE"
+        ).fetchall()]
+    finally:
+        db.close()
+    by_prop = {}
+    for u in units:
+        by_prop.setdefault(u["property_id"], []).append(u["unit_ref"])
+    return json_success({
+        "properties": [{"id": p["id"], "name": p["name"], "units": by_prop.get(p["id"], [])}
+                       for p in props if p.get("name")],
+        "types": MAINT_TYPES_PUBLIC,
+    })
+
+
+@banksia_os_bp.route("/maintenance/public/report", methods=["POST"])
+def api_public_report_job():
+    """A tenant reporting a problem. Multipart, because evidence is required.
+
+    Required: a description, a property, and at least one photo or video. The
+    photo is the point -- an unillustrated "the boiler is broken" costs a visit
+    to find out what is actually wrong.
+    """
+    import secrets
+    ip = _client_ip() or "unknown"
+    # Twelve an hour is far more than a person reports and far less than a script
+    # is worth running.
+    if _public_throttle("tenant_report", ip, 12, 3600):
+        return json_error("Too many reports from this connection. Try again later, "
+                          "or call us if it is urgent.", 429)
+
+    description = str(request.form.get("description") or "").strip()
+    if len(description) < 10:
+        return json_error("Please describe the problem in a little more detail.", 400)
+    description = description[:2000]
+
+    try:
+        property_id = int(request.form.get("property_id") or 0)
+    except (TypeError, ValueError):
+        property_id = 0
+    if not property_id:
+        return json_error("Please choose the property.", 400)
+
+    unit = str(request.form.get("unit") or "").strip()[:120]
+    job_type = str(request.form.get("type") or "").strip()
+    if job_type and job_type not in MAINT_TYPES_PUBLIC:
+        return json_error("That is not one of the job types.", 400)
+    emergency = 1 if str(request.form.get("emergency") or "").lower() in ("1", "true", "on", "yes") else 0
+
+    files = [f for f in request.files.getlist("evidence") if f and f.filename]
+    if not files:
+        return json_error("Please add a photo or a short video of the problem.", 400)
+    if len(files) > _REPORT_MAX_FILES:
+        return json_error("Please attach no more than %d files." % _REPORT_MAX_FILES, 400)
+
+    # Read and check every file BEFORE writing any of them, so a rejected second
+    # photo does not leave the first one orphaned on disk with no job attached.
+    payloads = []
+    for f in files:
+        name = _evidence_name(f.filename)
+        ext = os.path.splitext(name)[1].lower()
+        if ext not in _EVIDENCE_ALLOWED_EXT:
+            return json_error("Cannot attach %s — please send a photo or a video."
+                              % (ext or "that file"), 415)
+        blob = f.read()
+        if not blob:
+            return json_error("%s is empty." % name, 400)
+        if len(blob) > _EVIDENCE_MAX_BYTES:
+            return json_error("%s is too large — 60MB is the limit." % name, 413)
+        payloads.append((name, blob))
+
+    db = get_dict_db()
+    try:
+        prop = db.execute(
+            """SELECT id, COALESCE(NULLIF(CASE WHEN LOWER(name) IN ('multi','single') THEN ''
+                                              ELSE name END, ''),
+                                   address_line_1, ref, name) AS name
+               FROM properties WHERE id = ?""", [property_id]).fetchone()
+        if not prop:
+            return json_error("Please choose the property.", 400)
+        prop = dict(prop)
+
+        _ensure_maintenance_cost_ll(db)
+        _ensure_maintenance_cert_key(db)
+        reference = _next_maintenance_reference(db)
+        title = description.split("\n")[0][:120]
+        cur = db.execute(
+            """INSERT INTO maintenance_jobs
+               (reference, title, description, type, priority, status, location,
+                property_id, address, emergency, source, bill_ll)
+               VALUES (?, ?, ?, ?, ?, 'NEW REPORT', ?, ?, ?, ?, 'tenant', 0)""",
+            [reference, title, description, job_type or None,
+             "High" if emergency else "Medium", unit or None,
+             property_id, prop.get("name"), emergency]
+        )
+        db.commit()
+        job_id = cur.lastrowid
+
+        # Same rule the board applies when a job is raised there: on a management
+        # fee the landlord carries repairs, so Bill LL is ticked for them. Without
+        # this the two ways of raising the same job would disagree about whether
+        # anybody gets charged.
+        if _is_management_fee(db, property_id):
+            db.execute("UPDATE maintenance_jobs SET bill_ll = 1 WHERE id = ?", [job_id])
+            db.commit()
+
+        stored_urls = []
+        for name, blob in payloads:
+            stored = "%s_%s_%s" % (job_id, secrets.token_hex(4), name)
+            with open(os.path.join(MAINT_EVIDENCE_DIR, stored), "wb") as fh:
+                fh.write(blob)
+            stored_urls.append("/api/banksia-os/maintenance/evidence/%s" % stored)
+        db.execute("UPDATE maintenance_jobs SET photo_paths = ? WHERE id = ?",
+                   [",".join(stored_urls), job_id])
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
+    # The reference is the only thing the tenant gets back, and it is what they
+    # will quote on the phone, so it is the one thing the page must show.
+    return json_success({"reference": reference}), 201
 
 
 @banksia_os_bp.route("/maintenance/evidence/<path:stored>", methods=["GET"])
