@@ -1380,8 +1380,8 @@ def api_create_maintenance_job():
                (reference, title, description, type, cert_key, priority, status, location,
                 property_id, address, contractor, labour_cost, materials_cost,
                 bill_ll, emergency, reporter_name, reporter_email, team_notes, source,
-                cost_ll)
-               VALUES (?, ?, ?, ?, ?, ?, 'TO BE ARRANGED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                cost_ll, start_date)
+               VALUES (?, ?, ?, ?, ?, ?, 'TO BE ARRANGED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 reference,
                 data.get("title"),
@@ -1402,6 +1402,10 @@ def api_create_maintenance_job():
                 data.get("team_notes", ""),
                 data.get("source", "board"),
                 float(data.get("cost_ll") or 0),
+                # Optional on the New Job form (Norbert, 2026-08-08). It was
+                # accepted by the API and then dropped on the floor, because the
+                # INSERT never named the column.
+                str(data.get("start_date") or "").strip() or None,
             ]
         )
         db.commit()
