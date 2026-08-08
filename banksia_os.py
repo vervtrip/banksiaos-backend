@@ -17919,20 +17919,21 @@ def _invoice_pdf_bytes(job):
     c.drawString(L + 12, y + 2, "ITEMS")
     c.drawRightString(R - 12, y + 2, "AMOUNT")
 
-    labour = float(job.get("labour_cost") or 0)
-    materials = float(job.get("materials_cost") or 0)
-    total = round(labour + materials, 2)
+    # The landlord charge, not what the work cost us (Norbert, 2026-08-08).
+    # Labour and materials are our internal figures and have no business on a
+    # document that leaves the building, so they are not printed at all -- and
+    # the total is Cost LL rather than their sum.
+    total = round(float(job.get("cost_ll") or 0), 2)
 
     y -= 14
-    for label, amount in (("Labour", labour), ("Materials", materials)):
-        y -= 22
-        ink()
-        c.setFont("Helvetica", 11)
-        c.drawString(L + 12, y, label)
-        c.drawRightString(R - 12, y, _money(amount))
-        c.setStrokeColorRGB(*INVOICE_RULE)
-        c.setLineWidth(0.6)
-        c.line(L + 12, y - 8, R - 12, y - 8)
+    y -= 22
+    ink()
+    c.setFont("Helvetica", 11)
+    c.drawString(L + 12, y, str(job.get("title") or "Maintenance")[:64])
+    c.drawRightString(R - 12, y, _money(total))
+    c.setStrokeColorRGB(*INVOICE_RULE)
+    c.setLineWidth(0.6)
+    c.line(L + 12, y - 8, R - 12, y - 8)
 
     y -= 30
     c.setStrokeColorRGB(*INVOICE_INK)
@@ -18007,6 +18008,13 @@ def api_maintenance_ll_invoice(job_id):
         job = dict(job)
         if str(job.get("status") or "").strip().upper() != "COMPLETED":
             return json_error("Only a completed job has an invoice.", 422)
+        # The landlord charge is now the only figure on the document, so a job
+        # without one would print a £0.00 invoice. Refuse and say why rather
+        # than hand somebody a document that looks finished and is not.
+        if round(float(job.get("cost_ll") or 0), 2) <= 0:
+            return json_error(
+                "This job has no landlord cost set, so there is nothing to invoice. "
+                "Set Cost LL on the board first.", 422)
         pdf = _invoice_pdf_bytes(job)
     except Exception as e:
         return json_error(safe_error(e), 500)
