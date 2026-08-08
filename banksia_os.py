@@ -17827,9 +17827,15 @@ def _invoice_pdf_bytes(job):
             from reportlab.lib.utils import ImageReader
             img = ImageReader(INVOICE_LOGO)
             iw, ih = img.getSize()
-            logo_h = 46.0
+            # Sized against the heading rather than picked out of the air: the mark
+            # reads as a letterhead at roughly two and a half times the word
+            # INVOICE, and still clears the rule beneath it (Norbert, 2026-08-08).
+            logo_h = 66.0
             logo_w = logo_h * (iw / float(ih or 1))
-            c.drawImage(img, R - logo_w, top - logo_h + 30, width=logo_w, height=logo_h,
+            # Centred on the heading block, which runs from the top of INVOICE down
+            # to the date line, so growing it does not push it into either.
+            c.drawImage(img, R - logo_w, top - 7 - logo_h / 2.0,
+                        width=logo_w, height=logo_h,
                         mask="auto", preserveAspectRatio=True)
         except Exception:
             logo_h = 0  # a missing logo must not cost anybody their invoice
