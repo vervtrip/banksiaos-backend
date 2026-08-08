@@ -17865,8 +17865,13 @@ def _invoice_pdf_bytes(job):
 
     where = str(job.get("property_name") or "").strip()
     unit = str(job.get("unit") or "").strip()
-    if unit:
+    # Some jobs carry the whole address in the unit field, which prints as
+    # "22 Carrol Close, 22 Carrol Close". A near-duplicate is left alone -- two
+    # spellings of one address is a data question, not a formatting one.
+    if unit and unit.lower() != where.lower():
         where = ("%s, %s" % (where, unit)).strip(", ")
+    elif not where:
+        where = unit
     if where:
         y -= 15
         ink(INVOICE_MUTED)
