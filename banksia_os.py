@@ -1031,6 +1031,7 @@ def api_submissions():
 # below are kept so anything still writing them is tolerated rather than rejected;
 # the board files anything it does not recognise under "TO BE ARRANGED".
 MAINT_STATUSES = [
+    "NEW REPORT",
     "URGENT", "TO BE ARRANGED", "LIVE", "COMPLETED",
     "PENDING", "IN PROGRESS", "ON HOLD", "CANCELLED",
     "ACKNOWLEDGED", "WAITING INVOICE", "No Invoice Found", "Invoice Uploaded"
@@ -1154,7 +1155,9 @@ MAINT_LIVE_REQUIRED = ("contractor", "labour_cost", "materials_cost", "photo_pat
 # property on the compliance board rather than photographed here (Norbert,
 # 2026-08-08). Asking for a photo as well only produces a token one taken to
 # clear the block, which is worse than not asking.
-MAINT_NO_EVIDENCE_TYPES = {"certificate"}
+# "compliance" is here because the compliance board has been writing that type
+# since long before this rule; the job is the same thing by another name.
+MAINT_NO_EVIDENCE_TYPES = {"certificate", "compliance"}
 
 
 def _next_maintenance_reference(db):
@@ -1218,6 +1221,56 @@ def _live_blockers(job):
     if _needs_evidence(job) and not [p for p in str(job.get("photo_paths") or "").split(",") if p.strip()]:
         missing.append("evidence")
     return missing
+
+
+def _london_today():
+    """Today where the business is, not where the server thinks it is.
+
+    SQLite's date('now') is UTC, so a job moved to Live at half past midnight in
+    summer would record yesterday.
+    """
+    from datetime import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Europe/London")).date().isoformat()
+    except Exception:
+        return datetime.now().date().isoformat()
+
+
+def _ensure_maintenance_cert_key(db):
+    """Which certificate a certificate job is for.
+
+    The type only says "Certificate"; the price depends on whether it is an EICR
+    or a gas safety check, so the board has to hold the distinction.
+    """
+    try:
+        db.execute("ALTER TABLE maintenance_jobs ADD COLUMN cert_key TEXT DEFAULT ''")
+        db.commit()
+    except Exception:
+        pass  # already present
+
+
+def _standard_quote(db, cert_key):
+    """The agreed price for a certificate, or None where there is no agreed price.
+
+    None matters: an FRA has no standard figure ("depends on the location"), and
+    billing a landlord zero for one is worse than falling back to the labour rule.
+    """
+    key = str(cert_key or "").strip()
+    if not key:
+        return None
+    try:
+        row = db.execute("SELECT amount FROM compliance_quotes WHERE cert_key = ?",
+                         (key,)).fetchone()
+    except Exception:
+        return None
+    raw = str(dict(row or {}).get("amount") or "").strip()
+    if not raw:
+        return None
+    try:
+        return round(float(raw), 2)
+    except (TypeError, ValueError):
+        return None
 
 
 def _ensure_maintenance_cost_ll(db):
@@ -1284,20 +1337,22 @@ def api_create_maintenance_job():
     db = get_dict_db()
     try:
         _ensure_maintenance_cost_ll(db)
+        _ensure_maintenance_cert_key(db)
         reference = _next_maintenance_reference(db)
 
         cur = db.execute(
             """INSERT INTO maintenance_jobs
-               (reference, title, description, type, priority, status, location,
+               (reference, title, description, type, cert_key, priority, status, location,
                 property_id, address, contractor, labour_cost, materials_cost,
                 bill_ll, emergency, reporter_name, reporter_email, team_notes, source,
                 cost_ll)
-               VALUES (?, ?, ?, ?, ?, 'TO BE ARRANGED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, 'TO BE ARRANGED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 reference,
                 data.get("title"),
                 data.get("description", ""),
                 data.get("type"),
+                str(data.get("cert_key") or ""),
                 data.get("priority", "Medium"),
                 data.get("location"),
                 data.get("property_id"),
@@ -1389,6 +1444,9 @@ def api_maintenance_job(job_id):
             return json_success(result)
 
         # PATCH
+        # The column has to exist before the UPDATE below can name it. Ensuring it
+        # inside _sync_cost_ll was too late -- that runs after the write.
+        _ensure_maintenance_cert_key(db)
         data = request.get_json(force=True, silent=True) or {}
         allowed = [
             "title", "description", "type", "priority", "status", "location",
@@ -1396,7 +1454,7 @@ def api_maintenance_job(job_id):
             "bill_ll", "ll_informed", "ll_informed_via", "ll_notes",
             "emergency", "reporter_name", "reporter_email", "photo_paths",
             "invoice_paths", "team_notes", "start_date", "completed_date",
-            "property_id", "unit", "cost_ll", "cost_ll_override"
+            "property_id", "unit", "cost_ll", "cost_ll_override", "cert_key"
         ]
         if "contractor" in data and str(data.get("contractor") or "").strip():
             known = _known_contractor(data.get("contractor"))
@@ -1455,6 +1513,17 @@ def api_maintenance_job(job_id):
         # Cost LL is derived from the labour, so it has to be recalculated after
         # anything that could move it -- not only when it is sent explicitly.
         _sync_cost_ll(db, job_id, data)
+
+        # Going Live is the day the work starts, so the board should not have to be
+        # told twice (Norbert, 2026-08-08). Only filled when empty: a date already
+        # agreed with a contractor beats today's date.
+        if str(data.get("status") or "").strip().upper() == "LIVE":
+            db.execute(
+                "UPDATE maintenance_jobs SET start_date = ? WHERE id = ? "
+                "AND (start_date IS NULL OR TRIM(start_date) = '')",
+                [_london_today(), job_id]
+            )
+            db.commit()
 
         # If status changed to COMPLETED, set completed_date
         if data.get("status") == "COMPLETED":
@@ -17263,17 +17332,19 @@ def api_quote_round_award(row_id, cert):
             cost_ll = 0.0
 
         label = QUOTE_ROUND_LABELS.get(cert, cert)
+        _ensure_maintenance_cert_key(db)
         reference = _next_maintenance_reference(db)
         address = prop.get("property_name") or ""
         cur = db.execute(
             """INSERT INTO maintenance_jobs
-               (reference, title, description, type, priority, status, address,
+               (reference, title, description, type, cert_key, priority, status, address,
                 contractor, labour_cost, materials_cost, bill_ll, emergency,
                 team_notes, source, cost_ll)
-               VALUES (?, ?, ?, 'Compliance', 'Medium', 'PENDING', ?, ?, ?, 0, 1, 0, ?, 'compliance', ?)""",
+               VALUES (?, ?, ?, 'Certificate', ?, 'Medium', 'PENDING', ?, ?, ?, 0, 1, 0, ?, 'compliance', ?)""",
             [reference,
              "%s — %s" % (label[:1].upper() + label[1:], address),
              "Booked from the compliance board after a quote round.",
+             cert,
              address,
              win.get("contractor_name") or "",
              float(win.get("quote") or 0),
@@ -17358,7 +17429,10 @@ def api_quote_round_reopen(row_id, cert):
 # Cancelled is a group rather than a delete (Norbert, 2026-08-08). A job called
 # off still has to be answerable for -- who raised it, against which property and
 # what it would have cost. Deleting it loses that, so cancelling moves it aside.
-MAINT_BOARD_GROUPS = ["URGENT", "TO BE ARRANGED", "LIVE", "COMPLETED", "CANCELLED"]
+# New Report first: it is the intake, not a stage of the work. A tenant's
+# report arrives there and is triaged out of it (Norbert, 2026-08-08).
+MAINT_BOARD_GROUPS = ["NEW REPORT", "URGENT", "TO BE ARRANGED", "LIVE",
+                      "COMPLETED", "CANCELLED"]
 
 # What we charge the landlord on top of the LABOUR only. Materials are passed on
 # at cost -- marking them up as well was never the agreement, and it is the kind
@@ -17405,8 +17479,10 @@ def _sync_cost_ll(db, job_id, data):
     rule. With Bill LL unticked there is nothing to charge, so it reads zero.
     """
     _ensure_cost_ll_override(db)
+    _ensure_maintenance_cert_key(db)
     row = db.execute(
-        "SELECT bill_ll, labour_cost, cost_ll, cost_ll_override FROM maintenance_jobs WHERE id = ?",
+        "SELECT bill_ll, labour_cost, cost_ll, cost_ll_override, cert_key "
+        "FROM maintenance_jobs WHERE id = ?",
         [job_id]
     ).fetchone()
     if not row:
@@ -17425,7 +17501,13 @@ def _sync_cost_ll(db, job_id, data):
     if not int(row.get("bill_ll") or 0):
         target = 0.0
     else:
-        target = round(float(row.get("labour_cost") or 0) * (1 + MAINT_LL_MARKUP), 2)
+        # A certificate is sold at the agreed price, not at cost plus a margin
+        # (Norbert, 2026-08-08). The landlord is quoted from the Quotes panel, so
+        # marking up whatever the contractor happened to charge would contradict
+        # the number he was given.
+        quoted = _standard_quote(db, row.get("cert_key"))
+        target = quoted if quoted is not None else round(
+            float(row.get("labour_cost") or 0) * (1 + MAINT_LL_MARKUP), 2)
     if float(row.get("cost_ll") or 0) != target:
         db.execute("UPDATE maintenance_jobs SET cost_ll = ? WHERE id = ?", [target, job_id])
         db.commit()
@@ -17587,6 +17669,12 @@ def api_maintenance_bulk_status():
                 "UPDATE maintenance_jobs SET status = ?, modified = datetime('now') WHERE id = ?",
                 [status, job_id]
             )
+            if status == "LIVE":
+                db.execute(
+                    "UPDATE maintenance_jobs SET start_date = ? WHERE id = ? "
+                    "AND (start_date IS NULL OR TRIM(start_date) = '')",
+                    [_london_today(), job_id]
+                )
             if status == "COMPLETED":
                 db.execute(
                     "UPDATE maintenance_jobs SET completed_date = datetime('now') "

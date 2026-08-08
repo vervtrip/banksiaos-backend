@@ -3671,7 +3671,37 @@ def api_portal_maintenance_create():
              pu.get("email"), category, title, description, priority, location]
         )
         db.commit()
-        return json_success({"id": cur.lastrowid, "reference": ref, "status": "open"},
+        req_id = cur.lastrowid
+
+        # Put it straight on the maintenance board under New Report (Norbert,
+        # 2026-08-08). Left in maintenance_requests as well, because that is the
+        # tenant's own record and the portal reads it back to them.
+        #
+        # Wrapped: a tenant's report must be saved even if the board write fails.
+        # Losing the report to protect a mirror of it would be the wrong way round.
+        try:
+            prop_id = None
+            if pu.get("tenancy_id"):
+                trow = db.execute("SELECT property_id FROM tenancies WHERE id = ?",
+                                  [pu.get("tenancy_id")]).fetchone()
+                prop_id = dict(trow or {}).get("property_id")
+            db.execute(
+                "INSERT INTO maintenance_jobs (reference, title, description, type, "
+                "priority, status, location, property_id, reporter_name, reporter_email, "
+                "source, team_notes) "
+                "VALUES (?,?,?,?,?, 'NEW REPORT', ?,?,?,?, 'portal', ?)",
+                [ref, title, description, (category or "").title() or None,
+                 "High" if priority in ("high", "emergency") else "Medium",
+                 location, prop_id,
+                 f"{pu.get('first_name','')} {pu.get('last_name','')}".strip(),
+                 pu.get("email"),
+                 "Reported by the tenant through the portal (%s)." % ref]
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        return json_success({"id": req_id, "reference": ref, "status": "open"},
                             message="Your maintenance request has been logged. Our team will be in touch.")
     finally:
         db.close()
