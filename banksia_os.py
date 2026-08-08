@@ -6,6 +6,7 @@ Mounts at /api/banksia-os/
 
 Architecture: Route definitions only — business logic lives in services/ modules.
 """
+import ipaddress
 import json, os, sys, re
 from datetime import datetime, timezone, timedelta
 
@@ -92,6 +93,39 @@ _ROLE_POLICY = {
 }
 
 
+def _client_ip():
+    """Address Traefik actually saw.
+
+    Traefik appends the peer to X-Forwarded-For, so the last entry is the one
+    it observed and the only one a caller cannot spoof by sending its own header.
+    """
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        return xff.split(",")[-1].strip()
+    return request.remote_addr or ""
+
+
+def _api_key_ip_allowed(entry):
+    """Whether this key may be used from the calling address.
+
+    Loopback and private ranges always pass so anything running on the box keeps
+    working. Off-box, a key is refused unless the address is in its allowed_ips.
+    """
+    try:
+        ip = ipaddress.ip_address(_client_ip())
+    except ValueError:
+        return False
+    if ip.is_loopback or ip.is_private or ip.is_link_local:
+        return True
+    for cidr in entry.get("allowed_ips") or []:
+        try:
+            if ip in ipaddress.ip_network(cidr, strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 @banksia_os_bp.before_request
 def _require_banksia_auth():
     """All routes in this blueprint require a logged-in session or valid API key."""
@@ -105,7 +139,9 @@ def _require_banksia_auth():
     if request.path.startswith(public_prefixes):
         return None
     # Check API key first (for programmatic access)
-    api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
+    # Header only. A key in the query string ends up in access logs, browser
+    # history and Referer headers, which is not a place for a super_admin key.
+    api_key = request.headers.get("X-API-Key")
     if api_key:
         _ak_path = os.path.join(os.path.dirname(__file__), "api_keys.json")
         if os.path.exists(_ak_path):
@@ -113,6 +149,8 @@ def _require_banksia_auth():
                 _ak_data = json.load(open(_ak_path))
                 _entry = _ak_data.get(api_key)
                 if _entry:
+                    if not _api_key_ip_allowed(_entry):
+                        return jsonify({"success": False, "error": "API key not permitted from this address"}), 403
                     request.current_user = {"username": _entry.get("name", "API"), "role": _entry.get("role", "admin")}
                     return None
             except Exception:
