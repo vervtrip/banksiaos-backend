@@ -17820,21 +17820,26 @@ def _invoice_pdf_bytes(job):
         c.line(L, y, R, y)
 
     # ── Head: the mark sits top right, as on the template ──
-    top = H - 58
+    # The mark hangs from the top margin and grows downward, and the heading
+    # block is placed beneath whatever room it takes. Sizing it against the
+    # heading capped it at 66pt; anchoring it this way means the only limit is
+    # the page edge (Norbert asked for it larger twice, 2026-08-08).
+    # The asset is trimmed to the mark itself: the file we were given is a
+    # 328pt square that is mostly white, so a 66pt box was drawing a 29pt mark
+    # and every size increase went into the margin (Norbert, 2026-08-08).
+    LOGO_H = 72.0
+    LOGO_TOP = H - 24
+    LOGO_GAP = 12  # clear air between the mark and the rule under the heading
+    top = LOGO_TOP - LOGO_H - LOGO_GAP + 50
     logo_h = 0
     if os.path.exists(INVOICE_LOGO):
         try:
             from reportlab.lib.utils import ImageReader
             img = ImageReader(INVOICE_LOGO)
             iw, ih = img.getSize()
-            # Sized against the heading rather than picked out of the air: the mark
-            # reads as a letterhead at roughly two and a half times the word
-            # INVOICE, and still clears the rule beneath it (Norbert, 2026-08-08).
-            logo_h = 66.0
+            logo_h = LOGO_H
             logo_w = logo_h * (iw / float(ih or 1))
-            # Centred on the heading block, which runs from the top of INVOICE down
-            # to the date line, so growing it does not push it into either.
-            c.drawImage(img, R - logo_w, top - 7 - logo_h / 2.0,
+            c.drawImage(img, R - logo_w, LOGO_TOP - logo_h,
                         width=logo_w, height=logo_h,
                         mask="auto", preserveAspectRatio=True)
         except Exception:
@@ -17940,7 +17945,10 @@ def _invoice_pdf_bytes(job):
 
     # ── Payment, directly under the total where it is read ──
     y -= 46
-    band_h = 22 + 15 * (len(INVOICE_PAYMENT) + 1)
+    # +2, not +1: the sort code and account are not the only lines inside the
+    # band -- the account name leads it and the reference closes it, and at +1
+    # the reference fell outside the grey and read as an orphan.
+    band_h = 22 + 15 * (len(INVOICE_PAYMENT) + 2)
     c.setFillColorRGB(*INVOICE_BAND)
     c.rect(L, y + 14 - band_h, R - L, band_h, stroke=0, fill=1)
     ink(INVOICE_MUTED)
