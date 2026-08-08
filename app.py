@@ -303,6 +303,8 @@ from referencing_api import referencing_bp
 app.register_blueprint(referencing_bp)
 from tenant_application_api import tenant_app_bp
 app.register_blueprint(tenant_app_bp)
+from guarantor_referencing_api import guarantor_bp
+app.register_blueprint(guarantor_bp)
 
 # ── Multi-user auth system ──
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
@@ -3183,6 +3185,25 @@ def referencing_apply_page():
 def referencing_form_page(token):
     # Support both /apply/x (path) and /apply?token=x (query) link styles.
     return render_template("referencing_form.html", url_token=token)
+
+
+@app.route("/report-job")
+def tenant_report_job_page():
+    """Public "report a problem" form for tenants (Norbert, 2026-08-08).
+
+    Open, not token-gated: the point is one link that can go on a noticeboard, a
+    tenancy pack or a WhatsApp message. What it can write is deliberately narrow
+    -- one job, in New Report, with evidence -- and it is rate limited per
+    address in the API behind it.
+    """
+    return render_template("tenant_report_job.html")
+
+
+@app.route("/guarantor-form/<token>")
+def guarantor_form_page(token):
+    """Public guarantor form. Token-gated, no account needed -- same pattern as
+    the tenant referencing form at /apply/<token>."""
+    return render_template("guarantor_form.html", url_token=token)
 
 
 @app.route("/tenant-application/<token>")
