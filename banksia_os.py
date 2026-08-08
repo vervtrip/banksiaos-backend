@@ -17876,15 +17876,10 @@ def _invoice_pdf_bytes(job):
     c.setFont("Helvetica-Bold", 12.5)
     c.drawString(L, y, str(job.get("title") or "Maintenance")[:76])
 
+    # The property, and only the property (Norbert, 2026-08-08). The unit is not
+    # printed at all: it is internal, and on this board it is as often the whole
+    # address again as it is a room number.
     where = str(job.get("property_name") or "").strip()
-    unit = str(job.get("unit") or "").strip()
-    # Some jobs carry the whole address in the unit field, which printed as
-    # "22 Carrol Close, 22 Carrol Close". A near-duplicate is left alone -- two
-    # spellings of one address is a data question, not a formatting one.
-    if unit and unit.lower() != where.lower():
-        where = ("%s, %s" % (where, unit)).strip(", ")
-    elif not where:
-        where = unit
     if where:
         y -= 15
         ink(INVOICE_MUTED)
