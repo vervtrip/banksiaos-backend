@@ -17593,26 +17593,49 @@ def _ensure_reporter_columns(db):
 def _tenant_at(db, property_id, unit_ref):
     """The tenant living in that room, or None.
 
-    Matched on the unit reference within the property, and only against a
-    tenancy that is actually running -- Current or Periodic. A past tenant's
-    name on a live report would be worse than no name at all.
+    Goes through the TENANCY, not through tenants.unit_id. For anything imported
+    from Arthur -- which is every real tenant on this system -- tenants.unit_id
+    and tenants.property_id hold Arthur's own ids, not ours, so joining on them
+    matches nothing: 161 live tenants, 0 hits. tenancies.unit_id is a real
+    reference to units.id, so that is the way in.
+
+    A locally-created tenant may have no tenancy but a correct unit_id, so that
+    path is kept as a fallback rather than dropped.
+
+    Ordered so a Current or Periodic tenancy wins: a past tenant's name on a live
+    report would be worse than no name at all.
     """
     if not unit_ref:
         return None
+    live_first = ("CASE WHEN UPPER(COALESCE(ten.status, '')) IN ('CURRENT', 'PERIODIC') "
+                  "THEN 0 ELSE 1 END")
     row = db.execute(
         """SELECT t.first_name, t.last_name, t.email, t.mobile, t.phone_home, u.unit_ref,
                   ten.ref AS tenancy_ref, ten.status AS tenancy_status
            FROM units u
-           JOIN tenants t ON t.unit_id = u.id
-           LEFT JOIN tenancies ten ON t.tenancy_id = ten.id
+           JOIN tenancies ten ON ten.unit_id = u.id
+           JOIN tenants t ON t.tenancy_id = ten.id
            WHERE u.property_id = ?
              AND LOWER(TRIM(u.unit_ref)) = LOWER(TRIM(?))
-           ORDER BY CASE WHEN UPPER(COALESCE(ten.status, '')) IN ('CURRENT', 'PERIODIC')
-                         THEN 0 ELSE 1 END,
-                    t.id DESC
-           LIMIT 1""",
+           ORDER BY %s, ten.id DESC, t.id DESC
+           LIMIT 1""" % live_first,
         [property_id, unit_ref]
     ).fetchone()
+
+    if not row:
+        row = db.execute(
+            """SELECT t.first_name, t.last_name, t.email, t.mobile, t.phone_home, u.unit_ref,
+                      ten.ref AS tenancy_ref, ten.status AS tenancy_status
+               FROM units u
+               JOIN tenants t ON t.unit_id = u.id
+               LEFT JOIN tenancies ten ON t.tenancy_id = ten.id
+               WHERE u.property_id = ?
+                 AND LOWER(TRIM(u.unit_ref)) = LOWER(TRIM(?))
+               ORDER BY %s, t.id DESC
+               LIMIT 1""" % live_first,
+            [property_id, unit_ref]
+        ).fetchone()
+
     if not row:
         return None
     row = dict(row)
