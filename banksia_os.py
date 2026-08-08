@@ -17756,11 +17756,16 @@ def _require_super_admin():
 
 @banksia_os_bp.route("/maintenance/landlord-report", methods=["GET"])
 def api_maintenance_landlord_report():
-    """Maintenance grouped by the landlord who owns the property.
+    """Maintenance the landlord is being charged for, by property.
 
-    Cancelled work is left out -- it never happened, so it cannot be reported on.
-    Money is only counted where Bill LL is ticked: an unticked job is one we are
-    carrying, and adding it to a landlord's column would misstate what they owe.
+    Only jobs with Bill LL ticked (Norbert, 2026-08-08). A job we are carrying is
+    not part of what a landlord owes, and listing it under their property invites
+    somebody to invoice for it.
+
+    Two categories, because the agreement decides who pays: on a management fee
+    the landlord carries the repair, on guaranteed rent we do. A billed job on a
+    guaranteed-rent property is therefore an exception -- a recharge, usually --
+    and worth being able to see on its own rather than mixed in.
     """
     denied = _require_super_admin()
     if denied:
@@ -17771,66 +17776,95 @@ def api_maintenance_landlord_report():
         rows = db.execute(
             """SELECT mj.id, mj.reference, mj.title, mj.status, mj.type, mj.contractor,
                       mj.start_date, mj.completed_date, mj.labour_cost, mj.materials_cost,
-                      mj.bill_ll, mj.cost_ll, mj.unit,
+                      mj.cost_ll, mj.unit, mj.property_id,
                       COALESCE(NULLIF(CASE WHEN LOWER(p.name) IN ('multi','single') THEN ''
                                            ELSE p.name END, ''),
                                p.address_line_1, p.ref, p.name) AS property_name,
                       p.property_owner_name, p.owner_company, p.management_type
                FROM maintenance_jobs mj
                LEFT JOIN properties p ON mj.property_id = p.id
-               WHERE UPPER(COALESCE(mj.status, '')) != 'CANCELLED'
+               WHERE mj.bill_ll = 1
+                 AND UPPER(COALESCE(mj.status, '')) != 'CANCELLED'
                ORDER BY mj.created DESC"""
         ).fetchall()
 
-        by_landlord = {}
+        buckets = {
+            "management": {"key": "management", "label": "Management Fee",
+                           "blurb": "The landlord carries the cost of repairs.",
+                           "props": {}},
+            "guaranteed": {"key": "guaranteed", "label": "Guaranteed Rent",
+                           "blurb": "We carry the cost, so anything billed here is a recharge.",
+                           "props": {}},
+        }
+        unassigned = []
+
         for r in rows:
             r = dict(r)
-            name = (str(r.get("property_owner_name") or "").strip()
-                    or str(r.get("owner_company") or "").strip()
-                    or "No landlord on the property")
-            billed = bool(r.get("bill_ll"))
             ours = round(float(r.get("labour_cost") or 0) + float(r.get("materials_cost") or 0), 2)
-            charged = round(float(r.get("cost_ll") or 0), 2) if billed else 0.0
-
-            entry = by_landlord.setdefault(name, {
-                "landlord": name, "properties": set(), "jobs": [],
-                "our_cost": 0.0, "charged": 0.0, "billed_jobs": 0,
-            })
-            entry["properties"].add(r.get("property_name") or "—")
-            entry["our_cost"] = round(entry["our_cost"] + ours, 2)
-            entry["charged"] = round(entry["charged"] + charged, 2)
-            if billed:
-                entry["billed_jobs"] += 1
-            entry["jobs"].append({
+            charged = round(float(r.get("cost_ll") or 0), 2)
+            job = {
                 "id": r["id"], "reference": r.get("reference"), "title": r.get("title"),
                 "status": r.get("status"), "type": r.get("type"),
-                "contractor": r.get("contractor"), "property_name": r.get("property_name"),
-                "unit": r.get("unit"), "management_type": r.get("management_type"),
+                "contractor": r.get("contractor"), "unit": r.get("unit"),
                 "start_date": r.get("start_date"), "completed_date": r.get("completed_date"),
                 "labour_cost": r.get("labour_cost"), "materials_cost": r.get("materials_cost"),
-                "bill_ll": billed, "our_cost": ours, "charged": charged,
-                "margin": round(charged - ours, 2) if billed else 0.0,
+                "our_cost": ours, "charged": charged, "margin": round(charged - ours, 2),
+            }
+
+            # A billed job with no property cannot be filed under one. Kept aside and
+            # shown as such rather than dropped, or the totals would not add up.
+            if not r.get("property_id"):
+                unassigned.append(job)
+                continue
+
+            mt = str(r.get("management_type") or "").strip()
+            key = "management" if "management fee" in mt.lower() else "guaranteed"
+            props = buckets[key]["props"]
+            pid = r["property_id"]
+            entry = props.setdefault(pid, {
+                "property_id": pid,
+                "property_name": r.get("property_name") or "Property %s" % pid,
+                "landlord": (str(r.get("property_owner_name") or "").strip()
+                             or str(r.get("owner_company") or "").strip()
+                             or "No landlord on the property"),
+                "management_type": mt or "Not set",
+                "jobs": [], "our_cost": 0.0, "charged": 0.0,
+            })
+            entry["jobs"].append(job)
+            entry["our_cost"] = round(entry["our_cost"] + ours, 2)
+            entry["charged"] = round(entry["charged"] + charged, 2)
+
+        categories = []
+        for key in ("management", "guaranteed"):
+            b = buckets[key]
+            props = []
+            for e in b["props"].values():
+                e["job_count"] = len(e["jobs"])
+                e["margin"] = round(e["charged"] - e["our_cost"], 2)
+                props.append(e)
+            props.sort(key=lambda e: (-e["charged"], e["property_name"]))
+            categories.append({
+                "key": b["key"], "label": b["label"], "blurb": b["blurb"],
+                "properties": props,
+                "property_count": len(props),
+                "job_count": sum(p["job_count"] for p in props),
+                "our_cost": round(sum(p["our_cost"] for p in props), 2),
+                "charged": round(sum(p["charged"] for p in props), 2),
+                "margin": round(sum(p["margin"] for p in props), 2),
             })
 
-        landlords = []
-        for e in by_landlord.values():
-            e["property_count"] = len(e["properties"])
-            e["properties"] = sorted(e["properties"])
-            e["job_count"] = len(e["jobs"])
-            e["margin"] = round(e["charged"] - e["our_cost"], 2)
-            landlords.append(e)
-        # Most billed first: the ones worth reading are at the top.
-        landlords.sort(key=lambda e: (-e["charged"], e["landlord"]))
-
         totals = {
-            "landlords": len(landlords),
-            "jobs": sum(e["job_count"] for e in landlords),
-            "billed_jobs": sum(e["billed_jobs"] for e in landlords),
-            "our_cost": round(sum(e["our_cost"] for e in landlords), 2),
-            "charged": round(sum(e["charged"] for e in landlords), 2),
+            "properties": sum(c["property_count"] for c in categories),
+            "jobs": sum(c["job_count"] for c in categories) + len(unassigned),
+            "our_cost": round(sum(c["our_cost"] for c in categories)
+                              + sum(j["our_cost"] for j in unassigned), 2),
+            "charged": round(sum(c["charged"] for c in categories)
+                             + sum(j["charged"] for j in unassigned), 2),
         }
         totals["margin"] = round(totals["charged"] - totals["our_cost"], 2)
-        return json_success({"landlords": landlords, "totals": totals})
+
+        return json_success({"categories": categories, "unassigned": unassigned,
+                             "totals": totals})
     except Exception as e:
         return json_error(safe_error(e), 500)
     finally:
