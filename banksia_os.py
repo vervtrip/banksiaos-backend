@@ -1401,7 +1401,7 @@ def api_create_maintenance_job():
                 db.execute("DELETE FROM maintenance_jobs WHERE id = ?", [job_id])
                 db.commit()
                 return json_error(
-                    "A job cannot be raised straight into Completed — it still needs %s."
+                    "A job cannot be raised straight into Done — it still needs %s."
                     % _join_words(missing), 422)
         if wanted.upper() == "LIVE":
             missing = _live_blockers(dict(data))
@@ -1511,7 +1511,7 @@ def api_maintenance_job(job_id):
             missing = _completed_blockers(merged)
             if missing:
                 return json_error(
-                    "This job cannot be marked Completed — it still needs %s."
+                    "This job cannot be marked Done — it still needs %s."
                     % _join_words(missing), 422)
 
         if str(data.get("status") or "").strip().upper() == "LIVE":
