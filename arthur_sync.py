@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from banksia_os_db import (
     insert, update, get_by_field, get_db, raw_execute,
-    count, init_db, dict_from_row
+    count, init_db, dict_from_row, guarded_update, set_shadow
 )
 
 # ── Configuration ────────────────────────────────────────────────
@@ -149,6 +149,59 @@ def arthur_get_all_pages(path, params=None, max_pages=None):
             break
 
     return all_items
+
+
+# ── Arthur → Banksia OS vocabulary ───────────────────────────────
+# Arthur and Banksia OS name the same states differently ("Let" vs "Occupied",
+# "Room" vs "Rooms"). Translating on the way in stops the pull rewriting all 155
+# units into Arthur's wording, and stops the edit-detection reading a wording
+# difference as though a member of staff had changed something.
+UNIT_STATUS_MAP = {
+    "let": "Occupied",
+    "available to let": "Vacant",
+    "available": "Vacant",
+    "unavailable to let": "Inactive",
+    "unavailable": "Inactive",
+}
+UNIT_TYPE_MAP = {
+    "room": "Rooms",
+    "rooms": "Rooms",
+    "house": "House",
+    "flat": "Flat",
+    "studio": "Studio",
+}
+
+
+def _map_unit_status(val):
+    v = _safe_str(val).strip()
+    if not v:
+        return ""
+    return UNIT_STATUS_MAP.get(v.lower(), v)
+
+
+def _map_unit_type(val):
+    v = _safe_str(val).strip()
+    if not v:
+        return ""
+    return UNIT_TYPE_MAP.get(v.lower(), v)
+
+
+def _refuse_force_if_local_edits(table):
+    """--force clears the table and re-imports it from scratch, which throws away
+    every local edit with no way back. Refuse it once staff own any field on that
+    table; a full re-import then has to be a deliberate, explicit act."""
+    try:
+        conn = get_db()
+        n = conn.execute(
+            "SELECT COUNT(*) FROM field_overrides WHERE table_name = ? AND released_at IS NULL",
+            (table,),
+        ).fetchone()[0]
+    except Exception:
+        n = 0
+    if n and os.environ.get("ARTHUR_FORCE_DISCARD_LOCAL") != "yes":
+        print(f"  [REFUSED] --force would delete all {table} and discard {n} field(s) "
+              f"edited in Banksia OS. Set ARTHUR_FORCE_DISCARD_LOCAL=yes to override.")
+        sys.exit(2)
 
 
 def _safe_str(val, default=""):
@@ -329,6 +382,7 @@ def sync_properties(force=False):
     """
     print("\n[SYNC] Syncing properties...")
     if force:
+        _refuse_force_if_local_edits("properties")
         raw_execute("DELETE FROM properties")
         print("  Force mode: cleared all properties")
 
@@ -340,6 +394,7 @@ def sync_properties(force=False):
     synced = 0
     updated = 0
     inserted = 0
+    kept_local = 0
 
     for p in items:
         aid = str(p.get("id", ""))
@@ -382,15 +437,18 @@ def sync_properties(force=False):
 
         existing = get_by_field("properties", "arthur_id", aid)
         if existing:
-            update("properties", existing[0]["id"], data)
+            _applied, _kept = guarded_update("properties", existing[0]["id"], data)
+            if _kept:
+                kept_local += len(_kept)
             updated += 1
         else:
             data["arthur_id"] = aid
-            insert("properties", data)
+            _new_id = insert("properties", data)
+            set_shadow("properties", _new_id, data)
             inserted += 1
         synced += 1
 
-    print(f"  Properties synced: {synced} (inserted: {inserted}, updated: {updated})")
+    print(f"  Properties synced: {synced} (inserted: {inserted}, updated: {updated}, local edits kept: {kept_local})")
     _build_property_map()
     return _property_id_map
 
@@ -404,6 +462,7 @@ def sync_units(force=False):
     """
     print("\n[SYNC] Syncing units...")
     if force:
+        _refuse_force_if_local_edits("units")
         raw_execute("DELETE FROM units")
         print("  Force mode: cleared all units")
 
@@ -418,6 +477,7 @@ def sync_units(force=False):
     synced = 0
     updated = 0
     inserted = 0
+    kept_local = 0
 
     for u in items:
         aid = str(u.get("id", ""))
@@ -430,8 +490,8 @@ def sync_units(force=False):
 
         data = {
             "property_id": local_prop_id,
-            "unit_type": _safe_str(u.get("unit_type")),
-            "unit_status": _safe_str(u.get("unit_status", "Available")),
+            "unit_type": _map_unit_type(u.get("unit_type")),
+            "unit_status": _map_unit_status(u.get("unit_status", "Available")),
             "unit_ref": _safe_str(u.get("unit_ref")),
             "unit_vacant": 1 if u.get("unit_vacant") is True else (0 if u.get("unit_vacant") is False else 1),
             "available_from": _safe_str(u.get("available_from")),
@@ -459,15 +519,18 @@ def sync_units(force=False):
 
         existing = get_by_field("units", "arthur_id", aid)
         if existing:
-            update("units", existing[0]["id"], data)
+            _applied, _kept = guarded_update("units", existing[0]["id"], data)
+            if _kept:
+                kept_local += len(_kept)
             updated += 1
         else:
             data["arthur_id"] = aid
-            insert("units", data)
+            _new_id = insert("units", data)
+            set_shadow("units", _new_id, data)
             inserted += 1
         synced += 1
 
-    print(f"  Units synced: {synced} (inserted: {inserted}, updated: {updated})")
+    print(f"  Units synced: {synced} (inserted: {inserted}, updated: {updated}, local edits kept: {kept_local})")
     _build_unit_map()
     return _unit_id_map
 
@@ -481,6 +544,7 @@ def sync_tenancies(force=False):
     """
     print("\n[SYNC] Syncing tenancies...")
     if force:
+        _refuse_force_if_local_edits("tenancies")
         raw_execute("DELETE FROM tenancies")
         print("  Force mode: cleared all tenancies")
 
@@ -495,6 +559,7 @@ def sync_tenancies(force=False):
     synced = 0
     updated = 0
     inserted = 0
+    kept_local = 0
 
     for t in items:
         aid = str(t.get("id", ""))
@@ -564,15 +629,18 @@ def sync_tenancies(force=False):
                     agreed = None  # notice table not created yet
                 if agreed and agreed[0]:
                     data.pop("end_date", None)
-            update("tenancies", existing[0]["id"], data)
+            _applied, _kept = guarded_update("tenancies", existing[0]["id"], data)
+            if _kept:
+                kept_local += len(_kept)
             updated += 1
         else:
             data["arthur_id"] = aid
-            insert("tenancies", data)
+            _new_id = insert("tenancies", data)
+            set_shadow("tenancies", _new_id, data)
             inserted += 1
         synced += 1
 
-    print(f"  Tenancies synced: {synced} (inserted: {inserted}, updated: {updated})")
+    print(f"  Tenancies synced: {synced} (inserted: {inserted}, updated: {updated}, local edits kept: {kept_local})")
     _build_tenancy_map()
     return _tenancy_id_map
 
@@ -586,6 +654,7 @@ def sync_tenants(force=False):
     """
     print("\n[SYNC] Syncing tenants...")
     if force:
+        _refuse_force_if_local_edits("tenants")
         raw_execute("DELETE FROM tenants")
         print("  Force mode: cleared all tenants")
 
@@ -599,6 +668,7 @@ def sync_tenants(force=False):
     synced = 0
     updated = 0
     inserted = 0
+    kept_local = 0
 
     for tn in items:
         aid = str(tn.get("id", ""))
@@ -677,15 +747,18 @@ def sync_tenants(force=False):
 
         existing = get_by_field("tenants", "arthur_id", aid)
         if existing:
-            update("tenants", existing[0]["id"], data)
+            _applied, _kept = guarded_update("tenants", existing[0]["id"], data)
+            if _kept:
+                kept_local += len(_kept)
             updated += 1
         else:
             data["arthur_id"] = aid
-            insert("tenants", data)
+            _new_id = insert("tenants", data)
+            set_shadow("tenants", _new_id, data)
             inserted += 1
         synced += 1
 
-    print(f"  Tenants synced: {synced} (inserted: {inserted}, updated: {updated})")
+    print(f"  Tenants synced: {synced} (inserted: {inserted}, updated: {updated}, local edits kept: {kept_local})")
 
 
 def sync_applicants(force=False):
@@ -697,6 +770,7 @@ def sync_applicants(force=False):
     """
     print("\n[SYNC] Syncing applicants...")
     if force:
+        _refuse_force_if_local_edits("applicants")
         raw_execute("DELETE FROM applicants")
         print("  Force mode: cleared all applicants")
 
@@ -708,6 +782,7 @@ def sync_applicants(force=False):
     synced = 0
     updated = 0
     inserted = 0
+    kept_local = 0
 
     for a in items:
         aid = str(a.get("id", ""))
@@ -776,15 +851,18 @@ def sync_applicants(force=False):
 
         existing = get_by_field("applicants", "arthur_id", aid)
         if existing:
-            update("applicants", existing[0]["id"], data)
+            _applied, _kept = guarded_update("applicants", existing[0]["id"], data)
+            if _kept:
+                kept_local += len(_kept)
             updated += 1
         else:
             data["arthur_id"] = aid
-            insert("applicants", data)
+            _new_id = insert("applicants", data)
+            set_shadow("applicants", _new_id, data)
             inserted += 1
         synced += 1
 
-    print(f"  Applicants synced: {synced} (inserted: {inserted}, updated: {updated})")
+    print(f"  Applicants synced: {synced} (inserted: {inserted}, updated: {updated}, local edits kept: {kept_local})")
 
 
 def sync_transactions(force=False):
@@ -796,6 +874,7 @@ def sync_transactions(force=False):
     """
     print("\n[SYNC] Syncing transactions...")
     if force:
+        _refuse_force_if_local_edits("transactions")
         raw_execute("DELETE FROM transactions")
         print("  Force mode: cleared all transactions")
 
@@ -811,6 +890,7 @@ def sync_transactions(force=False):
     synced = 0
     updated = 0
     inserted = 0
+    kept_local = 0
 
     for tx in items:
         aid = str(tx.get("id", ""))
@@ -846,15 +926,18 @@ def sync_transactions(force=False):
 
         existing = get_by_field("transactions", "arthur_id", aid)
         if existing:
-            update("transactions", existing[0]["id"], data)
+            _applied, _kept = guarded_update("transactions", existing[0]["id"], data)
+            if _kept:
+                kept_local += len(_kept)
             updated += 1
         else:
             data["arthur_id"] = aid
-            insert("transactions", data)
+            _new_id = insert("transactions", data)
+            set_shadow("transactions", _new_id, data)
             inserted += 1
         synced += 1
 
-    print(f"  Transactions synced: {synced} (inserted: {inserted}, updated: {updated})")
+    print(f"  Transactions synced: {synced} (inserted: {inserted}, updated: {updated}, local edits kept: {kept_local})")
 
 
 # ── Master Sync ──────────────────────────────────────────────────

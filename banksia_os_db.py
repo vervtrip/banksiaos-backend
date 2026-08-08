@@ -532,6 +532,38 @@ CREATE TABLE IF NOT EXISTS activity_log (
 );
 CREATE INDEX IF NOT EXISTS idx_activity_entity ON activity_log(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_log(created);
+
+-- ── 15. FIELD OVERRIDES (Arthur sync protection) ────────────────
+-- One row per field a member of staff has edited inside Banksia OS.
+-- The inbound Arthur pull strips these fields out of its update, so a
+-- local edit is never overwritten, while every field nobody has touched
+-- keeps syncing from Arthur normally.
+CREATE TABLE IF NOT EXISTS field_overrides (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name  TEXT NOT NULL,
+    row_id      INTEGER NOT NULL,
+    field       TEXT NOT NULL,
+    local_value TEXT,
+    set_at      TEXT NOT NULL,
+    set_by      TEXT NOT NULL DEFAULT 'system',
+    released_at TEXT,
+    UNIQUE(table_name, row_id, field)
+);
+CREATE INDEX IF NOT EXISTS idx_field_overrides_row ON field_overrides(table_name, row_id);
+CREATE INDEX IF NOT EXISTS idx_field_overrides_live ON field_overrides(table_name, row_id, released_at);
+
+-- ── 16. ARTHUR SHADOW (last value Arthur sent, per row) ─────────
+-- The baseline for detecting a local edit. If the live row no longer matches
+-- the shadow on a field, somebody changed it inside Banksia OS, whichever of
+-- the ~70 write paths they used. That is how a local edit is detected without
+-- every endpoint having to remember to flag itself.
+CREATE TABLE IF NOT EXISTS arthur_shadow (
+    table_name  TEXT NOT NULL,
+    row_id      INTEGER NOT NULL,
+    payload     TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (table_name, row_id)
+);
 """
 
 def init_db():
@@ -579,26 +611,208 @@ def _log_sync_conflict(table, row_id, detail=""):
         pass
 
 
-def update(table, row_id, data, mark_dirty=False):
+# Tables mirrored from Arthur. Only these carry sync tracking columns.
+SYNCED_TABLES = {"properties", "units", "tenancies", "tenants", "applicants"}
+# Never claimable as a local override — identity and tracking columns.
+_NEVER_OVERRIDE = {"id", "arthur_id", "sync_dirty", "local_modified",
+                   "sync_origin", "pushed_at", "modified", "created"}
+
+
+def record_field_override(table, row_id, field, value, actor="system"):
+    """Claim one field on one row as locally owned.
+
+    After this, the inbound Arthur pull will leave that field alone for good.
+    Called by every staff-initiated write path. Safe to call repeatedly — the
+    latest local value simply replaces the stored one.
+    """
+    if table not in SYNCED_TABLES or field in _NEVER_OVERRIDE or not row_id:
+        return
+    try:
+        conn = get_db()
+        conn.execute(
+            "INSERT INTO field_overrides (table_name,row_id,field,local_value,set_at,set_by,released_at) "
+            "VALUES (?,?,?,?,?,?,NULL) "
+            "ON CONFLICT(table_name,row_id,field) DO UPDATE SET "
+            "  local_value=excluded.local_value, set_at=excluded.set_at, "
+            "  set_by=excluded.set_by, released_at=NULL",
+            (table, int(row_id), field, None if value is None else str(value),
+             datetime.now(timezone.utc).isoformat(), actor or "system"),
+        )
+        conn.commit()
+    except Exception:
+        pass
+
+
+def record_field_overrides(table, row_id, data, actor="system", only_fields=None):
+    """Claim several fields at once. `data` is the dict that was just written."""
+    if table not in SYNCED_TABLES or not row_id:
+        return
+    for k, v in (data or {}).items():
+        if only_fields is not None and k not in only_fields:
+            continue
+        record_field_override(table, row_id, k, v, actor)
+
+
+def release_field_override(table, row_id, field):
+    """Hand a field back to Arthur — it will be overwritten by the next pull.
+
+    The shadow has to move with it. Otherwise the live value still differs from
+    the last thing Arthur sent, the next pull reads that as a fresh local edit
+    and immediately re-claims the field, which is the permanent freeze this
+    whole design exists to avoid.
+    """
+    try:
+        conn = get_db()
+        conn.execute(
+            "UPDATE field_overrides SET released_at = ? "
+            "WHERE table_name = ? AND row_id = ? AND field = ? AND released_at IS NULL",
+            (datetime.now(timezone.utc).isoformat(), table, int(row_id), field),
+        )
+        conn.commit()
+        cur = get(table, row_id) or {}
+        shadow = get_shadow(table, row_id)
+        shadow[field] = _shadow_val(cur.get(field))
+        set_shadow(table, row_id, shadow)
+    except Exception:
+        pass
+
+
+def overridden_fields(table, row_id):
+    """Set of field names on this row that Banksia OS owns."""
+    if table not in SYNCED_TABLES or not row_id:
+        return set()
+    try:
+        conn = get_db()
+        rows = conn.execute(
+            "SELECT field FROM field_overrides "
+            "WHERE table_name = ? AND row_id = ? AND released_at IS NULL",
+            (table, int(row_id)),
+        ).fetchall()
+        return {r[0] for r in rows}
+    except Exception:
+        return set()
+
+
+def overridden_fields_bulk(table):
+    """{row_id: {field, ...}} for a whole table — one query per sync run
+    instead of one per record, which matters at 7,000+ transactions."""
+    out = {}
+    if table not in SYNCED_TABLES:
+        return out
+    try:
+        conn = get_db()
+        for r in conn.execute(
+            "SELECT row_id, field FROM field_overrides "
+            "WHERE table_name = ? AND released_at IS NULL", (table,)
+        ).fetchall():
+            out.setdefault(r[0], set()).add(r[1])
+    except Exception:
+        pass
+    return out
+
+
+def get_shadow(table, row_id):
+    """The field values Arthur last sent for this row, or {} if never seen."""
+    try:
+        conn = get_db()
+        r = conn.execute(
+            "SELECT payload FROM arthur_shadow WHERE table_name = ? AND row_id = ?",
+            (table, int(row_id)),
+        ).fetchone()
+        return json.loads(r[0]) if r and r[0] else {}
+    except Exception:
+        return {}
+
+
+def set_shadow(table, row_id, payload):
+    """Store what Arthur just sent, as the baseline for the next pull."""
+    try:
+        conn = get_db()
+        conn.execute(
+            "INSERT INTO arthur_shadow (table_name,row_id,payload,updated_at) VALUES (?,?,?,?) "
+            "ON CONFLICT(table_name,row_id) DO UPDATE SET "
+            "  payload=excluded.payload, updated_at=excluded.updated_at",
+            (table, int(row_id), json.dumps({k: _shadow_val(v) for k, v in (payload or {}).items()}),
+             datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+    except Exception:
+        pass
+
+
+def _shadow_val(v):
+    """Compare everything as text — SQLite is loosely typed and Arthur sends
+    numbers as strings about half the time."""
+    return "" if v is None else str(v)
+
+
+def guarded_update(table, row_id, data, actor="arthur_sync"):
+    """Apply an inbound Arthur payload, keeping any field staff have changed.
+
+    Compares the live row against the shadow (what Arthur last sent). A field
+    that no longer matches was edited inside Banksia OS, so it is claimed as a
+    local override and dropped from this update. Everything nobody has touched
+    syncs normally.
+
+    This is deliberately done here rather than in each of the ~70 endpoints that
+    write to these tables: an endpoint can forget to flag itself, a value that
+    differs from Arthur cannot.
+
+    Returns (applied_fields, kept_local_fields).
+    """
+    if table not in SYNCED_TABLES:
+        update(table, row_id, dict(data))
+        return list(data.keys()), []
+    shadow = get_shadow(table, row_id)
+    current = get(table, row_id) or {}
+    kept = []
+    if shadow:
+        for field in list(data.keys()):
+            if field in _NEVER_OVERRIDE or field not in shadow:
+                continue
+            if _shadow_val(current.get(field)) != _shadow_val(shadow.get(field)):
+                # Live value drifted from Arthur's last -> a person changed it.
+                record_field_override(table, row_id, field, current.get(field), actor="banksia_os")
+                kept.append(field)
+    # Anything already claimed stays claimed even if the values happen to agree.
+    owned = overridden_fields(table, row_id)
+    payload = {k: v for k, v in data.items() if k not in owned and k not in kept}
+    if payload:
+        update(table, row_id, dict(payload))
+    if kept:
+        _log_sync_conflict(table, row_id, "kept local value for: " + ", ".join(sorted(set(kept))))
+    # Baseline is always what Arthur said, including fields we chose not to
+    # apply — so a field stays protected for as long as it differs from Arthur.
+    set_shadow(table, row_id, data)
+    return list(payload.keys()), sorted(set(kept))
+
+
+def update(table, row_id, data, mark_dirty=False, _owned=None):
     now = datetime.now(timezone.utc).isoformat()
     data["modified"] = now
     if mark_dirty:
-        # Local (Banksia OS) edit: flag for push-back to Arthur and protect
-        # this record from being overwritten by the next inbound pull sync.
+        # Local (Banksia OS) edit: flag for push-back to Arthur and claim every
+        # field written here so the next inbound pull cannot undo it.
         data["sync_dirty"] = 1
         data["local_modified"] = now
         data["sync_origin"] = "banksia_os"
+        record_field_overrides(table, row_id, data)
     else:
-        # Inbound/programmatic update. Never clobber a local edit that has not
-        # yet been pushed back to Arthur (sync_dirty=1). Skip and log instead.
-        try:
-            _c = get_db()
-            _r = _c.execute(f"SELECT sync_dirty FROM {table} WHERE id = ?", (row_id,)).fetchone()
-            if _r and (_r[0] or 0) == 1:
-                _log_sync_conflict(table, row_id, "inbound pull blocked; local edit pending push")
-                return
-        except sqlite3.OperationalError:
-            pass  # table has no sync_dirty column (e.g. transactions) -> proceed
+        # Inbound pull from Arthur. Drop any field Banksia OS owns and write the
+        # rest, so a record keeps syncing on the fields nobody has touched.
+        # `_owned` lets a sync run pass in a pre-fetched set (see
+        # overridden_fields_bulk) rather than hitting the DB per row.
+        owned = overridden_fields(table, row_id) if _owned is None else set(_owned or ())
+        if owned:
+            blocked = [k for k in data if k in owned]
+            if blocked:
+                for k in blocked:
+                    data.pop(k, None)
+                _log_sync_conflict(
+                    table, row_id,
+                    "inbound pull kept local value for: " + ", ".join(sorted(blocked)))
+        if not [k for k in data if k not in ("modified",)]:
+            return  # nothing left but the timestamp — don't touch the row
     items = [(k, data[k]) for k in data if data[k] is not None]
     if not items:
         return
