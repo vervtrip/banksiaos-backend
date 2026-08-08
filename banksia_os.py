@@ -17534,6 +17534,20 @@ MAINT_TYPES_BOARD = [
 # What a tenant may pick on the public form. Deliberately shorter than the
 # board's own list: Certificate, Licenses and Refurbishment are things we raise,
 # not things anybody reports.
+# Where the problem is, as a tenant would say it (Norbert, 2026-08-08). Only the
+# first one belongs to them alone; the rest are shared, which is why the board's
+# Unit column is left empty for those -- a communal job is not against a room.
+MAINT_AREAS = [
+    ("room", "Your room", "Tenant's room"),
+    ("kitchen", "Kitchen", "Kitchen"),
+    ("bathroom", "Bathroom", "Bathroom"),
+    ("garden", "Garden", "Garden"),
+    ("hallway", "Hallway", "Hallway"),
+    ("front", "Front of house", "Front of house"),
+]
+MAINT_AREA_KEYS = {a[0] for a in MAINT_AREAS}
+MAINT_AREA_BOARD = {a[0]: a[2] for a in MAINT_AREAS}
+
 MAINT_TYPES_PUBLIC = [
     "Plumbing", "Heating", "Electrical", "Gas", "Appliances", "Utilities",
     "Structural", "Wall Repairs", "Locksmith", "Pest Control", "Cleaning",
@@ -17556,6 +17570,56 @@ def _ensure_cost_ll_override(db):
         db.commit()
     except Exception:
         pass  # already present
+
+
+def _ensure_reporter_columns(db):
+    """Who the report came from, beyond a name and an email.
+
+    The phone is the thing an operative actually needs, and the reporter's own
+    room has to be kept even when the fault is in the kitchen -- otherwise a
+    communal report gives you no way back to the person who made it.
+    """
+    for ddl in ("ALTER TABLE maintenance_jobs ADD COLUMN reporter_phone TEXT DEFAULT ''",
+                "ALTER TABLE maintenance_jobs ADD COLUMN reporter_unit TEXT DEFAULT ''"):
+        try:
+            db.execute(ddl)
+            db.commit()
+        except Exception:
+            pass  # already present
+
+
+def _tenant_at(db, property_id, unit_ref):
+    """The tenant living in that room, or None.
+
+    Matched on the unit reference within the property, and only against a
+    tenancy that is actually running -- Current or Periodic. A past tenant's
+    name on a live report would be worse than no name at all.
+    """
+    if not unit_ref:
+        return None
+    row = db.execute(
+        """SELECT t.first_name, t.last_name, t.email, t.mobile, t.phone_home, u.unit_ref
+           FROM units u
+           JOIN tenants t ON t.unit_id = u.id
+           LEFT JOIN tenancies ten ON t.tenancy_id = ten.id
+           WHERE u.property_id = ?
+             AND LOWER(TRIM(u.unit_ref)) = LOWER(TRIM(?))
+           ORDER BY CASE WHEN UPPER(COALESCE(ten.status, '')) IN ('CURRENT', 'PERIODIC')
+                         THEN 0 ELSE 1 END,
+                    t.id DESC
+           LIMIT 1""",
+        [property_id, unit_ref]
+    ).fetchone()
+    if not row:
+        return None
+    row = dict(row)
+    name = (" ".join(x for x in [row.get("first_name"), row.get("last_name")] if x)).strip()
+    return {
+        "name": name,
+        "email": (row.get("email") or "").strip(),
+        "phone": (row.get("mobile") or row.get("phone_home") or "").strip(),
+        "unit": (row.get("unit_ref") or "").strip(),
+    }
 
 
 def _evidence_name(raw):
@@ -17734,6 +17798,7 @@ def api_public_report_options():
         "properties": [{"id": p["id"], "name": p["name"], "units": by_prop.get(p["id"], [])}
                        for p in props if p.get("name")],
         "types": MAINT_TYPES_PUBLIC,
+        "areas": [{"key": k, "label": l} for k, l, _ in MAINT_AREAS],
     })
 
 
@@ -17765,7 +17830,15 @@ def api_public_report_job():
     if not property_id:
         return json_error("Please choose the property.", 400)
 
+    # The room is where the TENANT LIVES, not where the fault is (Norbert,
+    # 2026-08-08). It is what identifies them, so it is required.
     unit = str(request.form.get("unit") or "").strip()[:120]
+    if not unit:
+        return json_error("Please choose the room you live in.", 400)
+
+    area = str(request.form.get("area") or "").strip().lower()
+    if area not in MAINT_AREA_KEYS:
+        return json_error("Please say where the problem is.", 400)
     # Required as of 2026-08-08 (Norbert). A report with no type cannot be sent
     # to the right trade without somebody reading it first.
     job_type = str(request.form.get("type") or "").strip()
@@ -17810,20 +17883,31 @@ def api_public_report_job():
 
         _ensure_maintenance_cost_ll(db)
         _ensure_maintenance_cert_key(db)
+        _ensure_reporter_columns(db)
         reference = _next_maintenance_reference(db)
         title = description.split("\n")[0][:120]
+        tenant = _tenant_at(db, property_id, unit)
+
+        # The board's Unit column is only filled when the fault is in the
+        # tenant's own room. A blocked kitchen sink is not a job against room D2,
+        # and filing it there would put communal work on one room's record.
+        board_unit = unit if area == "room" else ""
         cur = db.execute(
             """INSERT INTO maintenance_jobs
                (reference, title, description, type, priority, status, location,
-                property_id, address, emergency, source, bill_ll)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'tenant', 0)""",
+                unit, property_id, address, emergency, source, bill_ll,
+                reporter_name, reporter_email, reporter_phone, reporter_unit)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'tenant', 0, ?, ?, ?, ?)""",
             [reference, title, description, job_type or None,
              "High" if emergency else "Medium",
              # An emergency does not wait in the intake pile to be noticed
              # (Norbert, 2026-08-08): ticking the box puts it straight into
              # Urgent, which is the group that means "before anything else".
              "URGENT" if emergency else MAINT_INTAKE_ONLY,
-             unit or None, property_id, prop.get("name"), emergency]
+             MAINT_AREA_BOARD.get(area, ""), board_unit,
+             property_id, prop.get("name"), emergency,
+             (tenant or {}).get("name", ""), (tenant or {}).get("email", ""),
+             (tenant or {}).get("phone", ""), unit]
         )
         db.commit()
         job_id = cur.lastrowid

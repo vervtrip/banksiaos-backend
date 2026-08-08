@@ -90,13 +90,19 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bk-page);colo
       </div>
 
       <div class="fg">
-        <label>Property <span class="req">*</span></label>
+        <label>The property you live in <span class="req">*</span></label>
         <select id="property"><option value="">Loading…</option></select>
       </div>
 
       <div class="fg">
-        <label>Room or unit <span class="opt">optional</span></label>
-        <select id="unit"><option value="">Not sure / whole property</option></select>
+        <label>Your room <span class="req">*</span></label>
+        <select id="unit"><option value="">Choose your room…</option></select>
+        <div class="hint">This is your own room, not where the problem is — it tells us who you are.</div>
+      </div>
+
+      <div class="fg">
+        <label>Where is the problem? <span class="req">*</span></label>
+        <select id="area"><option value="">Choose…</option></select>
       </div>
 
       <div class="fg">
@@ -160,6 +166,9 @@ async function load() {
     var ts = document.getElementById('type');
     ts.innerHTML = '<option value="">Choose the type of job…</option>' +
       (j.data.types || []).map(function(t){ return '<option value="' + esc(t) + '">' + esc(t) + '</option>'; }).join('');
+    var as = document.getElementById('area');
+    as.innerHTML = '<option value="">Choose…</option>' +
+      (j.data.areas || []).map(function(a){ return '<option value="' + esc(a.key) + '">' + esc(a.label) + '</option>'; }).join('');
   } catch (e) {
     showErr('We could not load the property list. Please refresh the page.');
   }
@@ -171,9 +180,9 @@ document.getElementById('property').addEventListener('change', function () {
   var p = PROPS.find(function (x) { return String(x.id) === this.value; }.bind(this));
   var us = document.getElementById('unit');
   var units = (p && p.units) || [];
-  us.innerHTML = '<option value="">Not sure / whole property</option>' +
+  us.innerHTML = (units.length ? '<option value="">Choose your room…</option>'
+                               : '<option value="">No rooms listed — call us</option>') +
     units.map(function (u) { return '<option value="' + esc(u) + '">' + esc(u) + '</option>'; }).join('');
-  us.parentElement.style.display = units.length ? 'block' : 'none';
 });
 
 document.getElementById('drop').addEventListener('click', function () {
@@ -204,7 +213,9 @@ async function send() {
   var desc = document.getElementById('description').value.trim();
   var prop = document.getElementById('property').value;
   if (desc.length < 10) return showErr('Please describe the problem in a little more detail.');
-  if (!prop) return showErr('Please choose the property.');
+  if (!prop) return showErr('Please choose the property you live in.');
+  if (!document.getElementById('unit').value) return showErr('Please choose the room you live in.');
+  if (!document.getElementById('area').value) return showErr('Please say where the problem is.');
   if (!document.getElementById('type').value) return showErr('Please choose the type of job.');
   if (!picked.length) return showErr('Please add a photo or a short video of the problem.');
 
@@ -216,6 +227,7 @@ async function send() {
   fd.append('description', desc);
   fd.append('property_id', prop);
   fd.append('unit', document.getElementById('unit').value);
+  fd.append('area', document.getElementById('area').value);
   fd.append('type', document.getElementById('type').value);
   fd.append('emergency', document.getElementById('emergency').checked ? '1' : '0');
   picked.forEach(function (f) { fd.append('evidence', f); });
