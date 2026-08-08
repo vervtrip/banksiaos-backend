@@ -1211,14 +1211,21 @@ def _needs_evidence(job):
 
 # Somebody did the work and somebody has to be paid for it. A job closed with
 # nobody named cannot be matched to an invoice later (Norbert, 2026-08-08).
-MAINT_COMPLETED_REQUIRED = ("contractor",)
+#
+# The start date joins it because the Landlord Report bills by month, and the
+# month a job belongs to is its start date. A completed job without one cannot be
+# put in a month, so it would sit outside every total on the report.
+MAINT_COMPLETED_REQUIRED = ("contractor", "start_date")
 
 
 def _completed_blockers(job):
     """What is stopping this job being closed."""
+    missing = []
     if not str(job.get("contractor") or "").strip():
-        return ["a contractor"]
-    return []
+        missing.append("a contractor")
+    if not str(job.get("start_date") or "").strip():
+        missing.append("a start date")
+    return missing
 
 
 def _live_blockers(job):
@@ -1495,7 +1502,7 @@ def api_maintenance_job(job_id):
         # exactly as it was, not half-applied.
         if str(data.get("status") or "").strip().upper() == "COMPLETED":
             current = db.execute(
-                "SELECT contractor FROM maintenance_jobs WHERE id = ?", [job_id]
+                "SELECT contractor, start_date FROM maintenance_jobs WHERE id = ?", [job_id]
             ).fetchone()
             merged = dict(current or {})
             for f in MAINT_COMPLETED_REQUIRED:
@@ -17679,7 +17686,7 @@ def api_maintenance_bulk_status():
         for job_id in ids:
             row = db.execute(
                 "SELECT id, reference, status, contractor, labour_cost, materials_cost, "
-                "photo_paths, type FROM maintenance_jobs WHERE id = ?", [job_id]
+                "photo_paths, type, start_date FROM maintenance_jobs WHERE id = ?", [job_id]
             ).fetchone()
             if not row:
                 refused.append({"id": job_id, "reference": "#%s" % job_id,
@@ -18001,6 +18008,35 @@ def api_maintenance_ll_invoice(job_id):
 # ─── Landlord Report ─────────────────────────────────────────────────────────
 
 
+def _month_label(key):
+    """"2026-08" -> "August 2026"."""
+    if not key:
+        return "No start date"
+    from datetime import datetime
+    try:
+        return datetime.strptime(key, "%Y-%m").strftime("%B %Y")
+    except ValueError:
+        return key
+
+
+def _months_in_order(months):
+    """Newest month first, with the undated group at the top.
+
+    Undated leads because it is the only group anybody has to act on: those jobs
+    need a date before they belong to a month at all.
+    """
+    out = []
+    for key in sorted(months.keys(), reverse=True):
+        m = months[key]
+        m["label"] = _month_label(key)
+        m["job_count"] = len(m["jobs"])
+        m["margin"] = round(m["charged"] - m["our_cost"], 2)
+        out.append(m)
+    # sorted() with reverse puts "" last; it belongs first.
+    undated = [m for m in out if not m["key"]]
+    return undated + [m for m in out if m["key"]]
+
+
 def _require_super_admin():
     """Refuse anyone who is not super_admin. Returns a response, or None to carry on.
 
@@ -18088,11 +18124,23 @@ def api_maintenance_landlord_report():
                              or str(r.get("owner_company") or "").strip()
                              or "No landlord on the property"),
                 "management_type": mt or "Not set",
-                "jobs": [], "our_cost": 0.0, "charged": 0.0,
+                "jobs": [], "months": {}, "our_cost": 0.0, "charged": 0.0,
             })
             entry["jobs"].append(job)
             entry["our_cost"] = round(entry["our_cost"] + ours, 2)
             entry["charged"] = round(entry["charged"] + charged, 2)
+
+            # Billed by the month the work started (Norbert, 2026-08-08). A job
+            # with no start date is kept in its own group rather than dropped or
+            # guessed into a month -- it is a job somebody has to date, and
+            # hiding it would take it out of the property total as well.
+            mkey = str(job.get("start_date") or "")[:7]
+            months = entry["months"]
+            m = months.setdefault(mkey, {"key": mkey, "jobs": [],
+                                         "our_cost": 0.0, "charged": 0.0})
+            m["jobs"].append(job)
+            m["our_cost"] = round(m["our_cost"] + ours, 2)
+            m["charged"] = round(m["charged"] + charged, 2)
 
         categories = []
         for key in ("management", "guaranteed"):
@@ -18101,6 +18149,7 @@ def api_maintenance_landlord_report():
             for e in b["props"].values():
                 e["job_count"] = len(e["jobs"])
                 e["margin"] = round(e["charged"] - e["our_cost"], 2)
+                e["months"] = _months_in_order(e["months"])
                 props.append(e)
             props.sort(key=lambda e: (-e["charged"], e["property_name"]))
             categories.append({
