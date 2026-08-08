@@ -17766,8 +17766,12 @@ def api_public_report_job():
         return json_error("Please choose the property.", 400)
 
     unit = str(request.form.get("unit") or "").strip()[:120]
+    # Required as of 2026-08-08 (Norbert). A report with no type cannot be sent
+    # to the right trade without somebody reading it first.
     job_type = str(request.form.get("type") or "").strip()
-    if job_type and job_type not in MAINT_TYPES_PUBLIC:
+    if not job_type:
+        return json_error("Please choose the type of job.", 400)
+    if job_type not in MAINT_TYPES_PUBLIC:
         return json_error("That is not one of the job types.", 400)
     emergency = 1 if str(request.form.get("emergency") or "").lower() in ("1", "true", "on", "yes") else 0
 
