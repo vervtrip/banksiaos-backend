@@ -17848,6 +17848,83 @@ def api_maintenance_evidence_upload(job_id):
 _REPORT_MAX_FILES = 6
 
 
+# Openers a tenant writes before getting to the point. Stripped from the SHORT
+# version only -- the full description is kept exactly as they typed it.
+_REPORT_FILLER = (
+    "hi", "hello", "hey", "good morning", "good afternoon", "good evening",
+    "please", "please can you", "can you please", "can you", "could you",
+    "i would like to report that", "i would like to report", "i want to report",
+    "i am writing to report that", "i am writing to report", "just to let you know that",
+    "just to let you know", "i just wanted to say that", "sorry to bother you but",
+    "sorry to bother you", "i need to report that", "i need to report",
+    "this is to report that", "im reporting that", "i'm reporting that",
+    # Whole pleasantries. Matched by phrase rather than by length, because a
+    # short opening sentence can still be the point ("Boiler is dead.").
+    "hope you are well", "hope you're well", "hope youre well",
+    "hope this finds you well", "hope all is well", "hope your well",
+    "thanks", "thank you", "thanks in advance", "hi there", "hello there",
+    "please help", "can you help", "please can you help", "help",
+)
+
+
+_FILLER_LONGEST_FIRST = tuple(sorted(_REPORT_FILLER, key=len, reverse=True))
+
+
+def _short_title(text, limit=72):
+    """A short line the board can be scanned by, from whatever the tenant wrote.
+
+    A tenant reporting a fault writes a paragraph, and the board's Description
+    column is one line wide (Norbert, 2026-08-08). This keeps the first sentence,
+    drops the throat-clearing in front of it, and cuts on a word boundary. It is
+    only ever the TITLE -- the description they typed is stored untouched and
+    shown in full on the job page, so nothing they said is lost.
+
+    Deliberately mechanical: no summarising model. A repair note that quietly
+    changes meaning is worse than one that is merely long.
+    """
+    import re as _re
+    body = _re.sub(r"\s+", " ", str(text or "")).strip()
+    if not body:
+        return ""
+
+    def _strip_lead(s):
+        return s.lstrip(" ,.:;!?-–—")
+
+    # Peel off pleasantries, however many layers, including a whole opening
+    # sentence that says nothing ("Hi there." / "Hope you are well.").
+    for _ in range(6):
+        before = body
+        body = _strip_lead(body)
+        low = body.lower()
+        # Longest first: "hi" would otherwise win over "hi there" and leave
+        # "there, hope you are well" standing as the title.
+        for f in _FILLER_LONGEST_FIRST:
+            if low.startswith(f) and len(body) > len(f) + 3:
+                body = _strip_lead(body[len(f):])
+                break
+        m = _re.search(r"[.!?](\s|$)", body)
+        # Only a very short opener is throat-clearing by length alone. Anything
+        # longer is caught by phrase, because "Boiler is dead." IS the report.
+        if m and m.start() < 10 and len(body) > m.start() + 8:
+            body = _strip_lead(body[m.start() + 1:])
+        if body == before:
+            break
+
+    # The first real sentence, if it stands on its own.
+    m = _re.search(r"[.!?](\s|$)", body)
+    if m and m.start() + 1 >= 20:
+        body = body[:m.start()].strip()
+
+    if len(body) > limit:
+        cut = body[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-–—")
+        body = (cut or body[:limit]).rstrip() + "…"
+
+    return body[0].upper() + body[1:] if body else body
+
+
+
+
+
 def _public_throttle(bucket, subject, limit, window):
     """True when this caller is over the limit.
 
@@ -17997,7 +18074,7 @@ def api_public_report_job():
         _ensure_maintenance_cert_key(db)
         _ensure_reporter_columns(db)
         reference = _next_maintenance_reference(db)
-        title = description.split("\n")[0][:120]
+        title = _short_title(description) or description[:120]
         tenant = _tenant_at(db, property_id, unit)
 
         # The board's Unit column is only filled when the fault is in the
