@@ -17746,17 +17746,22 @@ def api_maintenance_bulk_status():
 # Zolt invoice he sent. Generated on demand rather than stored: the job is the
 # record, and a stored PDF would go stale the moment a figure is corrected.
 
-INVOICE_BILL_TO = [
-    "Verv Rooms",
-    "35a Highbury Corner",
-    "N5 1RA",
-    "London",
-]
+# Both sides of this invoice are fixed (Norbert, 2026-08-08): Zolt raises it
+# against Banksia for work billed on to a landlord, so neither party comes from
+# the job. The addresses and the bank details are his ZOLT-322 template.
+INVOICE_FROM = ["Zolt X", "2 Claremont Square", "N1 9LY", "London"]
+INVOICE_BILL_TO = ["Banksia", "29-31 Adelaide Road", "London"]
+INVOICE_PAYMENT = [("Sort Code", "23-08-01"), ("Acc Number", "26242135")]
 
-# Banksia green, so the document does not look like it came from somewhere else.
-INVOICE_ACCENT = (0.32, 0.73, 0.19)
-INVOICE_INK = (0.11, 0.13, 0.16)
-INVOICE_MUTED = (0.45, 0.49, 0.55)
+# assets/, not media/ -- media is gitignored because it holds tenant documents,
+# so a logo left there would be missing on any fresh checkout.
+INVOICE_LOGO = os.path.join(os.path.dirname(__file__), "assets", "invoice", "zolt-x.jpeg")
+
+# The template is black and #404040 grey with no accent colour. Kept as it is.
+INVOICE_INK = (0.0, 0.0, 0.0)
+INVOICE_MUTED = (0.251, 0.251, 0.251)
+INVOICE_RULE = (0.78, 0.79, 0.80)
+INVOICE_BAND = (0.957, 0.961, 0.965)
 
 
 def _money(n):
@@ -17786,8 +17791,8 @@ def _invoice_date(job):
 
 
 def _invoice_pdf_bytes(job):
-    """Draw the invoice. Kept to one page: it is one job, and an invoice that
-    runs over is an invoice somebody has to check twice."""
+    """Draw the invoice. One page: it is one job, and an invoice that runs over
+    is an invoice somebody has to check twice."""
     import io as _io
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas as rl_canvas
@@ -17797,75 +17802,83 @@ def _invoice_pdf_bytes(job):
     c = rl_canvas.Canvas(buf, pagesize=A4)
     c.setTitle("Invoice %s" % (job.get("reference") or ""))
 
-    L, R = 48, W - 48
+    L, R = 52, W - 52
 
     def ink(col=INVOICE_INK):
         c.setFillColorRGB(*col)
 
-    # Accent rule across the head.
-    c.setFillColorRGB(*INVOICE_ACCENT)
-    c.rect(0, H - 10, W, 10, stroke=0, fill=1)
+    def rule(y, col=INVOICE_RULE, width=0.8):
+        c.setStrokeColorRGB(*col)
+        c.setLineWidth(width)
+        c.line(L, y, R, y)
 
-    y = H - 62
+    # ── Head: the mark sits top right, as on the template ──
+    top = H - 58
+    logo_h = 0
+    if os.path.exists(INVOICE_LOGO):
+        try:
+            from reportlab.lib.utils import ImageReader
+            img = ImageReader(INVOICE_LOGO)
+            iw, ih = img.getSize()
+            logo_h = 46.0
+            logo_w = logo_h * (iw / float(ih or 1))
+            c.drawImage(img, R - logo_w, top - logo_h + 30, width=logo_w, height=logo_h,
+                        mask="auto", preserveAspectRatio=True)
+        except Exception:
+            logo_h = 0  # a missing logo must not cost anybody their invoice
+
     ink()
-    c.setFont("Helvetica-Bold", 26)
-    c.drawString(L, y, "INVOICE")
+    c.setFont("Helvetica-Bold", 25)
+    c.drawString(L, top, "INVOICE")
 
     number = "INV-%s" % (job.get("reference") or job.get("id"))
     when = _invoice_date(job)
-    c.setFont("Helvetica-Bold", 11)
-    c.drawRightString(R, y + 8, number)
     ink(INVOICE_MUTED)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(L, top - 19, number)
     c.setFont("Helvetica", 10)
-    c.drawRightString(R, y - 6, when.strftime("%-d %b %Y") if hasattr(when, "strftime") else "")
+    c.drawString(L, top - 33, when.strftime("%-d %b %Y"))
 
-    y -= 24
-    c.setStrokeColorRGB(0.85, 0.87, 0.89)
-    c.setLineWidth(1)
-    c.line(L, y, R, y)
+    y = top - 50
+    rule(y, INVOICE_INK, 1.6)
 
     # ── Bill to (left) and From (right) ──
     y -= 30
-    top = y
-    ink(INVOICE_MUTED)
-    c.setFont("Helvetica-Bold", 8.5)
-    c.drawString(L, y, "BILL TO")
-    ink()
-    c.setFont("Helvetica-Bold", 11.5)
-    y -= 16
-    c.drawString(L, y, INVOICE_BILL_TO[0])
-    c.setFont("Helvetica", 10.5)
-    for line in INVOICE_BILL_TO[1:]:
-        y -= 14
-        c.drawString(L, y, line)
+    block_top = y
 
-    ry = top
-    ink(INVOICE_MUTED)
-    c.setFont("Helvetica-Bold", 8.5)
-    c.drawRightString(R, ry, "FROM")
-    ink()
-    c.setFont("Helvetica-Bold", 11.5)
-    ry -= 16
-    c.drawRightString(R, ry, str(job.get("contractor") or "Contractor not recorded"))
-    ink(INVOICE_MUTED)
-    c.setFont("Helvetica", 10.5)
-    ry -= 14
-    c.drawRightString(R, ry, "Reference %s" % (job.get("reference") or ""))
+    def party(heading, lines, x, align_right=False):
+        yy = block_top
+        put = c.drawRightString if align_right else c.drawString
+        ink(INVOICE_MUTED)
+        c.setFont("Helvetica-Bold", 8.5)
+        put(x, yy, heading)
+        yy -= 17
+        ink()
+        c.setFont("Helvetica-Bold", 12)
+        put(x, yy, lines[0])
+        ink(INVOICE_MUTED)
+        c.setFont("Helvetica", 10.5)
+        for line in lines[1:]:
+            yy -= 14
+            put(x, yy, line)
+        return yy
+
+    ly = party("BILL TO", INVOICE_BILL_TO, L)
+    ry = party("FROM", INVOICE_FROM, R, align_right=True)
 
     # ── What the invoice is for ──
-    y = min(y, ry) - 34
+    y = min(ly, ry) - 34
     ink(INVOICE_MUTED)
     c.setFont("Helvetica-Bold", 8.5)
     c.drawString(L, y, "WORK CARRIED OUT")
-    y -= 17
+    y -= 18
     ink()
-    c.setFont("Helvetica-Bold", 12)
-    title = str(job.get("title") or "Maintenance")
-    c.drawString(L, y, title[:78])
+    c.setFont("Helvetica-Bold", 12.5)
+    c.drawString(L, y, str(job.get("title") or "Maintenance")[:76])
 
     where = str(job.get("property_name") or "").strip()
     unit = str(job.get("unit") or "").strip()
-    # Some jobs carry the whole address in the unit field, which prints as
+    # Some jobs carry the whole address in the unit field, which printed as
     # "22 Carrol Close, 22 Carrol Close". A near-duplicate is left alone -- two
     # spellings of one address is a data question, not a formatting one.
     if unit and unit.lower() != where.lower():
@@ -17885,13 +17898,13 @@ def _invoice_pdf_bytes(job):
         c.drawString(L, y, "Completed %s" % done)
 
     # ── Items ──
-    y -= 34
-    c.setFillColorRGB(0.96, 0.97, 0.98)
-    c.rect(L, y - 6, R - L, 24, stroke=0, fill=1)
+    y -= 36
+    c.setFillColorRGB(*INVOICE_BAND)
+    c.rect(L, y - 7, R - L, 24, stroke=0, fill=1)
     ink(INVOICE_MUTED)
     c.setFont("Helvetica-Bold", 8.5)
-    c.drawString(L + 12, y + 3, "ITEMS")
-    c.drawRightString(R - 12, y + 3, "AMOUNT")
+    c.drawString(L + 12, y + 2, "ITEMS")
+    c.drawRightString(R - 12, y + 2, "AMOUNT")
 
     labour = float(job.get("labour_cost") or 0)
     materials = float(job.get("materials_cost") or 0)
@@ -17904,13 +17917,13 @@ def _invoice_pdf_bytes(job):
         c.setFont("Helvetica", 11)
         c.drawString(L + 12, y, label)
         c.drawRightString(R - 12, y, _money(amount))
-        c.setStrokeColorRGB(0.91, 0.93, 0.94)
+        c.setStrokeColorRGB(*INVOICE_RULE)
         c.setLineWidth(0.6)
         c.line(L + 12, y - 8, R - 12, y - 8)
 
     y -= 30
-    c.setStrokeColorRGB(*INVOICE_ACCENT)
-    c.setLineWidth(1.6)
+    c.setStrokeColorRGB(*INVOICE_INK)
+    c.setLineWidth(1.4)
     c.line(L + 12, y + 14, R - 12, y + 14)
     ink()
     c.setFont("Helvetica-Bold", 13)
@@ -17918,28 +17931,33 @@ def _invoice_pdf_bytes(job):
     c.drawRightString(R - 12, y - 4, _money(total))
 
     # ── Payment, directly under the total where it is read ──
-    y -= 44
-    c.setFillColorRGB(0.96, 0.97, 0.98)
-    c.rect(L, y - 34, R - L, 52, stroke=0, fill=1)
+    y -= 46
+    band_h = 22 + 15 * (len(INVOICE_PAYMENT) + 1)
+    c.setFillColorRGB(*INVOICE_BAND)
+    c.rect(L, y + 14 - band_h, R - L, band_h, stroke=0, fill=1)
     ink(INVOICE_MUTED)
     c.setFont("Helvetica-Bold", 8.5)
-    c.drawString(L + 12, y + 6, "PAYMENT")
+    c.drawString(L + 12, y + 4, "PAYMENT INFORMATION")
+    yy = y - 12
     ink()
+    c.setFont("Helvetica-Bold", 10.5)
+    c.drawString(L + 12, yy, INVOICE_FROM[0])
     c.setFont("Helvetica", 10)
-    c.drawString(L + 12, y - 10, "Please quote %s on payment." % number)
+    for label, value in INVOICE_PAYMENT:
+        yy -= 15
+        c.drawString(L + 12, yy, "%s: %s" % (label, value))
+    yy -= 15
     ink(INVOICE_MUTED)
-    c.setFont("Helvetica", 9)
-    c.drawString(L + 12, y - 25, "Bank details to be confirmed.")
+    c.setFont("Helvetica", 9.5)
+    c.drawString(L + 12, yy, "Reference: %s" % number)
 
     # ── Foot ──
-    c.setStrokeColorRGB(0.85, 0.87, 0.89)
-    c.setLineWidth(1)
-    c.line(L, 74, R, 74)
+    rule(74)
     ink(INVOICE_MUTED)
     c.setFont("Helvetica-Oblique", 9.5)
     c.drawString(L, 56, "Thank you for your business.")
     c.setFont("Helvetica", 8.5)
-    c.drawRightString(R, 56, "%s · %s" % (number, INVOICE_BILL_TO[0]))
+    c.drawRightString(R, 56, "%s · %s" % (number, INVOICE_FROM[0]))
 
     c.showPage()
     c.save()
