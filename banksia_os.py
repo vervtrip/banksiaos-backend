@@ -1355,6 +1355,11 @@ def api_create_maintenance_job():
     for f in required:
         if not data.get(f):
             return json_error(f"'{f}' is required")
+    # The type is required as of 2026-08-08 (Norbert). A job with no type cannot
+    # be sent to the right trade without somebody reading it first. Enforced here
+    # as well as on the form, because the form is not the only way in.
+    if not str(data.get("type") or "").strip():
+        return json_error("Choose the type of job.", 400)
     if data.get("contractor"):
         known = _known_contractor(data.get("contractor"))
         if known is None:
