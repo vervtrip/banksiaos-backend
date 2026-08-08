@@ -6,6 +6,7 @@ Mounts at /api/banksia-os/
 
 Architecture: Route definitions only — business logic lives in services/ modules.
 """
+import ipaddress
 import json, os, sys, re
 from datetime import datetime, timezone, timedelta
 
@@ -92,6 +93,39 @@ _ROLE_POLICY = {
 }
 
 
+def _client_ip():
+    """Address Traefik actually saw.
+
+    Traefik appends the peer to X-Forwarded-For, so the last entry is the one
+    it observed and the only one a caller cannot spoof by sending its own header.
+    """
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        return xff.split(",")[-1].strip()
+    return request.remote_addr or ""
+
+
+def _api_key_ip_allowed(entry):
+    """Whether this key may be used from the calling address.
+
+    Loopback and private ranges always pass so anything running on the box keeps
+    working. Off-box, a key is refused unless the address is in its allowed_ips.
+    """
+    try:
+        ip = ipaddress.ip_address(_client_ip())
+    except ValueError:
+        return False
+    if ip.is_loopback or ip.is_private or ip.is_link_local:
+        return True
+    for cidr in entry.get("allowed_ips") or []:
+        try:
+            if ip in ipaddress.ip_network(cidr, strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 @banksia_os_bp.before_request
 def _require_banksia_auth():
     """All routes in this blueprint require a logged-in session or valid API key."""
@@ -105,7 +139,9 @@ def _require_banksia_auth():
     if request.path.startswith(public_prefixes):
         return None
     # Check API key first (for programmatic access)
-    api_key = request.headers.get("X-API-Key") or request.args.get("api_key")
+    # Header only. A key in the query string ends up in access logs, browser
+    # history and Referer headers, which is not a place for a super_admin key.
+    api_key = request.headers.get("X-API-Key")
     if api_key:
         _ak_path = os.path.join(os.path.dirname(__file__), "api_keys.json")
         if os.path.exists(_ak_path):
@@ -113,6 +149,8 @@ def _require_banksia_auth():
                 _ak_data = json.load(open(_ak_path))
                 _entry = _ak_data.get(api_key)
                 if _entry:
+                    if not _api_key_ip_allowed(_entry):
+                        return jsonify({"success": False, "error": "API key not permitted from this address"}), 403
                     request.current_user = {"username": _entry.get("name", "API"), "role": _entry.get("role", "admin")}
                     return None
             except Exception:
@@ -5616,7 +5654,7 @@ def api_banksia_deposits():
         rows = db.execute(
             f"SELECT d.id, d.tenancy_id, d.amount, d.registered_amount, d.scheme, d.protection_status, "
             f"d.protection_reference, d.date_received, d.date_protected, d.current_status, "
-            f"d.unprotected_at, d.unprotected_by, d.unprotected_reason, "
+            f"d.unprotected_at, d.unprotected_by, d.unprotected_reason, d.date_returned, d.amount_returned, d.deductions, "
             f"t.deposit_held_by, "
             f"t.ref AS tenancy_ref, t.main_tenant_name, t.status AS tenancy_status, "
             f"NULLIF(t.end_date,'') AS tenancy_end, "
@@ -5648,9 +5686,9 @@ def api_banksia_deposits():
             })
 
         today = datetime.now(timezone.utc).date().isoformat()
-        to_register, registered, unprotected = [], [], []
-        amt_to_register = amt_registered = amt_unprotected = 0.0
-        late_count = overdue_count = never_protected_count = 0
+        to_register, registered, unprotected, refunded = [], [], [], []
+        amt_to_register = amt_registered = amt_unprotected = amt_refunded = 0.0
+        late_count = overdue_count = never_protected_count = refunded_count = 0
 
         for r in rows:
             amt = r.get("registered_amount") or r.get("amount") or 0
@@ -5689,6 +5727,10 @@ def api_banksia_deposits():
                 "unprotected_by": r.get("unprotected_by") or "",
                 "unprotected_reason": r.get("unprotected_reason") or "",
                 "manually_unprotected": bool(marked),
+                "date_returned": r.get("date_returned") or "",
+                "amount_returned": round(r.get("amount_returned") or 0, 2),
+                "deductions": round(r.get("deductions") or 0, 2),
+                "refunded": bool(r.get("date_returned")),
                 "attachments": attachments.get(r["id"], []),
             }
 
@@ -5697,20 +5739,36 @@ def api_banksia_deposits():
                 # still matters — one is a deposit to release, the other is a
                 # deposit that was never protected at all — so it is carried
                 # through rather than collapsed into a single state.
-                never_protected = not protected
-                if never_protected:
-                    never_protected_count += 1
-                unprotected.append({
-                    **base,
-                    "category": "unprotected",
-                    "was_protected": protected,
-                    "never_protected": never_protected,
-                    "days_since_end": _days_between(end_date, today) if end_date else None,
-                })
-                # (base already carries manually_unprotected / unprotected_by,
-                # so the row can say whether a person stood it down or the
-                # tenancy simply ran out.)
-                amt_unprotected += amt
+                # But first: if the deposit has been returned to the tenant,
+                # it goes into refunded, not unprotected (Norbert, 2026-08-04).
+                is_refunded = bool(r.get("date_returned"))
+                if is_refunded:
+                    refunded_count += 1
+                    refunded.append({
+                        **base,
+                        "category": "refunded",
+                        "was_protected": protected,
+                        "never_protected": not protected,
+                        "date_returned": r.get("date_returned") or "",
+                        "amount_returned": round(r.get("amount_returned") or 0, 2),
+                        "deductions": round(r.get("deductions") or 0, 2),
+                    })
+                    amt_refunded += amt
+                else:
+                    never_protected = not protected
+                    if never_protected:
+                        never_protected_count += 1
+                    unprotected.append({
+                        **base,
+                        "category": "unprotected",
+                        "was_protected": protected,
+                        "never_protected": never_protected,
+                        "days_since_end": _days_between(end_date, today) if end_date else None,
+                    })
+                    # (base already carries manually_unprotected / unprotected_by,
+                    # so the row can say whether a person stood it down or the
+                    # tenancy simply ran out.)
+                    amt_unprotected += amt
             elif protected:
                 dtr = _days_between(r.get("commencement"), reg_date) if reg_date else None
                 # A registration date in the future cannot have happened, so it
@@ -5755,7 +5813,7 @@ def api_banksia_deposits():
         # deposit. The aliases below are the names that page reads.
         if tenancy_filter:
             flat = []
-            for item in to_register + registered + unprotected:
+            for item in to_register + registered + unprotected + refunded:
                 flat.append({
                     **item,
                     "amount": item["deposit_amount"],
@@ -5766,7 +5824,8 @@ def api_banksia_deposits():
                     "status": {
                         "to_register": "Awaiting registration",
                         "registered": "Registered",
-                        "unprotected": "Tenancy ended",
+                        "unprotected": "Awaiting return",
+                        "refunded": "Refunded",
                     }[item["category"]],
                 })
             return json_success(flat)
@@ -5775,21 +5834,25 @@ def api_banksia_deposits():
             "to_register": to_register,
             "registered": registered,
             "unprotected": unprotected,
+            "refunded": refunded,
             "counts": {
                 "to_register": len(to_register),
                 "registered": len(registered),
                 "unprotected": len(unprotected),
-                "all": len(to_register) + len(registered) + len(unprotected),
+                "refunded": len(refunded),
+                "all": len(to_register) + len(registered) + len(unprotected) + len(refunded),
             },
             "amounts": {
                 "to_register": round(amt_to_register, 2),
                 "registered": round(amt_registered, 2),
                 "unprotected": round(amt_unprotected, 2),
-                "all": round(amt_to_register + amt_registered + amt_unprotected, 2),
+                "refunded": round(amt_refunded, 2),
+                "all": round(amt_to_register + amt_registered + amt_unprotected + amt_refunded, 2),
             },
             "overdue_count": overdue_count,
             "late_registered_count": late_count,
             "never_protected_count": never_protected_count,
+            "refunded_count": refunded_count,
             "limit_days": LIMIT_DAYS,
         })
     except Exception as e:
@@ -8113,14 +8176,16 @@ def api_compliance_update(row_id):
 # derived from each certificate's expiry date and cannot be assigned by hand — a
 # property sits in Expired because its date has passed, not because someone put it
 # there. Custom groups exist alongside them for states the date cannot express,
-# "To be arranged" being the first (Norbert, 2026-07-30). Membership is per
-# property and applies to the WHOLE board — putting a property in a group on the
-# Gas page puts it in that group on all seven certificates (Norbert, 2026-07-30).
-# It was per property per certificate for a few hours on the same day; he asked
-# for board-wide instead, so one drag is one decision about the property rather
-# than seven. The cert_key column is kept (one row per certificate) so the read
-# API and the board keep working unchanged, and so going back to per-certificate
-# is a change to the writer alone.
+# "To be arranged" being the first (Norbert, 2026-07-30).
+#
+# A group belongs to ONE certificate (Norbert, 2026-08-06): creating, filling or
+# deleting a group on Fire Alarm must leave Emergency Lighting alone. Groups were
+# board-wide between 2026-07-30 and 2026-08-06 — a property dragged in on Gas
+# appeared in that group on every certificate — because a state like "to be
+# arranged" reads as a fact about the property. In practice it is a fact about one
+# certificate's renewal, so the scope moved back onto the certificate. Both tables
+# already carried a cert_key, so this was a change to the writers and to a new
+# compliance_groups.cert_key, not to the board's reads.
 
 COMPLIANCE_RETURNED_GROUP = "PROPERTY RETURNED"
 COMPLIANCE_LIVE_GROUP = "VERV COMPLIANCE CERTIFICATES"
@@ -8130,6 +8195,15 @@ COMPLIANCE_CERT_KEYS = {
     # there is no Monday column behind them, so they start undated on every property.
     "fire-doors", "fire-blanket", "co2-alarm",
 }
+
+
+# Floor Plan is scored on the document held rather than an expiry date, so its
+# board splits On file / Not on file. Everything else splits on the date.
+COMPLIANCE_PRESENCE_CERTS = {"floor-plan"}
+
+
+def _compliance_cert_kind(cert):
+    return "presence" if cert in COMPLIANCE_PRESENCE_CERTS else "date"
 
 
 def _ensure_compliance_group_tables():
@@ -8145,6 +8219,13 @@ def _ensure_compliance_group_tables():
             "  created TEXT DEFAULT (datetime('now'))"
             ")"
         )
+        # Which certificate the group belongs to (Norbert, 2026-08-06). Additive, so
+        # a database written before the change still opens; groups made while they
+        # were board-wide would carry '' and are treated as belonging to no
+        # certificate rather than to all of them.
+        cols = {c["name"] for c in db.execute("PRAGMA table_info(compliance_groups)").fetchall()}
+        if "cert_key" not in cols:
+            db.execute("ALTER TABLE compliance_groups ADD COLUMN cert_key TEXT NOT NULL DEFAULT ''")
         db.execute(
             "CREATE TABLE IF NOT EXISTS compliance_group_members ("
             "  group_id INTEGER NOT NULL,"
@@ -8155,9 +8236,11 @@ def _ensure_compliance_group_tables():
             ")"
         )
         # The order the sections are shown in, set by hand on the board (Norbert,
-        # 2026-07-30). Stored as an ordered list of section keys per certificate
-        # kind rather than a number on each section, because the built-in sections
-        # (Expired, Active, ...) have no row of their own to carry a position.
+        # 2026-07-30). Stored as an ordered list of section keys rather than a
+        # number on each section, because the built-in sections (Expired, Active,
+        # ...) have no row of their own to carry a position. The `kind` column now
+        # holds the CERTIFICATE key, one order per board (Norbert, 2026-08-06) —
+        # it held 'date'/'presence' while groups were shared across certificates.
         db.execute(
             "CREATE TABLE IF NOT EXISTS compliance_section_order ("
             "  kind TEXT PRIMARY KEY,"
@@ -8165,6 +8248,22 @@ def _ensure_compliance_group_tables():
             "  updated TEXT DEFAULT (datetime('now'))"
             ")"
         )
+        # Migrate the two shared orders onto every certificate of that kind, so a
+        # board someone had already arranged by hand keeps the arrangement.
+        legacy = db.execute(
+            "SELECT kind, keys FROM compliance_section_order WHERE kind IN ('date', 'presence')"
+        ).fetchall()
+        for row in legacy:
+            for cert in sorted(COMPLIANCE_CERT_KEYS):
+                if _compliance_cert_kind(cert) != row["kind"]:
+                    continue
+                db.execute(
+                    "INSERT INTO compliance_section_order (kind, keys, updated)"
+                    " VALUES (?, ?, datetime('now'))"
+                    " ON CONFLICT(kind) DO NOTHING",
+                    (cert, row["keys"])
+                )
+            db.execute("DELETE FROM compliance_section_order WHERE kind = ?", (row["kind"],))
         db.commit()
     finally:
         db.close()
@@ -8179,11 +8278,11 @@ COMPLIANCE_SECTION_KEYS = {
 
 
 def _compliance_section_order(db):
-    """{kind: [key, ...]} — empty lists when nothing has been reordered yet."""
-    out = {"date": [], "presence": []}
+    """{cert_key: [key, ...]} — certificates absent until reordered by hand."""
+    out = {}
     try:
         for row in db.execute("SELECT kind, keys FROM compliance_section_order").fetchall():
-            if row["kind"] in out:
+            if row["kind"] in COMPLIANCE_CERT_KEYS:
                 out[row["kind"]] = [k for k in str(row["keys"] or "").split(",") if k]
     except Exception:
         pass  # table predates this feature on an old database
@@ -8192,12 +8291,17 @@ def _compliance_section_order(db):
 
 @banksia_os_bp.route("/compliance/board-groups", methods=["GET"])
 def api_compliance_board_groups():
-    """Custom groups plus every property currently sitting in one."""
+    """Custom groups plus every property currently sitting in one.
+
+    Every certificate's groups come back in one response and the board picks out
+    the ones for the page it is showing — the payload is tiny and it saves a fetch
+    on every certificate switch.
+    """
     _ensure_compliance_group_tables()
     db = get_dict_db()
     try:
         groups = db.execute(
-            "SELECT id, name, colour, position FROM compliance_groups ORDER BY position, id"
+            "SELECT id, name, colour, position, cert_key FROM compliance_groups ORDER BY position, id"
         ).fetchall()
         members = db.execute(
             "SELECT group_id, compliance_id, cert_key FROM compliance_group_members"
@@ -8212,24 +8316,28 @@ def api_compliance_board_groups():
 def api_compliance_section_order_save():
     """Save the order the board's sections are shown in.
 
-    Body: {"kind": "date"|"presence", "keys": ["expired", "g:3", "due", ...]}
+    Body: {"cert": "fire-alarm", "keys": ["expired", "g:3", "due", ...]}
 
-    One order is kept per certificate kind, not per certificate: the sections mean
-    the same thing on every board (a group created on Gas exists on FRA too), so
-    ordering them separately would only let the seven boards drift apart.
+    One order per certificate (Norbert, 2026-08-06): arranging the Fire Alarm board
+    must not rearrange Emergency Lighting. `kind` is still accepted as the field
+    name so an open tab from before the change does not 422 on its next drag.
     """
     _ensure_compliance_group_tables()
     data = request.get_json(silent=True) or {}
-    kind = str(data.get("kind", "")).strip().lower()
-    if kind not in COMPLIANCE_SECTION_KEYS:
-        return json_error("Unknown board type", 422)
+    cert = str(data.get("cert") or data.get("kind") or "").strip().lower()
+    if cert not in COMPLIANCE_CERT_KEYS:
+        return json_error("Unknown certificate type", 422)
+    kind = _compliance_cert_kind(cert)
     raw = data.get("keys")
     if not isinstance(raw, list) or not raw:
         return json_error("Give the order to save", 422)
 
     db = get_dict_db()
     try:
-        live = {"g:%d" % g["id"] for g in db.execute("SELECT id FROM compliance_groups").fetchall()}
+        live = {
+            "g:%d" % g["id"] for g in
+            db.execute("SELECT id FROM compliance_groups WHERE cert_key = ?", (cert,)).fetchall()
+        }
         allowed = COMPLIANCE_SECTION_KEYS[kind] | live
         keys, seen = [], set()
         for k in raw:
@@ -8241,26 +8349,30 @@ def api_compliance_section_order_save():
                 keys.append(k)
         if not keys:
             return json_error("None of those sections exist any more", 422)
-        before = ",".join(_compliance_section_order(db).get(kind, []))
+        before = ",".join(_compliance_section_order(db).get(cert, []))
         db.execute(
             "INSERT INTO compliance_section_order (kind, keys, updated)"
             " VALUES (?, ?, datetime('now'))"
             " ON CONFLICT(kind) DO UPDATE SET keys = excluded.keys, updated = excluded.updated",
-            (kind, ",".join(keys))
+            (cert, ",".join(keys))
         )
         db.commit()
     finally:
         db.close()
 
-    _log_activity("compliance", 0, "update", "section_order_" + kind, before, ",".join(keys),
+    _log_activity("compliance", 0, "update", "section_order_" + cert, before, ",".join(keys),
                   notes="compliance board section order changed")
-    return json_success({"kind": kind, "keys": keys})
+    return json_success({"cert": cert, "kind": kind, "keys": keys})
 
 
 @banksia_os_bp.route("/compliance/board-groups", methods=["POST"])
 def api_compliance_board_group_create():
+    """Create a custom group on ONE certificate's board (Norbert, 2026-08-06)."""
     _ensure_compliance_group_tables()
     data = request.get_json(silent=True) or {}
+    cert = str(data.get("cert", "")).strip().lower()
+    if cert not in COMPLIANCE_CERT_KEYS:
+        return json_error("Unknown certificate type", 422)
     name = " ".join(str(data.get("name", "")).split())
     if not name:
         return json_error("Give the group a name", 422)
@@ -8271,23 +8383,31 @@ def api_compliance_board_group_create():
         colour = "#2563eb"
     db = get_dict_db()
     try:
+        # Scoped to the certificate: the same name on Gas and Fire Alarm is now two
+        # separate groups, which is the point of the change.
         clash = db.execute(
-            "SELECT id FROM compliance_groups WHERE LOWER(name) = LOWER(?)", (name,)
+            "SELECT id FROM compliance_groups WHERE cert_key = ? AND LOWER(name) = LOWER(?)",
+            (cert, name)
         ).fetchone()
         if clash:
-            return json_error("A group called %s already exists" % name, 409)
-        nxt = db.execute("SELECT COALESCE(MAX(position), 0) + 1 AS p FROM compliance_groups").fetchone()
+            return json_error("A group called %s already exists on this certificate" % name, 409)
+        nxt = db.execute(
+            "SELECT COALESCE(MAX(position), 0) + 1 AS p FROM compliance_groups WHERE cert_key = ?",
+            (cert,)
+        ).fetchone()
         cur = db.execute(
-            "INSERT INTO compliance_groups (name, colour, position) VALUES (?, ?, ?)",
-            (name, colour, nxt["p"])
+            "INSERT INTO compliance_groups (name, colour, position, cert_key) VALUES (?, ?, ?, ?)",
+            (name, colour, nxt["p"], cert)
         )
         db.commit()
         gid = cur.lastrowid
     finally:
         db.close()
     _log_activity("compliance", 0, "create", "board_group", "", name,
-                  notes="compliance board group %s created" % name)
-    return json_success({"id": gid, "name": name, "colour": colour, "position": nxt["p"]})
+                  notes="compliance board group %s created on %s" % (name, cert))
+    return json_success({
+        "id": gid, "name": name, "colour": colour, "position": nxt["p"], "cert_key": cert,
+    })
 
 
 @banksia_os_bp.route("/compliance/board-groups/<int:group_id>", methods=["DELETE"])
@@ -8297,10 +8417,11 @@ def api_compliance_board_group_delete(group_id):
     _ensure_compliance_group_tables()
     db = get_dict_db()
     try:
-        row = db.execute("SELECT name FROM compliance_groups WHERE id = ?", (group_id,)).fetchone()
+        row = db.execute(
+            "SELECT name, cert_key FROM compliance_groups WHERE id = ?", (group_id,)
+        ).fetchone()
         if not row:
             return json_error("Group not found", 404)
-        # DISTINCT: membership is board-wide, so one property holds seven rows.
         freed = db.execute(
             "SELECT COUNT(DISTINCT compliance_id) AS n FROM compliance_group_members WHERE group_id = ?",
             (group_id,)
@@ -8311,20 +8432,21 @@ def api_compliance_board_group_delete(group_id):
     finally:
         db.close()
     _log_activity("compliance", 0, "delete", "board_group", row["name"], "",
-                  notes="compliance board group %s deleted (%d propert%s released)"
-                        % (row["name"], freed, "y" if freed == 1 else "ies"))
-    return json_success({"deleted": group_id, "released": freed})
+                  notes="compliance board group %s deleted from %s (%d propert%s released)"
+                        % (row["name"], row["cert_key"] or "no certificate", freed,
+                           "y" if freed == 1 else "ies"))
+    return json_success({"deleted": group_id, "released": freed, "cert_key": row["cert_key"]})
 
 
 @banksia_os_bp.route("/compliance/<int:row_id>/group", methods=["PUT"])
 def api_compliance_set_group(row_id):
-    """Put one property into a custom group across the whole board, or take it out.
+    """Put one property into a custom group on ONE certificate, or take it out.
 
     Body: {"cert": "gas", "group_id": 3}   group_id null/absent removes it.
 
-    The cert is what the user was looking at when they dragged; it names the board
-    in the audit note but does NOT scope the change. Membership is board-wide, so
-    the property joins or leaves the group on all seven certificates at once.
+    The cert scopes the change (Norbert, 2026-08-06): a property dragged into a
+    group on Fire Alarm moves on Fire Alarm and nowhere else. It used to write a
+    row for every certificate key, which is what made one drag land on ten boards.
     """
     _ensure_compliance_group_tables()
     data = request.get_json(silent=True) or {}
@@ -8342,37 +8464,41 @@ def api_compliance_set_group(row_id):
     try:
         before = db.execute(
             "SELECT g.name FROM compliance_group_members m JOIN compliance_groups g ON g.id = m.group_id"
-            " WHERE m.compliance_id = ? LIMIT 1", (row_id,)
+            " WHERE m.compliance_id = ? AND m.cert_key = ?", (row_id, cert)
         ).fetchone()
         old_name = before["name"] if before else ""
         if group_id is None:
             db.execute(
-                "DELETE FROM compliance_group_members WHERE compliance_id = ?", (row_id,)
+                "DELETE FROM compliance_group_members WHERE compliance_id = ? AND cert_key = ?",
+                (row_id, cert)
             )
             new_name = ""
         else:
-            grp = db.execute("SELECT name FROM compliance_groups WHERE id = ?", (group_id,)).fetchone()
+            grp = db.execute(
+                "SELECT name, cert_key FROM compliance_groups WHERE id = ?", (group_id,)
+            ).fetchone()
             if not grp:
                 return json_error("Group not found", 404)
-            # One row per certificate, all written together: the board reads
-            # membership per (property, certificate), so writing the full set is
-            # what makes one drag land on every certificate page.
-            for key in sorted(COMPLIANCE_CERT_KEYS):
-                db.execute(
-                    "INSERT INTO compliance_group_members (group_id, compliance_id, cert_key)"
-                    " VALUES (?, ?, ?)"
-                    " ON CONFLICT(compliance_id, cert_key) DO UPDATE SET group_id = excluded.group_id",
-                    (group_id, row_id, key)
-                )
+            # A group belongs to one certificate, so dropping a property into it
+            # from another board would file the property somewhere it cannot be
+            # seen. Refuse rather than write an invisible row.
+            if grp["cert_key"] and grp["cert_key"] != cert:
+                return json_error("That group belongs to a different certificate", 422)
+            db.execute(
+                "INSERT INTO compliance_group_members (group_id, compliance_id, cert_key)"
+                " VALUES (?, ?, ?)"
+                " ON CONFLICT(compliance_id, cert_key) DO UPDATE SET group_id = excluded.group_id",
+                (group_id, row_id, cert)
+            )
             new_name = grp["name"]
         db.commit()
     finally:
         db.close()
 
     _log_activity("compliance", row_id, "update", "board_group", old_name, new_name,
-                  notes="%s moved to %s on every certificate (dragged on the %s board)"
+                  notes="%s moved to %s on the %s board only"
                         % (row["property_name"], new_name or "its expiry-date section", cert))
-    return json_success({"cert": cert, "group_id": group_id, "board_wide": True})
+    return json_success({"cert": cert, "group_id": group_id, "board_wide": False})
 
 # -- Landlord renewal emails ---------------------------------------------------
 # Step 1 of the renewal process (Norbert, 2026-07-30): fifteen days before a
@@ -8439,6 +8565,17 @@ def _last_used_sender():
 # worse than a blocked send.
 COMPLIANCE_QUOTE_TOKEN = "[QUOTE]"
 
+
+def _vat_mentioned(body):
+    """Norbert, 2026-08-06: no email to a landlord mentions VAT.
+
+    Enforced at send time rather than only kept out of the templates, because the
+    body is editable -- the templates have never carried it, so a template-only
+    rule would guard the one place the word was never going to come from. Matched
+    on word boundaries so 'private' and similar are not caught.
+    """
+    return bool(re.search(r"\bvat\b", str(body or ""), re.IGNORECASE))
+
 COMPLIANCE_CERT_LABELS = {
     "gas": "gas safety certificate",
     "electric": "electrical certificate (EICR)",
@@ -8490,6 +8627,14 @@ def _ensure_compliance_email_table():
         # a thread that was never recorded cannot be matched back afterwards.
         if "conversation_id" not in cols:
             db.execute("ALTER TABLE compliance_emails ADD COLUMN conversation_id TEXT DEFAULT ''")
+        # Which of the two emails this was (Norbert, 2026-08-06). 'renewal' is the
+        # 15-day chase that asks the landlord to approve the work; 'certificate'
+        # sends the finished certificate once it has been uploaded. They are
+        # separate events on the same row, so the board must not read one as the
+        # other -- the renewal chip in particular means "we have asked", and a
+        # certificate email would wrongly satisfy it.
+        if "kind" not in cols:
+            db.execute("ALTER TABLE compliance_emails ADD COLUMN kind TEXT NOT NULL DEFAULT 'renewal'")
         db.execute(
             "CREATE INDEX IF NOT EXISTS idx_compliance_emails_row"
             " ON compliance_emails (compliance_id, cert_key)"
@@ -8517,15 +8662,27 @@ def _compliance_email_draft(row, cert, sender=None):
     greeting = landlord if landlord else "Sir or Madam"
 
     subject = "%s due for renewal - %s" % (label[:1].upper() + label[1:], prop)
+    # Deliberately no claim about what the law requires: this one wording goes out
+    # for nine different certificates whose legal footing is not the same, and a
+    # landlord who checks and finds it overstated will trust none of the rest.
     lines = [
         "Dear %s," % greeting,
         "",
-        "The %s for %s is due to expire on %s." % (label, prop, _uk_date(expiry) or "its recorded date"),
+        "We look after the compliance certificates for %s on your behalf, and one of "
+        "them is now coming up for renewal." % prop,
         "",
-        "We can arrange the renewal on your behalf. Our quote for the work is %s." % COMPLIANCE_QUOTE_TOKEN,
+        "The %s expires on %s. We would like to arrange the renewal before that date so "
+        "there is no gap in the property's compliance."
+        % (label, _uk_date(expiry) or "its recorded date"),
         "",
-        "If you are happy to go ahead, please reply to confirm and we will book the "
-        "contractor and arrange access with the tenants where it is needed.",
+        "We can book the work for you. Our quote is %s." % COMPLIANCE_QUOTE_TOKEN,
+        "",
+        "If you are happy to go ahead, just reply to confirm. We will book the contractor, "
+        "arrange access with the tenants where it is needed, and send you the new "
+        "certificate as soon as it has been issued.",
+        "",
+        "If you would rather arrange it yourself, that is no problem — please let us know, "
+        "and send us a copy of the new certificate so our records stay up to date.",
         "",
         "Kind regards,",
         (sender or COMPLIANCE_EMAIL_SENDERS[0])["name"],
@@ -8533,34 +8690,148 @@ def _compliance_email_draft(row, cert, sender=None):
     return {"subject": subject, "body": "\n".join(lines), "expiry_date": expiry}
 
 
-def _email_html(body_text):
-    """Plain text in, email-safe HTML out. The editor is a plain textarea on purpose --
-    a landlord reminder is a short letter, and a rich editor would only invite
-    formatting that renders differently in every mail client."""
+# Letterhead per sending mailbox (Norbert, 2026-08-06: a bare email risks the spam
+# folder). Banksia's postal details are taken from their own letterhead on the
+# guarantor form, not invented -- an address nobody can verify in a footer is
+# worse than no address. Verv Rooms has no postal address on record here, so it
+# shows none rather than borrowing Banksia's.
+EMAIL_BRANDS = {
+    "team@banksialondon.com": {
+        "name": "Banksia London",
+        "accent": "#0f766e",
+        "address": "Banksia Limited, 29-31 Adelaide Road, London NW3 7BB",
+        "contact": "team@banksialondon.com",
+    },
+    "admin@vervrooms.com": {
+        "name": "Verv Rooms",
+        "accent": "#52BA31",
+        "address": "",
+        "contact": "admin@vervrooms.com",
+    },
+}
+
+
+def _email_html(body_text, sender=None):
+    """Plain text in, email-safe HTML out.
+
+    The editor is a plain textarea on purpose -- these are short letters, and a
+    rich editor would only invite formatting that renders differently in every
+    mail client. The letterhead is added here instead, so every email carries a
+    sender name, a footer and a reason for existing: a message that is little more
+    than an attachment is the shape spam filters are built to catch (Norbert,
+    2026-08-06).
+    """
+    brand = EMAIL_BRANDS.get(
+        ((sender or {}).get("address") or "").lower(),
+        EMAIL_BRANDS["team@banksialondon.com"],
+    )
     esc = (body_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
     paragraphs = [p.strip() for p in esc.split("\n\n")]
     html = "".join(
         "<p style=\"margin:0 0 14px;\">%s</p>" % p.replace("\n", "<br>")
         for p in paragraphs if p
     )
+    footer_address = (
+        "<div style=\"margin-top:4px;\">%s</div>" % brand["address"]
+    ) if brand["address"] else ""
     return (
-        "<!DOCTYPE html><html><body style=\"margin:0;padding:0;background:#f2f4f7;\">"
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "</head><body style=\"margin:0;padding:0;background:#f2f4f7;\">"
         "<table role=\"presentation\" width=\"100%%\" cellpadding=\"0\" cellspacing=\"0\">"
         "<tr><td align=\"center\" style=\"padding:26px 12px;\">"
         "<table role=\"presentation\" width=\"100%%\" style=\"max-width:600px;background:#ffffff;"
-        "border-radius:10px;font-family:Arial,Helvetica,sans-serif;color:#1a2233;font-size:15px;"
-        "line-height:1.6;\"><tr><td style=\"padding:28px 32px;\">%s</td></tr></table>"
-        "</td></tr></table></body></html>"
-    ) % html
+        "border-radius:12px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;"
+        "color:#1a2233;font-size:15px;line-height:1.6;"
+        "border:1px solid #e3e8ef;\">"
+        # Letterhead
+        "<tr><td style=\"background:%(accent)s;padding:18px 32px;\">"
+        "<div style=\"color:#ffffff;font-size:17px;font-weight:bold;letter-spacing:0.3px;\">"
+        "%(name)s</div>"
+        "<div style=\"color:#ffffff;opacity:0.85;font-size:12.5px;margin-top:2px;\">"
+        "Property compliance</div>"
+        "</td></tr>"
+        # Letter
+        "<tr><td style=\"padding:28px 32px 8px;\">%(body)s</td></tr>"
+        # Footer
+        "<tr><td style=\"padding:14px 32px 24px;\">"
+        "<div style=\"border-top:1px solid #e3e8ef;padding-top:14px;"
+        "font-size:11.5px;line-height:1.55;color:#6b7688;\">"
+        "This email was sent by %(name)s regarding a property we manage or maintain "
+        "compliance records for. If anything here looks wrong, reply to this email "
+        "and a person will read it."
+        "<div style=\"margin-top:8px;\">%(contact)s</div>"
+        "%(address)s"
+        "</div></td></tr>"
+        "</table></td></tr></table></body></html>"
+    ) % {
+        "accent": brand["accent"],
+        "name": brand["name"],
+        "contact": brand["contact"],
+        "address": footer_address,
+        "body": html,
+    }
 
 
-def _send_via_missive(to_email, subject, body_text, sender=None):
+def _compliance_cert_bytes(row_id, cert):
+    """(filename, bytes, error) for a property's certificate, whichever way it is
+    stored -- uploaded here ("local:<name>" on disk) or still a Monday asset id.
+
+    The same two shapes api_compliance_certificate streams to the browser. Pulled
+    out into a helper so emailing a certificate cannot drift from viewing one.
+    """
+    import urllib.request
+
+    field = _COMPLIANCE_DOC_FIELDS.get(cert)
+    if not field:
+        return None, None, "Unknown certificate type"
+    row = _compliance_row(row_id, field)
+    if not row:
+        return None, None, "Compliance record not found"
+    ref = (row["ref"] or "").strip()
+    if not ref:
+        return None, None, "There is no certificate on record to attach"
+
+    if ref.startswith("local:"):
+        name = ref[len("local:"):]
+        path = os.path.join(COMPLIANCE_UPLOAD_DIR, name)
+        if not os.path.exists(path):
+            return None, None, "The certificate file is missing on disk"
+        with open(path, "rb") as fh:
+            return name, fh.read(), None
+
+    m = re.search(r"/resources/(\d+)/", ref)
+    asset_id = m.group(1) if m else ref
+    if not asset_id.isdigit():
+        return None, None, "The certificate reference is not a Monday asset"
+    mtok = get_monday_token()
+    if not mtok:
+        return None, None, "Monday credentials unavailable on this server"
+    try:
+        data = _monday_graphql(mtok, "{assets(ids:[%s]){name file_extension public_url}}" % asset_id)
+        assets = ((data or {}).get("data") or {}).get("assets") or []
+        if not assets or not assets[0].get("public_url"):
+            return None, None, "The certificate file is no longer available on Monday"
+        asset = assets[0]
+        with urllib.request.urlopen(asset["public_url"], timeout=45) as r:
+            return (asset.get("name") or "certificate"), r.read(), None
+    except Exception as e:
+        return None, None, safe_error(e)
+
+
+def _send_via_missive(to_email, subject, body_text, sender=None, attachments=None):
     """Send it. Returns (ok, error, conversation_id) -- the thread id is what makes
-    a later reply findable, so it is carried back even though nothing reads it yet."""
+    a later reply findable, so it is carried back even though nothing reads it yet.
+
+    `attachments` is [(filename, bytes)]. Missive takes them base64-encoded on the
+    draft itself; verified 2026-08-06 by sending a 58KB PDF internally and reading
+    it back off the sent message at the same byte length.
+    """
     # Imported here rather than at module level to match _monday_graphql above,
     # the only other outbound HTTP call in this file. A module-level import was
     # skipped by the earlier patch because that local import already matched the
     # 'is urllib imported' check.
+    import base64
     import urllib.request
     import urllib.error
     token = _missive_token()
@@ -8570,12 +8841,17 @@ def _send_via_missive(to_email, subject, body_text, sender=None):
     payload = {
         "drafts": {
             "subject": subject,
-            "body": _email_html(body_text),
+            "body": _email_html(body_text, sender),
             "to_fields": [{"address": to_email}],
             "from_field": {"address": sender["address"], "name": sender["name"]},
             "send": True,
         }
     }
+    if attachments:
+        payload["drafts"]["attachments"] = [
+            {"base64_data": base64.b64encode(blob).decode(), "filename": name}
+            for name, blob in attachments
+        ]
     try:
         req = urllib.request.Request(
             MISSIVE_DRAFTS_URL,
@@ -8613,7 +8889,8 @@ def api_compliance_emails():
         rows = db.execute(
             "SELECT compliance_id, cert_key, expiry_date, to_email, from_email, sent_by,"
             " MAX(sent_at) AS sent_at"
-            " FROM compliance_emails GROUP BY compliance_id, cert_key, expiry_date"
+            " FROM compliance_emails WHERE kind = 'renewal'"
+            " GROUP BY compliance_id, cert_key, expiry_date"
         ).fetchall()
     finally:
         db.close()
@@ -8639,7 +8916,7 @@ def api_compliance_email_draft(row_id):
         draft = _compliance_email_draft(row, cert, sender)
         prev = db.execute(
             "SELECT to_email, from_email, sent_at, sent_by FROM compliance_emails"
-            " WHERE compliance_id = ? AND cert_key = ? AND expiry_date = ?"
+            " WHERE compliance_id = ? AND cert_key = ? AND expiry_date = ? AND kind = 'renewal'"
             " ORDER BY id DESC LIMIT 1",
             (row_id, cert, draft["expiry_date"])
         ).fetchone()
@@ -8692,6 +8969,8 @@ def api_compliance_email_send(row_id):
         return json_error("The email is empty", 422)
     if COMPLIANCE_QUOTE_TOKEN in body:
         return json_error("Replace %s with the quote before sending" % COMPLIANCE_QUOTE_TOKEN, 422)
+    if _vat_mentioned(body):
+        return json_error("These emails do not mention VAT — please take it out of the wording", 422)
 
     db = get_dict_db()
     try:
@@ -8702,7 +8981,7 @@ def api_compliance_email_send(row_id):
         expiry = (row[field] or "").strip() if field else ""
         prev = db.execute(
             "SELECT sent_at FROM compliance_emails"
-            " WHERE compliance_id = ? AND cert_key = ? AND expiry_date = ?"
+            " WHERE compliance_id = ? AND cert_key = ? AND expiry_date = ? AND kind = 'renewal'"
             " ORDER BY id DESC LIMIT 1",
             (row_id, cert, expiry)
         ).fetchone()
@@ -8722,8 +9001,8 @@ def api_compliance_email_send(row_id):
     try:
         db.execute(
             "INSERT INTO compliance_emails (compliance_id, cert_key, expiry_date, to_email,"
-            " from_email, subject, body, sent_by, conversation_id)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " from_email, subject, body, sent_by, conversation_id, kind)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'renewal')",
             (row_id, cert, expiry, to_email, sender["address"], subject, body, actor,
              conversation_id)
         )
@@ -8736,6 +9015,205 @@ def api_compliance_email_send(row_id):
                         % (cert, to_email, sender["address"], row["property_name"]))
     return json_success({"cert": cert, "to": to_email, "from": sender["address"],
                          "resent": bool(prev)})
+
+
+# -- Certificate issued: send it to the landlord -------------------------------
+# Norbert, 2026-08-06: the last step of the renewal. Once a certificate has been
+# uploaded, the landlord gets it -- their property, their document, and they
+# should not have to ask for it.
+#
+# It is NOT sent automatically. Uploading opens the drafted email and somebody
+# presses Send, which is what Norbert asked for and is also the safeguard: an
+# upload is a filing action, and filing a document should never put mail in
+# somebody's inbox on its own. Every field can be edited first.
+#
+# admin@vervrooms.com is the default sender here (Norbert's choice) rather than
+# team@banksialondon.com, which is the default on the renewal chase.
+
+CERTIFICATE_EMAIL_SENDER = "admin@vervrooms.com"
+
+
+def _certificate_email_draft(row, cert, sender=None):
+    """The email as first shown. Name, address and certificate type are what Norbert
+    asked to see in it; the certificate itself rides along as the attachment."""
+    label = COMPLIANCE_CERT_LABELS.get(cert, cert.replace("-", " "))
+    prop = (row["property_name"] or "").strip()
+    landlord = (row["landlord"] or "").strip()
+    field = _COMPLIANCE_DATE_FIELDS.get(cert)
+    expiry = (row[field] or "").strip() if field else ""
+    # 3 of 62 properties have no landlord name on record. "Dear ," is worse than a
+    # formal greeting, so an unknown name falls back rather than printing an empty.
+    greeting = landlord if landlord else "Sir or Madam"
+
+    lines = [
+        "Dear %s," % greeting,
+        "",
+        "We arrange and keep track of the compliance certificates for %s on your behalf." % prop,
+        "",
+        "The %s has now been carried out and the certificate is attached to this email. "
+        "Please keep a copy for your records — it is the document you would need to produce "
+        "if it were ever asked for." % label,
+    ]
+    if expiry:
+        lines += [
+            "",
+            "The certificate is valid until %s. We hold the renewal date on file and will "
+            "contact you before it runs out, so there is nothing you need to do now."
+            % _uk_date(expiry),
+        ]
+    else:
+        lines += [
+            "",
+            "There is nothing you need to do — we hold this on file and will let you know "
+            "when it next needs attention.",
+        ]
+    lines += [
+        "",
+        "If anything in the certificate looks wrong, or you have a question about the work "
+        "that was done, just reply to this email and we will look into it.",
+        "",
+        "Kind regards,",
+        (sender or _sender_for(CERTIFICATE_EMAIL_SENDER))["name"],
+    ]
+    return {
+        "subject": "%s - %s" % (label[:1].upper() + label[1:], prop),
+        "body": "\n".join(lines),
+        "expiry_date": expiry,
+    }
+
+
+@banksia_os_bp.route("/compliance/<int:row_id>/certificate-email", methods=["GET"])
+def api_compliance_certificate_email_draft(row_id):
+    """The drafted 'here is your certificate' email, for the confirmation step.
+
+    Query: ?cert=gas
+    """
+    _ensure_compliance_email_table()
+    cert = str(request.args.get("cert", "")).strip().lower()
+    if cert not in COMPLIANCE_CERT_KEYS:
+        return json_error("Unknown certificate type", 422)
+
+    sender = _sender_for(CERTIFICATE_EMAIL_SENDER) or COMPLIANCE_EMAIL_SENDERS[0]
+    db = get_dict_db()
+    try:
+        row = db.execute("SELECT * FROM compliance WHERE id = ?", (row_id,)).fetchone()
+        if not row:
+            return json_error("Compliance record not found", 404)
+        draft = _certificate_email_draft(row, cert, sender)
+        prev = db.execute(
+            "SELECT to_email, from_email, sent_at, sent_by FROM compliance_emails"
+            " WHERE compliance_id = ? AND cert_key = ? AND kind = 'certificate'"
+            " ORDER BY id DESC LIMIT 1",
+            (row_id, cert)
+        ).fetchone()
+    finally:
+        db.close()
+
+    # Resolved now, not at send time, so the modal can say what is attached -- and
+    # so a missing file is discovered before anybody has written an email.
+    filename, blob, err = _compliance_cert_bytes(row_id, cert)
+    return json_success({
+        "property_name": row["property_name"],
+        "landlord": row["landlord"] or "",
+        "to": (row["landlord_email"] or "").strip(),
+        "subject": draft["subject"],
+        "body": draft["body"],
+        "from": sender["address"],
+        "senders": COMPLIANCE_EMAIL_SENDERS,
+        "sign_off": sender["name"],
+        "attachment": filename,
+        "attachment_size": len(blob) if blob else 0,
+        "attachment_error": err,
+        "already_sent": prev,
+    })
+
+
+@banksia_os_bp.route("/compliance/<int:row_id>/certificate-email", methods=["POST"])
+def api_compliance_certificate_email_send(row_id):
+    """Send the certificate to the landlord, with the certificate attached.
+
+    Body: {"cert": "gas", "to": "...", "subject": "...", "body": "...", "confirm": true}
+
+    Refuses outright if there is no certificate to attach: an email that says "the
+    certificate is attached" and carries nothing is worse than no email at all.
+    """
+    _ensure_compliance_email_table()
+    data = request.get_json(silent=True) or {}
+    cert = str(data.get("cert", "")).strip().lower()
+    if cert not in COMPLIANCE_CERT_KEYS:
+        return json_error("Unknown certificate type", 422)
+
+    sender = _sender_for(data.get("from") or CERTIFICATE_EMAIL_SENDER)
+    if sender is None:
+        return json_error("That is not one of the addresses this board can send from", 422)
+
+    to_email = str(data.get("to", "")).strip()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", to_email):
+        return json_error("That is not an email address", 422)
+    subject = " ".join(str(data.get("subject", "")).split())
+    if not subject:
+        return json_error("The email needs a subject", 422)
+    body = str(data.get("body", "")).strip()
+    if not body:
+        return json_error("The email is empty", 422)
+    if _vat_mentioned(body):
+        return json_error("These emails do not mention VAT — please take it out of the wording", 422)
+
+    db = get_dict_db()
+    try:
+        row = db.execute("SELECT * FROM compliance WHERE id = ?", (row_id,)).fetchone()
+        if not row:
+            return json_error("Compliance record not found", 404)
+        # Property Returned is exempt from every automation (Norbert, 2026-07-30) --
+        # emailing a certificate to the landlord of a property we handed back is
+        # exactly the kind of thing that rule exists to stop.
+        if int(row["automation_exempt"] or 0) == 1:
+            return json_error("This property has been returned to the landlord", 422)
+        field = _COMPLIANCE_DATE_FIELDS.get(cert)
+        expiry = (row[field] or "").strip() if field else ""
+        prev = db.execute(
+            "SELECT sent_at FROM compliance_emails"
+            " WHERE compliance_id = ? AND cert_key = ? AND expiry_date = ? AND kind = 'certificate'"
+            " ORDER BY id DESC LIMIT 1",
+            (row_id, cert, expiry)
+        ).fetchone()
+    finally:
+        db.close()
+
+    # Keyed on the expiry date like the renewal log, so next year's certificate for
+    # the same property is a new send rather than a blocked duplicate.
+    if prev and not data.get("confirm"):
+        return json_error(
+            "This certificate was already sent on %s. Send it again?" % prev["sent_at"], 409)
+
+    filename, blob, err = _compliance_cert_bytes(row_id, cert)
+    if err or not blob:
+        return json_error(err or "There is no certificate on record to attach", 422)
+
+    ok, send_err, conversation_id = _send_via_missive(
+        to_email, subject, body, sender, attachments=[(filename, blob)])
+    if not ok:
+        return json_error(send_err or "The email could not be sent", 502)
+
+    actor = _archive_actor()
+    db = get_dict_db()
+    try:
+        db.execute(
+            "INSERT INTO compliance_emails (compliance_id, cert_key, expiry_date, to_email,"
+            " from_email, subject, body, sent_by, conversation_id, kind)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'certificate')",
+            (row_id, cert, expiry, to_email, sender["address"], subject, body, actor,
+             conversation_id)
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    _log_activity("compliance", row_id, "update", "certificate_email_" + cert, "", to_email,
+                  notes="%s certificate (%s) emailed to %s from %s for %s"
+                        % (cert, filename, to_email, sender["address"], row["property_name"]))
+    return json_success({"cert": cert, "to": to_email, "from": sender["address"],
+                         "attachment": filename, "resent": bool(prev)})
 
 
 # -- Landlord replies ----------------------------------------------------------
@@ -10110,9 +10588,13 @@ def api_get_current_user():
 
 @banksia_os_bp.route("/comments/<entity_type>/<int:entity_id>", methods=["GET"])
 def api_get_comments(entity_type, entity_id):
+    # "compliance" added 2026-08-06 (Norbert) so the compliance board carries the
+    # same per-row updates Monday has. Property-level: an update is about the
+    # property, so it reads the same on all nine certificate pages.
     valid = {"tenancy","tenancies","property","properties","tenant","tenants",
              "applicant","applicants","unit","units","transaction","transactions",
-             "maintenance_job","maintenance_jobs","property_owner","property_owners"}
+             "maintenance_job","maintenance_jobs","property_owner","property_owners",
+             "compliance"}
     if entity_type not in valid:
         return json_error("Invalid entity type", 400)
     sg_map = {"tenancy":"tenancies","property":"properties","applicant":"applicants",
@@ -10179,7 +10661,12 @@ def api_add_comment(entity_type, entity_id):
               "transaction":"transactions","maintenance_job":"maintenance_jobs",
               "tenant":"tenants","unit":"units","property_owner":"property_owners"}
     etype = sg_map.get(etype, etype)
-    valid = {"tenancies","properties","tenants","applicants","units","transactions","maintenance_jobs","property_owners"}
+    # This is a second, separately-worded allowlist from the one on GET (plurals
+    # only, since the singular has already been mapped by here). Adding an entity
+    # type means touching both -- "compliance" reads on one and 400s on the other
+    # otherwise, which looks like the board silently swallowing updates.
+    valid = {"tenancies","properties","tenants","applicants","units","transactions",
+             "maintenance_jobs","property_owners","compliance"}
     if etype not in valid:
         return json_error("Invalid entity type", 400)
     current_user, _ = _get_current_user()
@@ -10254,9 +10741,14 @@ def api_edit_comment(comment_id):
         import re
         mentioned = list(set(re.findall(r'@(\w+)', new_body)))
         now_iso = datetime.now(timezone.utc).isoformat()
-        # Soft-delete old comment
+        # Soft-delete the old version. It kept only is_edited until 2026-08-06,
+        # but GET filters on is_deleted, so the original stayed visible alongside
+        # the new one and a single edit showed the comment twice. The clone points
+        # back here via parent_id, so hiding the original loses no history.
+        # Never triggered in production -- nobody had used the in-app edit -- but
+        # it would have shown up the first time anyone edited a compliance update.
         db.execute(
-            "UPDATE comments SET is_edited = 1, modified = ? WHERE id = ?",
+            "UPDATE comments SET is_edited = 1, is_deleted = 1, modified = ? WHERE id = ?",
             (now_iso, comment_id)
         )
         # Insert new version with parent_id pointing to original
@@ -10344,6 +10836,28 @@ def api_upload_comment_media():
     file.save(save_path)
     url_path = f"/static/uploads/comments/{safe_name}"
     return json_success({"url": url_path, "filename": safe_name})
+
+
+@banksia_os_bp.route("/comments/counts/<entity_type>", methods=["GET"])
+def api_comment_counts(entity_type):
+    """How many updates each row of one entity type has, plus when the last one
+    landed. One request for the whole board -- a count per row would be 62 calls
+    on a page that already loads in one.
+    """
+    etype = str(entity_type or "").strip().lower()
+    if not re.fullmatch(r"[a-z_]+", etype):
+        return json_error("Invalid entity type", 400)
+    db = get_dict_db()
+    try:
+        rows = db.execute(
+            "SELECT entity_id, COUNT(*) AS n, MAX(created) AS last_at"
+            " FROM comments WHERE entity_type = ? AND is_deleted = 0"
+            " GROUP BY entity_id",
+            (etype,)
+        ).fetchall()
+    finally:
+        db.close()
+    return json_success(rows)
 
 
 @banksia_os_bp.route("/comments/recent")
