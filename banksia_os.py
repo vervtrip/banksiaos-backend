@@ -1406,6 +1406,10 @@ def api_create_maintenance_job():
             db.commit()
 
         wanted = str(data.get("status") or "").strip()
+        if wanted.upper() == MAINT_INTAKE_ONLY:
+            db.execute("DELETE FROM maintenance_jobs WHERE id = ?", [job_id])
+            db.commit()
+            return json_error(MAINT_INTAKE_REFUSAL, 422)
         if wanted.upper() == "COMPLETED":
             missing = _completed_blockers(dict(data))
             if missing:
@@ -1511,6 +1515,12 @@ def api_maintenance_job(job_id):
 
         # Guard before writing, not after: a rejected move must leave the job
         # exactly as it was, not half-applied.
+        if (str(data.get("status") or "").strip().upper() == MAINT_INTAKE_ONLY
+                and str((db.execute("SELECT status FROM maintenance_jobs WHERE id = ?",
+                                    [job_id]).fetchone() or {}).get("status")
+                        or "").strip().upper() != MAINT_INTAKE_ONLY):
+            return json_error(MAINT_INTAKE_REFUSAL, 422)
+
         if str(data.get("status") or "").strip().upper() == "COMPLETED":
             current = db.execute(
                 "SELECT contractor, start_date FROM maintenance_jobs WHERE id = ?", [job_id]
@@ -17489,6 +17499,14 @@ def api_quote_round_reopen(row_id, cert):
 MAINT_BOARD_GROUPS = ["NEW REPORT", "URGENT", "TO BE ARRANGED", "LIVE",
                       "COMPLETED", "CANCELLED"]
 
+# New Report is filled by the public tenant link and by nothing else (Norbert,
+# 2026-08-08). A job is triaged out of it, never into it -- otherwise the group
+# stops meaning "a tenant said this" and starts meaning "somebody put it here".
+# The board hides the option; this is what makes it true.
+MAINT_INTAKE_ONLY = "NEW REPORT"
+MAINT_INTAKE_REFUSAL = ("New Report only holds tenant reports from the public link. "
+                        "Raise the job in To Be Set or Urgent instead.")
+
 # What we charge the landlord on top of the LABOUR only. Materials are passed on
 # at cost -- marking them up as well was never the agreement, and it is the kind
 # of thing that is invisible until a landlord adds the invoice up himself.
@@ -17794,10 +17812,14 @@ def api_public_report_job():
             """INSERT INTO maintenance_jobs
                (reference, title, description, type, priority, status, location,
                 property_id, address, emergency, source, bill_ll)
-               VALUES (?, ?, ?, ?, ?, 'NEW REPORT', ?, ?, ?, ?, 'tenant', 0)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'tenant', 0)""",
             [reference, title, description, job_type or None,
-             "High" if emergency else "Medium", unit or None,
-             property_id, prop.get("name"), emergency]
+             "High" if emergency else "Medium",
+             # An emergency does not wait in the intake pile to be noticed
+             # (Norbert, 2026-08-08): ticking the box puts it straight into
+             # Urgent, which is the group that means "before anything else".
+             "URGENT" if emergency else MAINT_INTAKE_ONLY,
+             unit or None, property_id, prop.get("name"), emergency]
         )
         db.commit()
         job_id = cur.lastrowid
@@ -17893,6 +17915,8 @@ def api_maintenance_bulk_status():
         return json_error("No jobs selected", 400)
     if status not in MAINT_BOARD_GROUPS:
         return json_error("%s is not a group on this board" % (status or "That"), 400)
+    if status == MAINT_INTAKE_ONLY:
+        return json_error(MAINT_INTAKE_REFUSAL, 422)
 
     db = get_dict_db()
     moved, refused = [], []
