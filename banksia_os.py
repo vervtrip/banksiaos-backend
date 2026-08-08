@@ -1480,9 +1480,16 @@ def api_maintenance_job(job_id):
                 "SELECT * FROM ll_communications WHERE job_id = ? ORDER BY sent_at DESC",
                 [job_id]
             ).fetchall()
+            _ensure_tenant_comms(db)
+            tenant_comms = db.execute(
+                "SELECT * FROM tenant_communications WHERE job_id = ? "
+                "ORDER BY COALESCE(sent_at, created) DESC, id DESC",
+                [job_id]
+            ).fetchall()
             result = dict(job)
             result["orders"] = [dict(o) for o in orders]
             result["ll_comms"] = [dict(c) for c in ll_comms]
+            result["tenant_comms"] = [dict(c) for c in tenant_comms]
             result["bill_ll"] = bool(result["bill_ll"])
             result["emergency"] = bool(result["emergency"])
             result["ll_informed"] = bool(result["ll_informed"])
@@ -1763,6 +1770,74 @@ def api_maintenance_order(order_id):
 
 
 # ── LL Communications ──
+
+def _ensure_tenant_comms(db):
+    """Messages to and from the tenant about a job.
+
+    Its own table rather than a column on the job: a repair usually takes more
+    than one exchange, and the point of it is the sequence.
+    """
+    db.execute("""CREATE TABLE IF NOT EXISTS tenant_communications (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id         INTEGER REFERENCES maintenance_jobs(id) ON DELETE CASCADE,
+        direction      TEXT NOT NULL DEFAULT 'out',
+        contact_method TEXT NOT NULL,
+        contact_ref    TEXT,
+        summary        TEXT,
+        sent_at        TEXT,
+        logged_by      TEXT,
+        created        TEXT DEFAULT (datetime('now')))""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_tenant_comms_job "
+               "ON tenant_communications(job_id)")
+    db.commit()
+
+
+@banksia_os_bp.route("/maintenance/tenant-comms", methods=["GET", "POST"])
+def api_tenant_comms():
+    """What has been said to the tenant, and what they said back.
+
+    Deliberately a log rather than a sender (Norbert, 2026-08-08). Nothing here
+    emails anybody: the team rings or messages the tenant however they normally
+    would and records it, so the next person picking the job up can see whether
+    the tenant has already been told. Wiring it to actually send is a separate
+    decision, because that is a message going out under Banksia's name.
+    """
+    db = get_dict_db()
+    try:
+        _ensure_tenant_comms(db)
+        if request.method == "POST":
+            data = request.get_json(force=True, silent=True) or {}
+            if not data.get("job_id"):
+                return json_error("job_id is required")
+            if not str(data.get("summary") or "").strip():
+                return json_error("Say what was said — an empty note helps nobody.", 400)
+            username, _role = _get_current_user()
+            direction = "in" if str(data.get("direction")) == "in" else "out"
+            cur = db.execute(
+                """INSERT INTO tenant_communications
+                   (job_id, direction, contact_method, contact_ref, summary, sent_at, logged_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                [data["job_id"], direction, data.get("contact_method") or "phone",
+                 data.get("contact_ref") or "", str(data.get("summary")).strip()[:2000],
+                 data.get("sent_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                 username]
+            )
+            db.commit()
+            return json_success({"id": cur.lastrowid}), 201
+
+        job_id = request.args.get("job_id")
+        if not job_id:
+            return json_error("job_id is required")
+        rows = db.execute(
+            "SELECT * FROM tenant_communications WHERE job_id = ? "
+            "ORDER BY COALESCE(sent_at, created) DESC, id DESC", [job_id]
+        ).fetchall()
+        return json_success([dict(r) for r in rows])
+    except Exception as e:
+        return json_error(safe_error(e), 500)
+    finally:
+        db.close()
+
 
 @banksia_os_bp.route("/maintenance/ll-comms", methods=["GET", "POST"])
 def api_ll_comms():
@@ -5099,9 +5174,16 @@ def api_maintenance_detail(job_id):
             "SELECT * FROM ll_communications WHERE job_id = ? ORDER BY sent_at DESC",
             [job_id]
         ).fetchall()
+        _ensure_tenant_comms(db)
+        tenant_comms = db.execute(
+            "SELECT * FROM tenant_communications WHERE job_id = ? "
+            "ORDER BY COALESCE(sent_at, created) DESC, id DESC",
+            [job_id]
+        ).fetchall()
         result = dict(job)
         result["orders"] = [dict(o) for o in orders]
         result["ll_comms"] = [dict(c) for c in ll_comms]
+        result["tenant_comms"] = [dict(c) for c in tenant_comms]
         result["bill_ll"] = bool(result["bill_ll"])
         result["emergency"] = bool(result["emergency"])
         result["ll_informed"] = bool(result["ll_informed"])
