@@ -6,27 +6,30 @@
 <title>Report a problem — Banksia</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
-/* Banksia's own palette, from packages/design-tokens/src/colors.ts -- the same
-   tokens the dashboard is built from, rather than colours picked to look nice
-   on this page alone (Norbert, 2026-08-08).
-   primary 600 #059669 / 500 #10b981 / 50 #ecfdf5, charcoal 900 #111827 →
-   50 #f9fafb, and the warning ramp for the emergency box. */
+/* Banksia's palette is the orange one, taken from the tenant application form
+   (templates/tenant_application_form.html) rather than the dashboard's green --
+   the dashboard green is Banksia OS, the software, and this page is Banksia the
+   business talking to a tenant (Norbert, 2026-08-08).
+   #f16232 accent, #fdf3ee page, #fff2eb / #f8af97 tint and edge, #0f172a ink. */
 :root{
-  --bk-green:#059669;--bk-green-500:#10b981;--bk-green-50:#ecfdf5;--bk-green-700:#047857;
-  --bk-ink:#111827;--bk-body:#374151;--bk-label:#4b5563;--bk-muted:#6b7280;--bk-faint:#9ca3af;
-  --bk-line:#e5e7eb;--bk-page:#f9fafb;--bk-tint:#f3f4f6;
-  --bk-warn-bg:#fffbeb;--bk-warn-line:#fde68a;--bk-warn-ink:#b45309;--bk-warn-strong:#92400e;
+  --bk-brand:#f16232;--bk-brand-dark:#d24d20;--bk-brand-tint:#fff2eb;
+  --bk-brand-edge:#f8af97;--bk-brand-wash:#fffaf7;--bk-brand-ink:#b23c14;
+  --bk-ink:#0f172a;--bk-body:#334155;--bk-label:#475569;--bk-muted:#64748b;--bk-faint:#94a3b8;
+  --bk-line:#e2e8f0;--bk-page:#fdf3ee;--bk-tint:#f8fafc;
+  /* The emergency box is red, not amber: against an orange brand an amber panel
+     reads as decoration, and this is the one thing on the page that must not. */
+  --bk-warn-bg:#fef2f2;--bk-warn-line:#fecaca;--bk-warn-ink:#b91c1c;--bk-warn-strong:#991b1b;
   --bk-err-bg:#fef2f2;--bk-err-ink:#b91c1c;--bk-err-line:#fecaca;
 }
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Inter',-apple-system,sans-serif;background:var(--bk-page);color:var(--bk-ink);min-height:100vh;-webkit-font-smoothing:antialiased}
 .center{min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:20px}
-.card{background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(17,24,39,.10);border:1px solid var(--bk-line);width:100%;max-width:480px;padding:0 0 32px;margin:24px 0;overflow:hidden}
+.card{background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(15,23,42,.10);border:1px solid var(--bk-line);width:100%;max-width:480px;padding:0 0 32px;margin:24px 0;overflow:hidden}
 /* A green band across the top, the way the dashboard heads its own panels. */
-.hat{height:5px;background:linear-gradient(90deg,var(--bk-green) 0%,var(--bk-green-500) 100%)}
+.hat{height:5px;background:linear-gradient(90deg,var(--bk-brand) 0%,#f8875f 100%)}
 .inner{padding:30px 32px 0}
 .brand{text-align:center;margin-bottom:26px}
-.brand .logo{width:56px;height:56px;border-radius:14px;background:var(--bk-green);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:24px;margin:0 auto 14px;box-shadow:0 6px 18px rgba(5,150,105,.28)}
+.brand .logo{width:56px;height:56px;border-radius:14px;background:var(--bk-brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:24px;margin:0 auto 14px;box-shadow:0 6px 18px rgba(241,98,50,.28)}
 .brand h1{font-size:23px;font-weight:800;letter-spacing:-.5px;color:var(--bk-ink)}
 .brand p{color:var(--bk-muted);font-size:13px;margin-top:5px;line-height:1.55}
 .fg{margin-bottom:16px}
@@ -35,14 +38,14 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bk-page);colo
 .fg label .opt{color:var(--bk-faint);font-weight:500;margin-left:4px}
 .fg input,.fg select,.fg textarea{width:100%;padding:12px 14px;border-radius:11px;border:1px solid var(--bk-line);font-size:14px;font-family:inherit;outline:none;background:#fff;color:var(--bk-ink);transition:border .15s,box-shadow .15s}
 .fg textarea{min-height:104px;resize:vertical;line-height:1.5}
-.fg input:focus,.fg select:focus,.fg textarea:focus{border-color:var(--bk-green-500);box-shadow:0 0 0 3px rgba(16,185,129,.14)}
+.fg input:focus,.fg select:focus,.fg textarea:focus{border-color:var(--bk-brand);box-shadow:0 0 0 3px rgba(241,98,50,.15)}
 .fg .hint{font-size:11px;color:var(--bk-faint);margin-top:5px;line-height:1.5}
 .check{display:flex;align-items:flex-start;gap:10px;background:var(--bk-warn-bg);border:1px solid var(--bk-warn-line);border-radius:12px;padding:13px 14px;margin-bottom:18px;cursor:pointer}
-.check input{width:18px;height:18px;margin-top:1px;accent-color:#d97706;flex-shrink:0;cursor:pointer}
+.check input{width:18px;height:18px;margin-top:1px;accent-color:#dc2626;flex-shrink:0;cursor:pointer}
 .check .t{font-size:13px;font-weight:700;color:var(--bk-warn-strong)}
 .check .s{font-size:11.5px;color:var(--bk-warn-ink);margin-top:2px;line-height:1.5}
-.drop{border:1.5px dashed var(--bk-line);border-radius:12px;padding:20px 14px;text-align:center;cursor:pointer;background:var(--bk-page);transition:border .15s,background .15s}
-.drop:hover{border-color:var(--bk-green-500);background:var(--bk-green-50)}
+.drop{border:1.5px dashed var(--bk-brand-edge);border-radius:12px;padding:20px 14px;text-align:center;cursor:pointer;background:var(--bk-brand-wash);transition:border .15s,background .15s}
+.drop:hover{border-color:var(--bk-brand);background:var(--bk-brand-wash)}
 .drop .big{font-size:13px;font-weight:700;color:var(--bk-body)}
 .drop .small{font-size:11.5px;color:var(--bk-faint);margin-top:3px}
 .files{margin-top:10px;display:none}
@@ -51,17 +54,17 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bk-page);colo
 .file .sz{color:var(--bk-faint);font-size:11px}
 .file .x{border:none;background:transparent;color:var(--bk-faint);cursor:pointer;font-size:15px;line-height:1;padding:0 2px}
 .file .x:hover{color:var(--bk-err-ink)}
-.btn{width:100%;padding:14px;border-radius:11px;background:var(--bk-green);color:#fff;font-size:14.5px;font-weight:700;border:none;cursor:pointer;font-family:inherit;transition:background .15s;box-shadow:0 6px 16px rgba(5,150,105,.22)}
-.btn:hover{background:var(--bk-green-700)}
+.btn{width:100%;padding:14px;border-radius:11px;background:var(--bk-brand);color:#fff;font-size:14.5px;font-weight:700;border:none;cursor:pointer;font-family:inherit;transition:background .15s;box-shadow:0 6px 16px rgba(241,98,50,.24)}
+.btn:hover{background:var(--bk-brand-dark)}
 .btn:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
 .err{background:var(--bk-err-bg);color:var(--bk-err-ink);border:1px solid var(--bk-err-line);padding:11px 13px;border-radius:10px;font-size:13px;margin-bottom:14px;display:none;line-height:1.5}
 .spinner{display:inline-block;width:15px;height:15px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:-2px;margin-right:7px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .done{text-align:center;padding:14px 0}
-.done .tick{width:62px;height:62px;border-radius:50%;background:var(--bk-green-50);color:var(--bk-green-700);font-size:31px;display:flex;align-items:center;justify-content:center;margin:0 auto 18px}
+.done .tick{width:62px;height:62px;border-radius:50%;background:var(--bk-brand-tint);color:var(--bk-brand-ink);font-size:31px;display:flex;align-items:center;justify-content:center;margin:0 auto 18px}
 .done h2{font-size:21px;font-weight:800;margin-bottom:9px;color:var(--bk-ink)}
 .done p{font-size:13.5px;color:var(--bk-body);line-height:1.6}
-.done .ref{display:inline-block;margin:16px 0 4px;padding:11px 20px;border-radius:11px;background:var(--bk-green-50);border:1px solid #a7f3d0;color:var(--bk-green-700);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:17px;font-weight:700;letter-spacing:.5px}
+.done .ref{display:inline-block;margin:16px 0 4px;padding:11px 20px;border-radius:11px;background:var(--bk-brand-tint);border:1px solid var(--bk-brand-edge);color:var(--bk-brand-ink);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:17px;font-weight:700;letter-spacing:.5px}
 .footer{text-align:center;margin-top:18px;font-size:11.5px;color:var(--bk-faint);line-height:1.6}
 </style>
 </head>
@@ -97,8 +100,8 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bk-page);colo
       </div>
 
       <div class="fg">
-        <label>Type of job <span class="opt">optional</span></label>
-        <select id="type"><option value="">Not sure</option></select>
+        <label>Type of job <span class="req">*</span></label>
+        <select id="type"><option value="">Choose the type of job…</option></select>
       </div>
 
       <label class="check" for="emergency">
@@ -155,7 +158,7 @@ async function load() {
     ps.innerHTML = '<option value="">Choose your property…</option>' +
       PROPS.map(function(p){ return '<option value="' + p.id + '">' + esc(p.name) + '</option>'; }).join('');
     var ts = document.getElementById('type');
-    ts.innerHTML = '<option value="">Not sure</option>' +
+    ts.innerHTML = '<option value="">Choose the type of job…</option>' +
       (j.data.types || []).map(function(t){ return '<option value="' + esc(t) + '">' + esc(t) + '</option>'; }).join('');
   } catch (e) {
     showErr('We could not load the property list. Please refresh the page.');
@@ -202,6 +205,7 @@ async function send() {
   var prop = document.getElementById('property').value;
   if (desc.length < 10) return showErr('Please describe the problem in a little more detail.');
   if (!prop) return showErr('Please choose the property.');
+  if (!document.getElementById('type').value) return showErr('Please choose the type of job.');
   if (!picked.length) return showErr('Please add a photo or a short video of the problem.');
 
   var btn = document.getElementById('send');
